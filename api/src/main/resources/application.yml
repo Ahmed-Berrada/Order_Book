@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: lob-engine
+
+# Instruments are declared at startup, like on a real exchange.
+# One single-writer thread is created per symbol (ADR-0001). Wired in step 2.
+lob:
+  instruments:
+    - symbol: AAPL
+      tick-size: "0.01"
+    - symbol: MSFT
+      tick-size: "0.01"
