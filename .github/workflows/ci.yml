@@ -30,6 +30,7 @@ jobs:
             engine-core/target/site/jacoco/
             engine-journal/target/site/jacoco/
             engine-service/target/site/jacoco/
+            api/target/site/jacoco/
           if-no-files-found: ignore
 
   mutation:
