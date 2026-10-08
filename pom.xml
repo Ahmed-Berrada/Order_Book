@@ -72,6 +72,12 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
+                <groupId>io.github.ahmedberrada.lob</groupId>
+                <artifactId>fix-gateway</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
+            <dependency>
                 <groupId>org.quickfixj</groupId>
                 <artifactId>quickfixj-core</artifactId>
                 <version>${quickfixj.version}</version>

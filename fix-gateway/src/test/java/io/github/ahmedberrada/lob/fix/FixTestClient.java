@@ -24,14 +24,14 @@ import quickfix.field.MsgType;
  * it receives. Its message store is on disk, so it can disconnect and reconnect with its sequence
  * numbers intact.
  */
-final class FixTestClient implements Application, AutoCloseable {
+public final class FixTestClient implements Application, AutoCloseable {
 
     private final SessionID session;
     private final SocketInitiator initiator;
     private final BlockingQueue<Message> received = new LinkedBlockingQueue<>();
     private volatile CountDownLatch loggedOn = new CountDownLatch(1);
 
-    FixTestClient(String compId, int port, Path storeDirectory) throws Exception {
+    public FixTestClient(String compId, int port, Path storeDirectory) throws Exception {
         session = new SessionID(FixGateway.BEGIN_STRING, compId, "LOB");
         SessionSettings settings = new SessionSettings();
         settings.setString("ConnectionType", "initiator");
@@ -54,7 +54,7 @@ final class FixTestClient implements Application, AutoCloseable {
     }
 
     /** Connects and waits until the venue has accepted the logon. */
-    FixTestClient logon() throws Exception {
+    public FixTestClient logon() throws Exception {
         loggedOn = new CountDownLatch(1);
         initiator.start();
         if (!loggedOn.await(10, TimeUnit.SECONDS)) {
@@ -63,25 +63,25 @@ final class FixTestClient implements Application, AutoCloseable {
         return this;
     }
 
-    boolean isLoggedOn() {
+    public boolean isLoggedOn() {
         Session s = Session.lookupSession(session);
         return s != null && s.isLoggedOn();
     }
 
-    void send(Message message) throws SessionNotFound {
+    public void send(Message message) throws SessionNotFound {
         if (!Session.sendToTarget(message, session)) {
             throw new AssertionError("could not send " + message);
         }
     }
 
     /** Sends a message and returns the next one received. */
-    Message next(Message toSend) throws Exception {
+    public Message next(Message toSend) throws Exception {
         send(toSend);
         return next();
     }
 
     /** Next application or reject message, failing after a few seconds. */
-    Message next() throws InterruptedException {
+    public Message next() throws InterruptedException {
         Message message = received.poll(5, TimeUnit.SECONDS);
         if (message == null) {
             throw new AssertionError(session + " received nothing");
@@ -90,19 +90,19 @@ final class FixTestClient implements Application, AutoCloseable {
     }
 
     /** Asserts that nothing arrives for a short while. */
-    void expectNothing(Duration wait) throws InterruptedException {
+    public void expectNothing(Duration wait) throws InterruptedException {
         Message message = received.poll(wait.toMillis(), TimeUnit.MILLISECONDS);
         if (message != null) {
             throw new AssertionError(session + " unexpectedly received " + message);
         }
     }
 
-    static String type(Message message) throws FieldNotFound {
+    public static String type(Message message) throws FieldNotFound {
         return message.getHeader().getString(MsgType.FIELD);
     }
 
     /** Disconnects, keeping the message store, so a later {@link #logon()} resumes the session. */
-    void disconnect() {
+    public void disconnect() {
         initiator.stop(true);
     }
 
