@@ -14,9 +14,10 @@ backed by **invariant tests**, and **measured before it is optimised**.
 > **Status: Phase 3, Connectivity (in progress).** Price-time matching
 > ([rulebook](docs/rulebook/continuous-trading.md)) is durable, with a write-ahead journal, crash
 > recovery and a replay tool ([resilience rules](docs/rulebook/resilience.md)). Every listed instrument
-> runs on its own writer thread with a bounded queue ([order-entry rules](docs/rulebook/order-entry.md)),
-> and a [REST API](docs/interfaces/rest-api.md) with OpenAPI exposes order entry and book depth.
-> The FIX gateway comes next (see [Roadmap](#roadmap)).
+> runs on its own writer thread with a bounded queue ([order-entry rules](docs/rulebook/order-entry.md)).
+> Members trade over **FIX 4.4** ([Rules of Engagement](docs/interfaces/fix-rules-of-engagement.md)) or a
+> [REST API](docs/interfaces/rest-api.md) with OpenAPI, on the same venue. Market data comes next
+> (see [Roadmap](#roadmap)).
 
 ---
 
@@ -40,11 +41,17 @@ around it.**
 ```mermaid
 flowchart LR
     client([HTTP client])
+    member([FIX member])
 
     subgraph api ["api — Spring Boot"]
         ctrl[OrderController<br/>InstrumentController]
-        svc[MatchingService<br/>router]
     end
+
+    subgraph fix ["fix-gateway — QuickFIX/J"]
+        gw[FixApplication<br/>ClOrdID ↔ order]
+    end
+
+    svc[MatchingService<br/>router + event listeners]
 
     subgraph journal ["engine-service + engine-journal — plain Java"]
         w1[SymbolWorker AAPL<br/>single thread]
@@ -62,6 +69,8 @@ flowchart LR
     tests[[JUnit 5 + jqwik]]
 
     client -->|JSON| ctrl --> svc
+    member -->|FIX 4.4| gw --> svc
+    svc -.->|events| gw
     svc -->|Command| w1
     svc -->|Command| w2
     w1 -->|1. append| j1
@@ -77,7 +86,8 @@ flowchart LR
 | `engine-core` | Order book, matching, commands and events, snapshot/restore | JDK only, no I/O (Spring is **banned by the build**) |
 | `engine-journal` | Write-ahead journal, event journal, snapshots, recovery, replay tool | `engine-core`, JDK only |
 | `engine-service` | One writer thread and bounded queue per instrument, routing, price conversion, refusals | `engine-journal`, JDK only |
-| `api` | REST adapter: JSON, validation, problem details, OpenAPI, configuration | `engine-service`, Spring Boot |
+| `fix-gateway` | FIX 4.4 acceptor: orders, cancels, status, execution reports to both sides of a trade | `engine-service`, QuickFIX/J |
+| `api` | REST adapter, OpenAPI, venue configuration; hosts the FIX gateway | `engine-service`, `fix-gateway`, Spring Boot |
 | `engine-bench` *(phase 6)* | JMH micro-benchmarks | `engine-core`, JMH |
 
 Why the core is isolated:
@@ -275,7 +285,8 @@ mutated by a single thread and never needs a lock.
 ## Key technical decisions
 
 The full rationale is in [ADR-0001](docs/adr/0001-foundations.md), [ADR-0002](docs/adr/0002-core-engine-model.md)
-[ADR-0003](docs/adr/0003-journal-and-recovery.md) [ADR-0004](docs/adr/0004-service-layer.md) and [ADR-0005](docs/adr/0005-rest-api.md).
+[ADR-0003](docs/adr/0003-journal-and-recovery.md) [ADR-0004](docs/adr/0004-service-layer.md), [ADR-0005](docs/adr/0005-rest-api.md) and
+[ADR-0006](docs/adr/0006-fix-gateway.md).
 The matching behaviour itself is specified in the [rulebook](docs/rulebook/continuous-trading.md).
 
 | Decision | Choice | Reason |
@@ -301,7 +312,7 @@ Requirements: **JDK 21+**. Maven is not required because the wrapper is included
 ./mvnw verify                                   # build, tests and quality gates
 ./mvnw -pl engine-core,engine-journal,engine-service -am -Pmutation verify   # mutation testing (PIT), slower
 ./mvnw -pl api -am install -DskipTests && \
-  ./mvnw -pl api spring-boot:run                # start the venue on :8080 (journals in ./data)
+  ./mvnw -pl api spring-boot:run                # REST on :8080, FIX on :9878 (journals in ./data)
 ```
 
 On Windows, use `mvnw.cmd` in place of `./mvnw`.
@@ -330,6 +341,17 @@ An off-tick price is refused before it reaches the engine:
 {"status":422,"title":"Price off the tick grid","reason":"OFF_TICK_PRICE",
  "detail":"The price is not a multiple of the tick size of AAPL","instance":"/api/v1/instruments/AAPL/orders"}
 ```
+
+### Trading over FIX
+
+The venue accepts FIX 4.4 on port 9878 for the sessions provisioned in `application.yml`
+(`MEMBER1`, `MEMBER2`, venue CompID `LOB`). Connect any FIX engine as an initiator; the
+[Rules of Engagement](docs/interfaces/fix-rules-of-engagement.md) list the messages, fields and reject
+codes. Both sides of a trade receive an ExecutionReport, and reports sent while a member is
+disconnected are delivered by FIX resend when it logs on again.
+
+Both HTTP and FIX listen on `127.0.0.1` only: there is no authentication until phase 8. Set
+`LOB_BIND_ADDRESS` to expose them deliberately, on a trusted network.
 
 ### Replaying a journal
 
@@ -374,6 +396,9 @@ Verification    OK: 5 event batches identical to the event journal
 | Refusal mapping | `@WebMvcTest` with a stubbed service | Overload (`Retry-After`), halt, shutdown and unknown-outcome responses |
 | Contract | OpenAPI test | The published document lists exactly the implemented endpoints |
 | End to end | Real port, `java.net.http`, two application starts | Concurrent orders over HTTP; the book survives a restart |
+| FIX conformance | QuickFIX/J initiators over a socket, as in member certification | Logon, orders, fills on both sides, cancels, status, every reject code, resend after a disconnect |
+| FIX + REST | The real application with both protocols | A FIX member's order filled and cancelled over REST is reported on its FIX session |
+| Exact prices | ArchUnit | The gateway never touches QuickFIX/J's `double`-typed price and quantity fields |
 | Performance *(phase 6)* | JMH | Throughput and p50 / p99 / p99.9 latency, with published methodology |
 
 ---|---|---|
@@ -394,7 +419,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 0 | **Foundations**: multi-module build, CI, enforced module boundary, ADR | ✅ |
 | 1 | **Core engine**: rulebook, LIMIT / MARKET / cancel, property tests, reference model, quality gates | ✅ |
 | 2 | **Durability & audit**: write-ahead journal, snapshots, crash recovery, replay | ✅ |
-| 3 | **Connectivity**: thread per symbol, FIX order entry, market data feeds, admin REST | ⏳ |
+| 3 | **Connectivity**: ✅ service layer, ✅ REST API, ✅ FIX order entry; market data feeds next | ⏳ |
 | 4 | **Venue functionality**: advanced orders, auctions, trading phases, circuit breakers | |
 | 5 | **Pre-trade risk & members** | |
 | 6 | **Performance**: JMH, zero-allocation hot path, published latency | |
@@ -424,7 +449,8 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 Order_Book/
 ├── engine-core/        pure-Java matching engine (no Spring, no I/O, enforced)
 ├── engine-journal/     write-ahead journal, snapshots, recovery, replay tool
-├── engine-service/     writer thread per instrument, routing, price conversion
+├── engine-service/     writer thread per instrument, routing, price conversion, event listeners
+├── fix-gateway/        FIX 4.4 order entry (QuickFIX/J)
 ├── api/                Spring Boot REST adapter, OpenAPI
 ├── docs/adr/           architecture decision records
 ├── docs/rulebook/      venue rules, cited by tests
