@@ -15,6 +15,7 @@ import io.github.ahmedberrada.lob.journal.JournalOptions;
 import io.github.ahmedberrada.lob.journal.JournaledEngine;
 import io.github.ahmedberrada.lob.service.RequestRefusedException.Reason;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -134,6 +135,41 @@ class SymbolWorkerTest {
     }
 
     @Test
+    @Rulebook("OE-006")
+    void failedCommandWriteLeavesTheOutcomeUnknownAndHalts() throws Exception {
+        start(NO_SNAPSHOTS, 10);
+        worker.submit(buy(99, 1)).join();
+        clock.close();
+        CompletableFuture<EventBatch> unknown = worker.submit(buy(100, 5));
+        clock.awaitBlocked();
+        // Interrupting a thread closes the file channel it writes to: the next journal write fails.
+        workerThread().interrupt();
+        clock.open();
+
+        assertThatThrownBy(unknown::join).cause().isInstanceOf(UncheckedIOException.class);
+        assertThat(worker.isHalted()).isTrue();
+        assertRefused(worker.submit(buy(100, 1)), Reason.HALTED);
+        assertThat(worker.book(5).join().bids()).containsExactly(new OrderBook.Level(99, 1, 1));
+    }
+
+    @Test
+    void interruptedCloseCanBeRetried() throws Exception {
+        start(NO_SNAPSHOTS, 10);
+        clock.close();
+        CompletableFuture<EventBatch> inProgress = worker.submit(buy(100, 1));
+        clock.awaitBlocked();
+
+        Thread.currentThread().interrupt();
+        assertThatThrownBy(worker::close).isInstanceOf(IOException.class).hasMessageContaining("interrupted");
+        assertThat(Thread.interrupted()).isTrue();
+
+        clock.open();
+        worker.close();
+        assertThat(inProgress.join().commandSequence()).isEqualTo(1);
+        worker = null;
+    }
+
+    @Test
     @Rulebook("OE-007")
     void shutdownProcessesWhatIsQueuedThenRefuses() throws Exception {
         start(NO_SNAPSHOTS, 10);
@@ -164,6 +200,11 @@ class SymbolWorkerTest {
             assertThat(reopened.lastCommandSequence()).isEqualTo(3);
         }
         worker = null;
+    }
+
+    private static Thread workerThread() {
+        return Thread.getAllStackTraces().keySet().stream()
+                .filter(t -> t.getName().equals("lob-" + INSTRUMENT.symbol())).findFirst().orElseThrow();
     }
 
     private void deleteDirectory() throws IOException {
