@@ -63,6 +63,19 @@
                 </executions>
             </plugin>
 
+            <!-- Shares the @Rulebook annotation with the tests of other modules. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- ADR-0002 §7: line and branch coverage of the core must stay at or above 90 %. -->
             <plugin>
                 <groupId>org.jacoco</groupId>
