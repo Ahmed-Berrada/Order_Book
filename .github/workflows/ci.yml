@@ -17,5 +17,37 @@ jobs:
           java-version: '21'
           cache: maven
 
+      # Tests, property tests, ArchUnit rules, rulebook traceability and the JaCoCo 90 % gate.
       - name: Build and test
         run: ./mvnw -B -ntp verify
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: engine-core/target/site/jacoco/
+          if-no-files-found: ignore
+
+  mutation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # ADR-0002 §7: PIT mutation score of engine-core must stay at or above 80 %.
+      - name: Mutation testing
+        run: ./mvnw -B -ntp -pl engine-core -am -Pmutation verify
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pit-report
+          path: engine-core/target/pit-reports/
+          if-no-files-found: ignore

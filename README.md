@@ -11,8 +11,10 @@ a REST API on Spring Boot, and published JMH benchmarks.
 The goal is engineering rigour rather than feature count. The engine is **deterministic**,
 backed by **invariant tests**, and **measured before it is optimised**.
 
-> **Status: Step 0, Foundations.** The build, CI, module boundaries and architecture decisions
-> are in place. The matching logic comes in Step 1 (see [Roadmap](#roadmap)).
+> **Status: Phase 1, Core engine.** Price-time matching of LIMIT and MARKET orders and cancels,
+> specified in the [rulebook](docs/rulebook/continuous-trading.md) and verified by scenario tests,
+> property tests and a reference model. The service layer and FIX connectivity come next
+> (see [Roadmap](#roadmap)).
 
 ---
 
@@ -49,7 +51,7 @@ flowchart LR
         b2[(OrderBook MSFT)]
     end
 
-    bench[[engine-bench — JMH<br/>step 3]]
+    bench[[engine-bench — JMH<br/>phase 6]]
     tests[[JUnit 5 + jqwik]]
 
     client -->|JSON| ctrl --> svc
@@ -63,7 +65,7 @@ flowchart LR
 |---|---|---|
 | `engine-core` | Order book, matching, commands and events | JDK only (Spring is **banned by the build**) |
 | `api` | REST, validation, JSON, threads per symbol | `engine-core`, Spring Boot |
-| `engine-bench` *(step 3)* | JMH micro-benchmarks | `engine-core`, JMH |
+| `engine-bench` *(phase 6)* | JMH micro-benchmarks | `engine-core`, JMH |
 
 Why the core is isolated:
 - **Benchmarks measure the algorithm**, not Tomcat or Jackson.
@@ -86,7 +88,7 @@ so they run in parallel with no locks.
 | Pattern | Where | Why |
 |---|---|---|
 | **Single Writer** (LMAX-style) | `SymbolWorker`: one thread owns one `OrderBook` | No locks and no races on the critical path. The result is deterministic. Real exchanges work this way. |
-| **Command → Events** | `MatchingEngine.process(Command) : List<Event>` | One input and one output, with no hidden side effects. Tests read as "given these orders, expect these events". Replay comes for free (step 5). |
+| **Command → Events** | `MatchingEngine.process(Command) : List<Event>` | One input and one output, with no hidden side effects. Tests read as "given these orders, expect these events". Replay comes for free (phase 2). |
 | **Algebraic data types** (sealed interfaces + records) | `Command`, `Event` | Java 21 `switch` pattern matching is **exhaustive**: forgetting to handle a case is a compile error. |
 | **Router** | `EngineService` sends a command to the worker that owns its symbol | Keeps concurrency out of the domain. |
 | **Adapter** (light hexagonal) | `api` translates HTTP and decimal prices to and from core commands and ticks | The domain stays independent of the transport. |
@@ -99,7 +101,7 @@ added later if a benchmark or a requirement justifies it.
 
 ## UML
 
-### Class diagram: target domain model (step 1)
+### Class diagram: domain model
 
 ```mermaid
 classDiagram
@@ -108,19 +110,23 @@ classDiagram
     class Command {
         <<sealed interface>>
     }
-    class NewOrder {
+    class LimitOrder {
         <<record>>
-        long orderId
         Side side
-        OrderType type
         long priceTicks
+        long quantity
+    }
+    class MarketOrder {
+        <<record>>
+        Side side
         long quantity
     }
     class CancelOrder {
         <<record>>
         long orderId
     }
-    Command <|.. NewOrder
+    Command <|.. LimitOrder
+    Command <|.. MarketOrder
     Command <|.. CancelOrder
 
     class Event {
@@ -129,30 +135,60 @@ classDiagram
     }
     class OrderAccepted {
         <<record>>
+        long orderId
+    }
+    class OrderRejected {
+        <<record>>
+        long orderId
+        RejectReason reason
     }
     class TradeExecuted {
         <<record>>
-        long buyOrderId
-        long sellOrderId
+        long takerOrderId
+        long makerOrderId
+        Side aggressorSide
+        long priceTicks
+        long quantity
+        long takerRemainingQuantity
+        long makerRemainingQuantity
+    }
+    class OrderRested {
+        <<record>>
+        long orderId
+        Side side
         long priceTicks
         long quantity
     }
     class OrderCancelled {
         <<record>>
+        long orderId
+        long cancelledQuantity
+        CancelReason reason
     }
-    class OrderRejected {
+    class CancelRejected {
         <<record>>
+        long orderId
         RejectReason reason
     }
     Event <|.. OrderAccepted
-    Event <|.. TradeExecuted
-    Event <|.. OrderCancelled
     Event <|.. OrderRejected
+    Event <|.. TradeExecuted
+    Event <|.. OrderRested
+    Event <|.. OrderCancelled
+    Event <|.. CancelRejected
 
     class MatchingEngine {
+        -Instrument instrument
         -OrderBook book
-        -long sequence
+        -long nextOrderId
+        -long nextSequence
         +process(Command) List~Event~
+    }
+    class Instrument {
+        <<record>>
+        String symbol
+        long maxOrderQuantity
+        long maxPriceTicks
     }
     class OrderBook {
         -TreeMap~Long, PriceLevel~ bids
@@ -160,11 +196,12 @@ classDiagram
         -HashMap~Long, Order~ ordersById
         +bestBid() OptionalLong
         +bestAsk() OptionalLong
+        +depth(Side) List~Level~
     }
     class PriceLevel {
         -long priceTicks
         -ArrayDeque~Order~ orders
-        +totalQuantity() long
+        -long totalQuantity
     }
     class Order {
         -long orderId
@@ -172,17 +209,8 @@ classDiagram
         -long priceTicks
         -long remainingQuantity
     }
-    class Side {
-        <<enumeration>>
-        BUY
-        SELL
-    }
-    class OrderType {
-        <<enumeration>>
-        LIMIT
-        MARKET
-    }
 
+    MatchingEngine --> Instrument
     MatchingEngine --> OrderBook
     MatchingEngine ..> Command : consumes
     MatchingEngine ..> Event : emits
@@ -190,7 +218,7 @@ classDiagram
     PriceLevel "1" o-- "*" Order : FIFO
 ```
 
-### Sequence diagram: `POST /orders` (step 2)
+### Sequence diagram: `POST /orders` (phase 3)
 
 ```mermaid
 sequenceDiagram
@@ -203,9 +231,9 @@ sequenceDiagram
 
     C->>Ctl: POST /orders {symbol, side, type, price, qty}
     Ctl->>Ctl: validate DTO, convert price to ticks
-    Ctl->>Svc: submit(symbol, NewOrder)
+    Ctl->>Svc: submit(symbol, LimitOrder)
     Svc->>W: enqueue(command) : Future
-    W->>E: process(NewOrder)
+    W->>E: process(LimitOrder)
     E-->>W: [OrderAccepted, TradeExecuted...]
     W-->>Svc: complete Future
     Svc-->>Ctl: events
@@ -230,15 +258,17 @@ mutated by a single thread and never needs a lock.
 
 ## Key technical decisions
 
-The full rationale is in [`docs/adr/0001-foundations.md`](docs/adr/0001-foundations.md).
+The full rationale is in [ADR-0001](docs/adr/0001-foundations.md) and [ADR-0002](docs/adr/0002-core-engine-model.md).
+The matching behaviour itself is specified in the [rulebook](docs/rulebook/continuous-trading.md).
 
 | Decision | Choice | Reason |
 |---|---|---|
 | Price representation | `long` ticks | `double` causes rounding errors. `BigDecimal` allocates on the hot path. Conversion happens in the API layer. |
 | Book sides | `TreeMap<Long, PriceLevel>` | Sorted best price in O(log n). Simple and correct first. |
 | Time priority | `ArrayDeque<Order>` per price level | FIFO by construction. |
-| Cancel | O(n) inside a price level (v1) | Deliberate. It will be measured with JMH and then optimised to O(1) in step 4. |
-| Time source | Injected `Clock` and sequence numbers | Determinism and reproducible replay. |
+| Cancel | O(n) inside a price level (v1) | Deliberate. It will be measured with JMH and then optimised to O(1) in phase 6. |
+| Order IDs | Assigned by the engine, per instrument | Deterministic replay ([ADR-0002](docs/adr/0002-core-engine-model.md)). |
+| Ordering and time | Gap-free sequence numbers; timestamps journaled with commands (phase 2) | Determinism and reproducible replay. |
 | Errors | Typed `OrderRejected(reason)`, no exceptions on the hot path | Rejection is a business outcome, not an error. |
 | Instruments | Declared at startup (`application.yml`) | Exchanges do not create symbols on demand. |
 
@@ -249,8 +279,9 @@ The full rationale is in [`docs/adr/0001-foundations.md`](docs/adr/0001-foundati
 Requirements: **JDK 21+**. Maven is not required because the wrapper is included.
 
 ```bash
-./mvnw verify                      # build + all tests
-./mvnw -pl api spring-boot:run     # start the API on :8080
+./mvnw verify                                   # build, tests and quality gates
+./mvnw -pl engine-core -am -Pmutation verify    # mutation testing (PIT), slower
+./mvnw -pl api spring-boot:run                  # start the API on :8080
 ```
 
 On Windows, use `mvnw.cmd` in place of `./mvnw`.
@@ -261,6 +292,16 @@ On Windows, use `mvnw.cmd` in place of `./mvnw`.
 
 | Layer | Tooling | What it proves |
 |---|---|---|
+| Core scenarios | JUnit 5 + AssertJ | Exact event sequences for partial fills, multi-level sweeps, FIFO, market orders, cancels, rejections |
+| Core invariants | jqwik (property-based) | Book never crossed, quantity conserved, no gaps in IDs or sequences, determinism |
+| Reference model | jqwik + naive oracle in test sources | Random command streams give exactly the same events as a deliberately simple implementation |
+| Architecture | ArchUnit | Core uses only the JDK: no clock, randomness, threads, I/O or floating point |
+| Traceability | `RulebookTraceabilityTest` | Every rulebook rule is cited by a test (`@Rulebook("CT-xxx")`) |
+| Quality gates | JaCoCo, PIT | ≥ 90 % line and branch coverage; ≥ 80 % mutation score on `engine-core` |
+| Web layer *(phase 3)* | `@WebMvcTest` | Validation and HTTP status codes |
+| Performance *(phase 6)* | JMH | Throughput and p50 / p99 / p99.9 latency, with published methodology |
+
+---|---|---|
 | Core scenarios | JUnit 5 + AssertJ | Partial fills, multi-level sweeps, FIFO at equal price, cancels, rejections |
 | Core invariants | jqwik (property-based) | Book is never crossed, quantity is conserved, FIFO holds, no negative quantity |
 | Web layer | `@WebMvcTest` | Validation and HTTP status codes |
@@ -271,10 +312,23 @@ On Windows, use `mvnw.cmd` in place of `./mvnw`.
 
 ## Roadmap
 
-Each step can be delivered and demonstrated on its own.
+The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-| # | Step | Content | Status |
-|---|---|---|---|
+| # | Phase | Status |
+|---|---|---|
+| 0 | **Foundations**: multi-module build, CI, enforced module boundary, ADR | ✅ |
+| 1 | **Core engine**: rulebook, LIMIT / MARKET / cancel, property tests, reference model, quality gates | ✅ |
+| 2 | **Durability & audit**: write-ahead journal, snapshots, crash recovery, replay | ⏳ |
+| 3 | **Connectivity**: thread per symbol, FIX order entry, market data feeds, admin REST | |
+| 4 | **Venue functionality**: advanced orders, auctions, trading phases, circuit breakers | |
+| 5 | **Pre-trade risk & members** | |
+| 6 | **Performance**: JMH, zero-allocation hot path, published latency | |
+| 7 | **Regulatory evidence**: MiFID II compliance matrix, RTS 22 / 24 reporting, surveillance | |
+| 8 | **Security & supply chain**: mTLS, OIDC, SBOM, signed releases | |
+| 9 | **Operations & resilience**: observability, failover, runbooks, chaos tests | |
+| 10 | **Post-trade & analytics** *(optional)* | |
+
+---|---|---|---|
 | 0 | **Foundations** | Maven multi-module, wrapper, CI, enforced module boundary, ADR | ✅ |
 | 1 | **Core engine** | `OrderBook`: LIMIT / MARKET / cancel, JUnit scenarios, jqwik invariants | ⏳ |
 | 2 | **Service** | One thread per symbol, Spring Boot REST API, web tests | |
@@ -296,6 +350,8 @@ Order_Book/
 ├── engine-core/        pure-Java matching engine (no Spring, enforced)
 ├── api/                Spring Boot REST adapter
 ├── docs/adr/           architecture decision records
+├── docs/rulebook/      venue rules, cited by tests
+├── docs/ROADMAP.md     phased plan and exit criteria
 ├── .github/workflows/  CI
 └── mvnw, mvnw.cmd      Maven wrapper
 ```
