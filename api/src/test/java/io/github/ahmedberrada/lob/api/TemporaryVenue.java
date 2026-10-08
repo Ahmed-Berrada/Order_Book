@@ -20,5 +20,6 @@ final class TemporaryVenue {
             }
         });
         registry.add("lob.fsync", () -> "OS");
+        registry.add("lob.fix.enabled", () -> "false");      // tests that need FIX start it on a free port
     }
 }

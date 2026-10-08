@@ -15,22 +15,22 @@ import quickfix.field.TransactTime;
 import quickfix.fix44.NewOrderSingle;
 
 /** Builds member messages for tests; decimals are set by tag, never as doubles. */
-final class Orders {
+public final class Orders {
 
     private Orders() {
     }
 
-    static Message limit(String clOrdId, char side, String price, String quantity) {
+    public static Message limit(String clOrdId, char side, String price, String quantity) {
         Message order = order(clOrdId, "AAPL", side, OrdType.LIMIT, quantity);
         order.setDecimal(Price.FIELD, new BigDecimal(price));
         return order;
     }
 
-    static Message market(String clOrdId, char side, String quantity) {
+    public static Message market(String clOrdId, char side, String quantity) {
         return order(clOrdId, "AAPL", side, OrdType.MARKET, quantity);
     }
 
-    static Message order(String clOrdId, String symbol, char side, char type, String quantity) {
+    public static Message order(String clOrdId, String symbol, char side, char type, String quantity) {
         NewOrderSingle order = new NewOrderSingle();
         order.setString(ClOrdID.FIELD, clOrdId);
         order.setString(Symbol.FIELD, symbol);
@@ -44,7 +44,7 @@ final class Orders {
     }
 
     /** A field as text, for exact comparisons of decimals and identifiers. */
-    static String field(Message message, int tag) throws FieldNotFound {
+    public static String field(Message message, int tag) throws FieldNotFound {
         return message.getString(tag);
     }
 }

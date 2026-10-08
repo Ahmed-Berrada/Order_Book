@@ -18,6 +18,12 @@ lob:
   queue-capacity: 10000
   fsync: EVERY_COMMAND
   snapshot-interval: 10000
+  # FIX 4.4 order entry (docs/interfaces/fix-rules-of-engagement.md). Sessions are provisioned here.
+  fix:
+    enabled: true
+    port: 9878
+    sender-comp-id: LOB
+    members: [MEMBER1, MEMBER2]
   instruments:
     - symbol: AAPL
       tick-size: "0.01"

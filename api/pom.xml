@@ -20,6 +20,10 @@
             <artifactId>engine-service</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.github.ahmedberrada.lob</groupId>
+            <artifactId>fix-gateway</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
@@ -45,6 +49,12 @@
         <dependency>
             <groupId>io.github.ahmedberrada.lob</groupId>
             <artifactId>engine-core</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.ahmedberrada.lob</groupId>
+            <artifactId>fix-gateway</artifactId>
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>
