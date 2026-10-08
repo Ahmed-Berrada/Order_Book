@@ -1,7 +1,5 @@
 # Rulebook: order entry
 
-- **Status:** Draft
-
 This chapter specifies how commands reach the matching engine of each instrument, whatever the access
 protocol (REST today, FIX next). As in the other chapters, each rule ID is cited by at least one test
 through `@Rulebook("OE-xxx")`. The design is in [ADR-0004](../adr/0004-service-layer.md).
