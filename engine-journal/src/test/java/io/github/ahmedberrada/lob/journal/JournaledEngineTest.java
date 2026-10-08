@@ -431,16 +431,27 @@ class JournaledEngineTest {
     void stopsAfterAnIoFailure() throws IOException {
         JournaledEngine engine = open(NO_SNAPSHOTS);
         engine.process(new LimitOrder(Side.BUY, 100, 1));
-        try (Stream<Path> files = Files.list(directory)) {
-            for (Path file : files.toList()) {
-                Files.delete(file);
-            }
-        }
-        Files.delete(directory);
+        assertThat(engine.isStopped()).isFalse();
+        deleteDirectory();
 
         assertThatThrownBy(engine::snapshot).isInstanceOf(UncheckedIOException.class);
+        assertThat(engine.isStopped()).isTrue();
         assertThatIllegalStateException().isThrownBy(() -> engine.process(new LimitOrder(Side.BUY, 100, 1)))
                 .withMessageContaining("stopped");
+        engine.close();
+    }
+
+    @Test
+    @Rulebook("RS-001")
+    void commandIsAcknowledgedWhenOnlyTheSnapshotAfterItFails() throws IOException {
+        JournaledEngine engine = open(new JournalOptions(FsyncPolicy.OS, 1));
+        deleteDirectory();
+
+        EventBatch batch = engine.process(new LimitOrder(Side.BUY, 100, 1));
+
+        assertThat(batch.commandSequence()).isEqualTo(1);
+        assertThat(engine.isStopped()).isTrue();
+        assertThatIllegalStateException().isThrownBy(() -> engine.process(new LimitOrder(Side.BUY, 100, 1)));
         engine.close();
     }
 
@@ -474,6 +485,15 @@ class JournaledEngineTest {
         long after = System.currentTimeMillis() * 1_000 + 1_000;
 
         assertThat(now).isBetween(before, after);
+    }
+
+    private void deleteDirectory() throws IOException {
+        try (Stream<Path> files = Files.list(directory)) {
+            for (Path file : files.toList()) {
+                Files.delete(file);
+            }
+        }
+        Files.delete(directory);
     }
 
     private static byte[] frame(byte[] payload) throws IOException {

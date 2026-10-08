@@ -95,9 +95,11 @@ If a write fails, the `JournaledEngine` refuses every further command. It can no
 has recorded, and continuing could acknowledge orders that would be lost. Restarting runs recovery,
 which re-establishes a known state.
 
-A command whose write failed may or may not have reached the journal. Its sender got an error, not an
-acknowledgement, and must check the order's status after recovery, as with any exchange. Order status
-queries arrive with the FIX gateway (phase 3).
+Once a command's record is written, its outcome is decided: if writing its events or a snapshot then
+fails, its events are still returned, and only later commands are refused. Recovery regenerates the
+missing events (§5). Only a failure of the command write itself leaves the outcome unknown: the
+record may or may not have reached the disk. That sender gets an error, not an acknowledgement, and
+must check the order's status after recovery, as with any exchange.
 
 ## Testing
 
