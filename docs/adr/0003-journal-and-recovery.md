@@ -115,6 +115,10 @@ promises; no test here can show it, and a mutation test that removes an `fsync` 
 either. Removing a flush or a `close()` therefore accounts for most of the surviving mutants in this
 module.
 
+**Test structure.** JUnit `@Nested` test classes are not run by PIT (with `pitest-junit5-plugin` 1.2.3
+on JUnit 6), so they would quietly lower the mutation score. Test classes in this project are flat,
+with comment headers instead of nesting.
+
 ## Consequences
 
 - ➕ No acknowledged order is lost in a process crash, or, with `EVERY_COMMAND`, in a power loss.
