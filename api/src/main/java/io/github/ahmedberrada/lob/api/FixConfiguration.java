@@ -22,6 +22,7 @@ class FixConfiguration {
     FixGateway fixGateway(MatchingService service, LobProperties properties) throws ConfigError {
         LobProperties.FixProperties fix = properties.fix();
         Path store = fix.storeDirectory() != null ? fix.storeDirectory() : properties.dataDirectory().resolve("fix");
-        return FixGateway.start(service, new FixGatewayConfig(fix.port(), fix.senderCompId(), fix.members(), store));
+        return FixGateway.start(service, new FixGatewayConfig(fix.bindAddress(), fix.port(), fix.senderCompId(),
+                fix.members(), store));
     }
 }

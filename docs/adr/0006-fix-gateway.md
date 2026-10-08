@@ -61,4 +61,5 @@ fills that happened while a member was disconnected.
 - ➕ Messages missed during a disconnection are recovered by standard FIX resend.
 - ➖ Order ownership is not journaled: after a restart, FIX cannot report fills of orders entered
   before it. Phase 5 adds the member to each journaled command and removes this gap.
-- ➖ No authentication until phase 8: sessions are identified by CompIDs only.
+- ➖ No authentication until phase 8: sessions are identified by CompIDs only. The acceptor therefore
+  listens on the loopback interface by default (`lob.fix.bind-address`, `LOB_BIND_ADDRESS`).

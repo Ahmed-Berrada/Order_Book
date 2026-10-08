@@ -37,12 +37,14 @@ public record LobProperties(
         @DefaultValue @Valid FixProperties fix) {
 
     /**
-     * The FIX acceptor.
+     * The FIX acceptor. It listens on the loopback interface unless told otherwise: sessions are not
+     * authenticated until phase 8.
      *
      * @param storeDirectory sequence numbers and sent messages; defaults to {@code <data-directory>/fix}
      */
     public record FixProperties(
             @DefaultValue("false") boolean enabled,
+            @DefaultValue("127.0.0.1") @NotBlank String bindAddress,
             @DefaultValue("9878") int port,
             @DefaultValue("LOB") @NotBlank String senderCompId,
             @DefaultValue List<String> members,

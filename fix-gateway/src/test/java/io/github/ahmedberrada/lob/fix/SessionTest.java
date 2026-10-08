@@ -73,6 +73,8 @@ class SessionTest {
         assertThatIllegalArgumentException().isThrownBy(() -> new FixGatewayConfig(9_000, "LOB", List.of(), store));
         assertThatIllegalArgumentException().isThrownBy(() -> new FixGatewayConfig(9_000, "LOB", List.of("M", "M"), store));
         assertThatNullPointerException().isThrownBy(() -> new FixGatewayConfig(9_000, null, List.of("M"), store));
+        assertThatNullPointerException().isThrownBy(() -> new FixGatewayConfig(null, 9_000, "LOB", List.of("M"), store));
+        assertThat(new FixGatewayConfig(9_000, "LOB", List.of("M"), store).bindAddress()).isEqualTo("127.0.0.1");
         assertThatNullPointerException().isThrownBy(() -> FixGateway.start(null,
                 new FixGatewayConfig(9_000, "LOB", List.of("M"), store)));
     }
