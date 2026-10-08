@@ -63,10 +63,12 @@ class EndToEndTest {
                 responses.add(post(venue, "{\"side\":\"%s\",\"type\":\"LIMIT\",\"price\":\"%s\",\"quantity\":%d}"
                         .formatted(side, price, 1 + i % 3)));
             }
-            responses.add(post(venue, "{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":3}"));
             for (CompletableFuture<HttpResponse<String>> response : responses) {
                 assertThat(response.join().statusCode()).as(response.join().body()).isEqualTo(201);
             }
+            // Only once the asks are known to rest: sent concurrently, it could arrive first (NO_LIQUIDITY).
+            assertThat(post(venue, "{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":3}").join().statusCode())
+                    .isEqualTo(201);
             bookBefore = get(venue, "/api/v1/instruments/AAPL/book?depth=100");
             assertThat(bookBefore).contains("\"commandSequence\":51");
         }
