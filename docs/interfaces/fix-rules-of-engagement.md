@@ -14,7 +14,7 @@ specified in the [rulebook](../rulebook/); this document only covers the protoco
 | Sequence numbers | Persisted by the venue across restarts and reconnections |
 | Resend | Standard `ResendRequest` / `SequenceReset`. Messages sent while a member is disconnected (for example fills of its resting orders) are delivered by resend after it logs on again |
 | Authentication | Not yet (phase 8: mutual TLS and Logon credentials). Use on a trusted network only |
-| Validation | Messages are checked against the FIX 4.4 data dictionary; a malformed message gets a session `Reject` (`35=3`) |
+| Validation | Messages are checked against the FIX 4.4 data dictionary; a malformed message gets a session `Reject` (`35=3`). A field the venue requires but FIX 4.4 makes optional, such as `OrderQty`, gets a `BusinessMessageReject` with reason `5`, naming the field in `Text` |
 
 Unsupported application messages get a `BusinessMessageReject` (`35=j`).
 
@@ -68,13 +68,13 @@ fill, in execution order.
 
 | Cause | OrdRejReason (103) | Text (58) |
 |---|---|---|
-| Unknown symbol (OE-001) | `1` Unknown symbol | |
-| Venue shutting down (OE-007) | `2` Exchange closed | |
+| Unknown symbol (OE-001) | `1` Unknown symbol | `UNKNOWN_INSTRUMENT` |
+| Venue shutting down (OE-007) | `2` Exchange closed | `STOPPED` |
 | Quantity above the instrument maximum | `3` Order exceeds limit | `QUANTITY_ABOVE_MAXIMUM` |
 | Price above the instrument maximum | `3` Order exceeds limit | `PRICE_ABOVE_MAXIMUM` |
-| Duplicate ClOrdID | `6` Duplicate order | |
-| Unsupported field value (TimeInForce, OrdType, price on a market order) | `11` Unsupported order characteristic | |
-| Zero, negative or fractional quantity | `13` Incorrect quantity | |
+| Duplicate ClOrdID | `6` Duplicate order | `DUPLICATE_CLORDID` |
+| Unsupported field value (Side other than buy/sell, TimeInForce, OrdType), price on a market order or missing on a limit order | `11` Unsupported order characteristic | `UNSUPPORTED_SIDE`, `UNSUPPORTED_TIME_IN_FORCE`, `UNSUPPORTED_ORD_TYPE`, `PRICE_NOT_ALLOWED_FOR_MARKET`, `PRICE_REQUIRED_FOR_LIMIT` |
+| Zero, negative or fractional quantity | `13` Incorrect quantity | `INVALID_QUANTITY`, `FRACTIONAL_QUANTITY` |
 | Off-tick or non-positive price, no liquidity, overload, halt | `99` Other | `OFF_TICK_PRICE`, `INVALID_PRICE`, `NO_LIQUIDITY`, `OVERLOADED`, `HALTED` |
 
 Rejections by the engine carry the `OrderID` they consumed (CT-010); refusals before the engine carry

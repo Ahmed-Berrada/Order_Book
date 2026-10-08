@@ -74,6 +74,12 @@ final class FixTestClient implements Application, AutoCloseable {
         }
     }
 
+    /** Sends a message and returns the next one received. */
+    Message next(Message toSend) throws Exception {
+        send(toSend);
+        return next();
+    }
+
     /** Next application or reject message, failing after a few seconds. */
     Message next() throws InterruptedException {
         Message message = received.poll(5, TimeUnit.SECONDS);
