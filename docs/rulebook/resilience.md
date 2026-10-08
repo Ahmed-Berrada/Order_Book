@@ -1,7 +1,5 @@
 # Rulebook: resilience and record keeping
 
-- **Status:** Draft
-
 This chapter specifies what the venue guarantees when it crashes and restarts, and which records it
 keeps. As in the other chapters, each rule ID is cited by at least one test through
 `@Rulebook("RS-xxx")`. The design behind it is in
