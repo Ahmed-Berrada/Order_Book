@@ -21,7 +21,7 @@ traceable to a rule; every performance number measured and reproducible.
 | 0 | Foundations | Maven multi-module, wrapper, CI, enforced module boundary, ADR-0001 | ✅ |
 | 1 | Core engine | Rulebook, LIMIT / MARKET / cancel, scenario tests, jqwik invariants, reference model, JaCoCo / PIT / ArchUnit gates | ✅ |
 | 2 | Durability & audit | Write-ahead command journal (CRC, sequence), snapshots, crash recovery proof, event store, µs timestamps (RTS 25), replay tool | ✅ |
-| 3 | Connectivity | ✅ 3a single writer per symbol service (`engine-service`); ✅ 3b REST API + OpenAPI; ✅ 3c FIX 4.4 order entry (QuickFIX/J); next: 3d ITCH-style SBE market data + replay; WebSocket L1/L2; drop copy; FIX conformance suite | ⏳ |
+| 3 | Connectivity | ✅ 3a single writer per symbol service (`engine-service`); ✅ 3b REST API + OpenAPI; ✅ 3c FIX 4.4 order entry (QuickFIX/J); next: 3d ITCH-style SBE market data + replay; WebSocket L1/L2; drop copy | ⏳ |
 | 4 | Venue functionality | IOC, FOK, post-only, iceberg, stop; cancel/replace priority rules; self-trade prevention; opening and closing auctions; trading phases; volatility interruptions (RTS 7); tick-size regime (RTS 11); order-to-trade ratio and throttles (RTS 9); kill switch | |
 | 5 | Pre-trade risk & members | Member / trader / session hierarchy; max quantity and value, price collars, credit limits, restricted list; exposure monitoring | |
 | 6 | Performance | `engine-bench` (JMH), HdrHistogram end-to-end load tests, O(1) cancel, primitive maps, zero-allocation hot path, Aeron / Disruptor evaluation, GC comparison, regression gate in CI, `docs/performance.md` | |
