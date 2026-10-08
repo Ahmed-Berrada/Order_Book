@@ -26,7 +26,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jacoco-report
-          path: engine-core/target/site/jacoco/
+          path: |
+            engine-core/target/site/jacoco/
+            engine-journal/target/site/jacoco/
           if-no-files-found: ignore
 
   mutation:
@@ -40,14 +42,16 @@ jobs:
           java-version: '21'
           cache: maven
 
-      # ADR-0002 §7: PIT mutation score of engine-core must stay at or above 80 %.
+      # ADR-0002 §7: PIT mutation score of each engine module must stay at or above 80 %.
       - name: Mutation testing
-        run: ./mvnw -B -ntp -pl engine-core -am -Pmutation verify
+        run: ./mvnw -B -ntp -pl engine-core,engine-journal -am -Pmutation verify
 
       - name: Upload mutation report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pit-report
-          path: engine-core/target/pit-reports/
+          path: |
+            engine-core/target/pit-reports/
+            engine-journal/target/pit-reports/
           if-no-files-found: ignore

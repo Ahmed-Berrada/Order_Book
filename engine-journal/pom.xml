@@ -10,11 +10,22 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>engine-core</artifactId>
-    <name>LOB Engine :: Core</name>
-    <description>Pure-Java matching engine. No framework, no I/O, deterministic.</description>
+    <artifactId>engine-journal</artifactId>
+    <name>LOB Engine :: Journal</name>
+    <description>Write-ahead command journal, event journal, snapshots and recovery. JDK only.</description>
 
     <dependencies>
+        <dependency>
+            <groupId>io.github.ahmedberrada.lob</groupId>
+            <artifactId>engine-core</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.github.ahmedberrada.lob</groupId>
+            <artifactId>engine-core</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -39,13 +50,13 @@
 
     <build>
         <plugins>
-            <!-- ADR-0001: the core must never depend on Spring. The build fails if it does. -->
+            <!-- ADR-0003: the journal is plain Java like the core. The build fails if Spring appears. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>enforce-pure-core</id>
+                        <id>enforce-no-framework</id>
                         <goals>
                             <goal>enforce</goal>
                         </goals>
@@ -55,7 +66,7 @@
                                     <excludes>
                                         <exclude>org.springframework*</exclude>
                                     </excludes>
-                                    <message>engine-core must stay framework-free (see docs/adr/0001-foundations.md)</message>
+                                    <message>engine-journal must stay framework-free (see docs/adr/0003-journal-and-recovery.md)</message>
                                 </bannedDependencies>
                             </rules>
                         </configuration>
@@ -63,20 +74,7 @@
                 </executions>
             </plugin>
 
-            <!-- Shares the @Rulebook annotation with the tests of other modules. -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>test-jar</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-
-            <!-- ADR-0002 §7: line and branch coverage of the core must stay at or above 90 %. -->
+            <!-- Same coverage gate as the core (ADR-0002 §7). -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -125,7 +123,7 @@
     </build>
 
     <profiles>
-        <!-- ADR-0002 §7: mutation testing. Slow, so run separately: ./mvnw -pl engine-core -Pmutation verify -->
+        <!-- Mutation testing, as for the core: ./mvnw -pl engine-journal -am -Pmutation verify -->
         <profile>
             <id>mutation</id>
             <build>
@@ -143,14 +141,14 @@
                         </dependencies>
                         <configuration>
                             <targetClasses>
-                                <param>io.github.ahmedberrada.lob.core.*</param>
+                                <param>io.github.ahmedberrada.lob.journal.*</param>
                             </targetClasses>
                             <targetTests>
-                                <param>io.github.ahmedberrada.lob.core.*</param>
+                                <param>io.github.ahmedberrada.lob.journal.*</param>
                             </targetTests>
                             <excludedTestClasses>
-                                <param>io.github.ahmedberrada.lob.core.ArchitectureTest</param>
-                                <param>io.github.ahmedberrada.lob.core.RulebookTraceabilityTest</param>
+                                <param>io.github.ahmedberrada.lob.journal.ArchitectureTest</param>
+                                <param>io.github.ahmedberrada.lob.journal.ProcessCrashTest</param>
                             </excludedTestClasses>
                             <mutationThreshold>80</mutationThreshold>
                             <outputFormats>

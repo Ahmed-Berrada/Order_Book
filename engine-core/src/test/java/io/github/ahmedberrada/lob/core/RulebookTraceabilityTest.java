@@ -16,7 +16,8 @@ import org.junit.jupiter.api.Test;
 class RulebookTraceabilityTest {
 
     private static final Path RULEBOOK = Path.of("..", "docs", "rulebook");
-    private static final Path TEST_SOURCES = Path.of("src", "test", "java");
+    /** Rules can be verified in any module, so the test sources of every module are searched. */
+    private static final Path MODULES = Path.of("..");
 
     private static final Pattern RULE_DEFINITION = Pattern.compile("\\*\\*([A-Z]{2,4}-\\d{3}):");
     private static final Pattern ANNOTATION = Pattern.compile("@Rulebook\\(([^)]*)\\)");
@@ -25,7 +26,12 @@ class RulebookTraceabilityTest {
     @Test
     void everyRuleIsVerifiedByATest() throws IOException {
         Set<String> defined = collect(RULEBOOK, ".md", RULE_DEFINITION, null);
-        Set<String> cited = collect(TEST_SOURCES, ".java", ANNOTATION, RULE_ID);
+        Set<String> cited = new TreeSet<>();
+        try (Stream<Path> modules = Files.list(MODULES)) {
+            for (Path testSources : modules.map(m -> m.resolve("src/test/java")).filter(Files::isDirectory).toList()) {
+                cited.addAll(collect(testSources, ".java", ANNOTATION, RULE_ID));
+            }
+        }
 
         assertThat(defined).as("rules defined in %s", RULEBOOK).isNotEmpty();
         assertThat(cited).as("rules cited by tests").containsAll(defined);
