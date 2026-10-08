@@ -58,8 +58,10 @@ Every report carries `37 OrderID` (`<symbol>-<engine order ID>`, or `NONE` when 
 `17 ExecID` (`<symbol>-<event sequence>`, unique), `11 ClOrdID`, `55`, `54`, `38`, `14 CumQty`,
 `151 LeavesQty`, `6 AvgPx` and `60 TransactTime` (the command's timestamp, microseconds, RS-006).
 Fills add `31 LastPx` and `32 LastQty`. **Both** sides of a trade receive a fill report: the taker in
-reply to its order, the maker on its own session, even if it is not the session that sent the order
-that traded against it.
+reply to its order, the maker on its own session, whoever caused the trade (another FIX member or the
+REST API). The maker's report has the same ExecID as the taker's with a `-M` suffix. An order
+cancelled by another channel (for example an operator over REST) gets an unsolicited `Canceled`
+report on its owner's session.
 
 An order accepted and filled by the same command gets a `New` report, then one `Trade` report per
 fill, in execution order.

@@ -12,6 +12,7 @@ import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
 import io.github.ahmedberrada.lob.fix.OrderRegistry.FixOrder;
 import io.github.ahmedberrada.lob.journal.EventBatch;
+import io.github.ahmedberrada.lob.service.EventListener;
 import io.github.ahmedberrada.lob.service.InstrumentConfig;
 import io.github.ahmedberrada.lob.service.MatchingService;
 import io.github.ahmedberrada.lob.service.RequestRefusedException;
@@ -43,10 +44,11 @@ import quickfix.field.TimeInForce;
  * Application layer of the gateway: application messages become commands, events become execution
  * reports (ADR-0006, Rules of Engagement). Session-level messages are handled by QuickFIX/J.
  *
- * <p>Requests arrive on QuickFIX/J threads; results are processed on the instrument's writer thread,
- * where the service completes its future, so the reports of one order are sent in event order.
+ * <p>Requests arrive on QuickFIX/J threads. Events arrive through {@link #onEvents} on the
+ * instrument's writer thread, for every command whoever sent it (ADR-0004 §7), so the reports of one
+ * order are sent in event order and makers are told of their fills even when REST caused the trade.
  */
-final class FixApplication implements Application {
+final class FixApplication implements Application, EventListener {
 
     private static final Logger LOG = LoggerFactory.getLogger(FixApplication.class);
 
@@ -59,6 +61,11 @@ final class FixApplication implements Application {
     private final MatchingService service;
     private final Sender sender;
     private final OrderRegistry registry = new OrderRegistry();
+
+    /** Attached to a NewOrderSingle's command, so its events can be reported to its sender. */
+    private record NewOrderContext(SessionID session, String clOrdId, InstrumentConfig instrument, char side,
+            long lots) {
+    }
 
     FixApplication(MatchingService service) {
         this(service, FixApplication::sendToTarget);
@@ -113,11 +120,10 @@ final class FixApplication implements Application {
             refuse(session, clOrdId, symbol, side, quantity, OrdRejReason.OTHER, e.reason().name(), true);
             return;
         }
-        service.submit(symbol, command).whenComplete((batch, failure) -> {
+        NewOrderContext context = new NewOrderContext(session, clOrdId, instrument.get(), side, lots);
+        service.submit(symbol, command, context).whenComplete((batch, failure) -> {
             if (failure != null) {
                 onFailure(unwrap(failure), session, clOrdId, symbol, side, quantity);
-            } else {
-                onOrderEvents(batch, session, clOrdId, instrument.get(), side, lots);
             }
         });
     }
@@ -153,36 +159,55 @@ final class FixApplication implements Application {
         return new LimitOrder(side, instrument.toTicks(order.getDecimal(Price.FIELD)), lots);
     }
 
-    /** Runs on the instrument's writer thread, in event order (CT-012). */
-    private void onOrderEvents(EventBatch batch, SessionID session, String clOrdId, InstrumentConfig instrument,
-            char side, long lots) {
-        FixOrder order = null;
+    /**
+     * Turns events into reports, on the instrument's writer thread, in event order (CT-012): the new
+     * order's own reports if a FIX session sent it, and fill or cancel reports to the FIX owners of the
+     * resting orders it touched.
+     */
+    @Override
+    public void onEvents(String symbol, EventBatch batch, Object context) {
+        long time = batch.timestampMicros();
+        FixOrder taker = null;
         for (Event event : batch.events()) {
             switch (event) {
-                case OrderRejected e -> {
-                    order = new FixOrder(session, clOrdId, instrument, side, e.orderId(), lots, OrdStatus.REJECTED);
-                    registry.created(order);
-                    sender.send(ExecutionReports.engineRejection(order, e.sequence(), batch.timestampMicros(),
-                            ordRejReason(e.reason()), e.reason().name()), session);
+                case OrderRejected e when context instanceof NewOrderContext c -> {
+                    taker = new FixOrder(c.session(), c.clOrdId(), c.instrument(), c.side(), e.orderId(), c.lots(),
+                            OrdStatus.REJECTED);
+                    registry.created(taker);
+                    sender.send(ExecutionReports.engineRejection(taker, e.sequence(), time,
+                            ordRejReason(e.reason()), e.reason().name()), taker.session);
                 }
-                case OrderAccepted e -> {
-                    order = new FixOrder(session, clOrdId, instrument, side, e.orderId(), lots, OrdStatus.NEW);
-                    registry.created(order);
-                    sender.send(ExecutionReports.of(order, ExecType.NEW, e.sequence(), batch.timestampMicros()), session);
+                case OrderAccepted e when context instanceof NewOrderContext c -> {
+                    taker = new FixOrder(c.session(), c.clOrdId(), c.instrument(), c.side(), e.orderId(), c.lots(),
+                            OrdStatus.NEW);
+                    registry.created(taker);
+                    sender.send(ExecutionReports.of(taker, ExecType.NEW, e.sequence(), time), taker.session);
                 }
                 case TradeExecuted e -> {
-                    order.fill(e.priceTicks(), e.quantity(), e.takerRemainingQuantity());
-                    sender.send(ExecutionReports.trade(order, e.sequence(), batch.timestampMicros(), e.priceTicks(),
-                            e.quantity()), session);
+                    if (taker != null) {
+                        taker.fill(e.priceTicks(), e.quantity(), e.takerRemainingQuantity());
+                        sender.send(ExecutionReports.trade(taker, e.sequence(), time, e.priceTicks(), e.quantity(),
+                                false), taker.session);
+                    }
+                    FixOrder maker = registry.byOrderId(symbol, e.makerOrderId());
+                    if (maker != null) {
+                        maker.fill(e.priceTicks(), e.quantity(), e.makerRemainingQuantity());
+                        sender.send(ExecutionReports.trade(maker, e.sequence(), time, e.priceTicks(), e.quantity(),
+                                true), maker.session);
+                    }
                 }
                 case OrderCancelled e -> {
-                    order.cancel();
-                    sender.send(ExecutionReports.of(order, ExecType.CANCELED, e.sequence(), batch.timestampMicros()), session);
+                    FixOrder cancelled = taker != null && taker.orderId == e.orderId()
+                            ? taker : registry.byOrderId(symbol, e.orderId());
+                    if (cancelled != null) {
+                        cancelled.cancel();
+                        sender.send(ExecutionReports.of(cancelled, ExecType.CANCELED, e.sequence(), time),
+                                cancelled.session);
+                    }
                 }
-                case OrderRested e -> {
-                    // already reported as New or Partially filled
+                default -> {
+                    // OrderRested is already reported as New or a fill; other commands' events concern no FIX order
                 }
-                default -> throw new IllegalStateException("unexpected event for a new order: " + event);
             }
         }
     }

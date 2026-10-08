@@ -30,6 +30,7 @@ public final class FixGateway implements AutoCloseable {
         Objects.requireNonNull(service, "service");
         SessionSettings settings = settings(config);
         FixApplication application = new FixApplication(service);
+        service.addListener(application);
         Acceptor acceptor = new ThreadedSocketAcceptor(application, new FileStoreFactory(settings), settings,
                 new SLF4JLogFactory(settings), new DefaultMessageFactory());
         acceptor.start();
