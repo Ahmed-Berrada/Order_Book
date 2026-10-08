@@ -1,6 +1,8 @@
 package io.github.ahmedberrada.lob.core;
 
 import java.util.ArrayDeque;
+import java.util.Collection;
+import java.util.Collections;
 
 /** All resting orders of one side at one price, in arrival order (CT-002). */
 final class PriceLevel {
@@ -27,6 +29,11 @@ final class PriceLevel {
 
     boolean isEmpty() {
         return orders.isEmpty();
+    }
+
+    /** The queue, oldest order first. Read-only. */
+    Collection<Order> orders() {
+        return Collections.unmodifiableCollection(orders);
     }
 
     /** The order with time priority at this price. */
