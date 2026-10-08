@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 
 /**
@@ -30,10 +31,12 @@ public final class MatchingService implements AutoCloseable {
 
     private final Map<String, InstrumentConfig> instruments;
     private final Map<String, SymbolWorker> workers;
+    private final List<EventListener> listeners;
     private final Map<String, RecoveryReport> recoveries;
 
     private MatchingService(Map<String, InstrumentConfig> instruments, Map<String, SymbolWorker> workers,
-            Map<String, RecoveryReport> recoveries) {
+            Map<String, RecoveryReport> recoveries, List<EventListener> listeners) {
+        this.listeners = listeners;
         this.instruments = Collections.unmodifiableMap(instruments);
         this.workers = workers;
         this.recoveries = Collections.unmodifiableMap(recoveries);
@@ -59,12 +62,13 @@ public final class MatchingService implements AutoCloseable {
         }
         Map<String, SymbolWorker> workers = new LinkedHashMap<>();
         Map<String, RecoveryReport> recoveries = new LinkedHashMap<>();
+        List<EventListener> listeners = new CopyOnWriteArrayList<>();
         try {
             for (InstrumentConfig config : bySymbol.values()) {
                 JournaledEngine engine = JournaledEngine.open(
                         dataDirectory.resolve(config.symbol()), config.instrument(), options, timeSource);
                 recoveries.put(config.symbol(), engine.recovery());
-                workers.put(config.symbol(), new SymbolWorker(engine, queueCapacity));
+                workers.put(config.symbol(), new SymbolWorker(engine, queueCapacity, listeners));
             }
         } catch (IOException | RuntimeException e) {
             IOException closeFailure = closeAll(workers.values());
@@ -73,13 +77,26 @@ public final class MatchingService implements AutoCloseable {
             }
             throw e;
         }
-        return new MatchingService(bySymbol, workers, recoveries);
+        return new MatchingService(bySymbol, workers, recoveries, listeners);
     }
 
     /** Journals and processes a command for an instrument (OE-003, OE-004). */
     public CompletableFuture<EventBatch> submit(String symbol, Command command) {
+        return submit(symbol, command, null);
+    }
+
+    /**
+     * Like {@link #submit(String, Command)}, attaching a context that {@link EventListener}s receive with
+     * the command's events, for example which session sent it.
+     */
+    public CompletableFuture<EventBatch> submit(String symbol, Command command, Object context) {
         Objects.requireNonNull(command, "command");
-        return withWorker(symbol, worker -> worker.submit(command));
+        return withWorker(symbol, worker -> worker.submit(command, context));
+    }
+
+    /** Registers a listener for the events of every instrument, from the next command on. */
+    public void addListener(EventListener listener) {
+        listeners.add(Objects.requireNonNull(listener, "listener"));
     }
 
     /** The best {@code depth} levels of each side of an instrument's book. */
