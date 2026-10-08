@@ -34,16 +34,25 @@ final class SymbolWorker implements AutoCloseable {
         }
     }
 
+    private static final System.Logger LOG = System.getLogger(SymbolWorker.class.getName());
+
     private final String symbol;
     private final JournaledEngine engine;
+    private final List<EventListener> listeners;
     private final BlockingQueue<Task<?>> queue;
     private final Thread thread;
     private volatile boolean accepting = true;
     private volatile boolean halted;
 
     SymbolWorker(JournaledEngine engine, int queueCapacity) {
+        this(engine, queueCapacity, List.of());
+    }
+
+    /** @param listeners read on every command; the list may change while the worker runs */
+    SymbolWorker(JournaledEngine engine, int queueCapacity, List<EventListener> listeners) {
         this.symbol = engine.instrument().symbol();
         this.engine = engine;
+        this.listeners = listeners;
         this.queue = new ArrayBlockingQueue<>(queueCapacity);
         this.thread = Thread.ofPlatform().name("lob-" + symbol).start(this::runLoop);
     }
@@ -56,6 +65,10 @@ final class SymbolWorker implements AutoCloseable {
      * In both I/O cases the instrument halts (OE-006).
      */
     CompletableFuture<EventBatch> submit(Command command) {
+        return submit(command, null);
+    }
+
+    CompletableFuture<EventBatch> submit(Command command, Object context) {
         if (halted) {
             return CompletableFuture.failedFuture(new RequestRefusedException(Reason.HALTED, symbol));
         }
@@ -66,6 +79,7 @@ final class SymbolWorker implements AutoCloseable {
             try {
                 EventBatch batch = engine.process(command);
                 halted = engine.isStopped();    // a later write failed: this command counts, the next ones do not
+                notifyListeners(batch, context);
                 return batch;
             } catch (UncheckedIOException e) {
                 halted = true;
@@ -86,6 +100,21 @@ final class SymbolWorker implements AutoCloseable {
     /** Remaining quantity of a resting order, 0 if it is not resting. */
     CompletableFuture<Long> restingQuantity(long orderId) {
         return enqueue(() -> engine.book().restingQuantity(orderId));
+    }
+
+    /**
+     * A listener failure is logged and does not affect the command, which is already journaled, nor the
+     * other listeners.
+     */
+    private void notifyListeners(EventBatch batch, Object context) {
+        for (EventListener listener : listeners) {
+            try {
+                listener.onEvents(symbol, batch, context);
+            } catch (RuntimeException e) {
+                LOG.log(System.Logger.Level.ERROR, "Event listener failed on " + symbol + " command "
+                        + batch.commandSequence(), e);
+            }
+        }
     }
 
     boolean isHalted() {
