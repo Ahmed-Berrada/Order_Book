@@ -84,8 +84,21 @@ Rejections by the engine carry the `OrderID` they consumed (CT-010); refusals be
 
 ### OrderCancelReject (`35=9`)
 
-`102 CxlRejReason`: `1` Unknown order (not resting, or not this member's), `3` Order already in
-pending status (its acknowledgement has not been sent yet). `434 CxlRejResponseTo=1`.
+`434 CxlRejResponseTo=1`, and `102 CxlRejReason`:
+
+| Reason | When | Text (58) |
+|---|---|---|
+| `0` Too late to cancel | The order exists but no longer rests (filled or already cancelled) | `NOT_RESTING` |
+| `1` Unknown order | No such ClOrdID on this session (another member's orders are invisible), or symbol or side mismatch | `UNKNOWN_ORDER` |
+| `3` Pending status | The order's acknowledgement has not been sent yet | `PENDING` |
+| `6` Duplicate ClOrdID | The cancel request reuses a ClOrdID | `DUPLICATE_CLORDID` |
+| `99` Other | Refused by the venue (overload, halt, shutdown) | `OVERLOADED`, `HALTED`, `STOPPED` |
+
+A cancel whose journal write fails is answered with an ExecutionReport `150=6 / 39=6` (Pending cancel)
+and `Text=OUTCOME_UNKNOWN`, never with a reject.
+
+An OrderStatusRequest on an unknown ClOrdID is answered with `150=I`, `39=8`, `103=5` (Unknown order);
+on an order still awaiting its acknowledgement with `39=A`.
 
 ## Unknown outcomes
 
