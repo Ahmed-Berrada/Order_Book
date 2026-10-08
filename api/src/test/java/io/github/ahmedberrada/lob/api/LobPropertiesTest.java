@@ -34,6 +34,7 @@ class LobPropertiesTest {
             assertThat(properties.snapshotInterval()).isEqualTo(10_000);
             assertThat(properties.fix().enabled()).isFalse();
             assertThat(properties.fix().port()).isEqualTo(9878);
+            assertThat(properties.fix().bindAddress()).isEqualTo("127.0.0.1");
             assertThat(properties.fix().senderCompId()).isEqualTo("LOB");
             assertThat(context.getBean(MatchingService.class).instruments()).hasSize(1);
         });

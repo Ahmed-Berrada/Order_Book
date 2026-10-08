@@ -1,3 +1,7 @@
+# No authentication until phase 8: listen on the loopback interface unless deliberately opened.
+server:
+  address: ${LOB_BIND_ADDRESS:127.0.0.1}
+
 spring:
   application:
     name: lob-engine
@@ -21,6 +25,7 @@ lob:
   # FIX 4.4 order entry (docs/interfaces/fix-rules-of-engagement.md). Sessions are provisioned here.
   fix:
     enabled: true
+    bind-address: ${LOB_BIND_ADDRESS:127.0.0.1}
     port: 9878
     sender-comp-id: LOB
     members: [MEMBER1, MEMBER2]

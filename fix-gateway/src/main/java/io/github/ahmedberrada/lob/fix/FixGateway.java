@@ -42,6 +42,7 @@ public final class FixGateway implements AutoCloseable {
         settings.setString("ConnectionType", "acceptor");
         settings.setString("BeginString", BEGIN_STRING);
         settings.setString("SenderCompID", config.senderCompId());
+        settings.setString("SocketAcceptAddress", config.bindAddress());
         settings.setLong("SocketAcceptPort", config.port());
         settings.setString("NonStopSession", "Y");               // sequence numbers persist; no daily reset yet
         settings.setString("UseDataDictionary", "Y");

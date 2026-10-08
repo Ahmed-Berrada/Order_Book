@@ -55,7 +55,9 @@ the endpoints, so the published contract cannot silently drift from the implemen
 ## Not in this step
 
 Authentication and authorisation (phase 8: OAuth2/OIDC, mutual TLS) and per-member rate limits
-(phase 4/5). Until then the API must not be exposed beyond a trusted network.
+(phase 4/5). Until then the server listens on the loopback interface by default (`server.address`,
+overridable with `LOB_BIND_ADDRESS`), so exposing it is a deliberate act, and must stay within a
+trusted network.
 
 ## Consequences
 
