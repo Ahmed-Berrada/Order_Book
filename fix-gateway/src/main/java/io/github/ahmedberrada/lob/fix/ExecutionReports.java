@@ -9,6 +9,8 @@ import quickfix.UtcTimestampPrecision;
 import quickfix.field.AvgPx;
 import quickfix.field.ClOrdID;
 import quickfix.field.CumQty;
+import quickfix.field.CxlRejReason;
+import quickfix.field.CxlRejResponseTo;
 import quickfix.field.ExecID;
 import quickfix.field.ExecType;
 import quickfix.field.LastPx;
@@ -18,11 +20,13 @@ import quickfix.field.OrdRejReason;
 import quickfix.field.OrdStatus;
 import quickfix.field.OrderID;
 import quickfix.field.OrderQty;
+import quickfix.field.OrigClOrdID;
 import quickfix.field.Side;
 import quickfix.field.Symbol;
 import quickfix.field.Text;
 import quickfix.field.TransactTime;
 import quickfix.fix44.ExecutionReport;
+import quickfix.fix44.OrderCancelReject;
 
 /**
  * Builds ExecutionReports (Rules of Engagement, "Execution reports"). Decimal fields are written by tag
@@ -82,9 +86,13 @@ final class ExecutionReports {
      */
     static ExecutionReport withoutOrder(char execType, String clOrdId, String symbol, char side,
             BigDecimal orderQuantity, Integer ordRejReason, String text) {
-        long nowMicros = Math.multiplyExact(System.currentTimeMillis(), 1_000L);
-        ExecutionReport report = base(NO_ORDER_ID, GATEWAY_EXEC_PREFIX + GATEWAY_EXEC_IDS.incrementAndGet(),
-                execType, execType, clOrdId, symbol, side, 0, nowMicros);
+        return withoutOrder(execType, execType, clOrdId, symbol, side, orderQuantity, ordRejReason, text);
+    }
+
+    static ExecutionReport withoutOrder(char execType, char ordStatus, String clOrdId, String symbol, char side,
+            BigDecimal orderQuantity, Integer ordRejReason, String text) {
+        ExecutionReport report = base(NO_ORDER_ID, gatewayExecId(), execType, ordStatus, clOrdId, symbol, side, 0,
+                nowMicros());
         if (orderQuantity != null) {
             report.setDecimal(OrderQty.FIELD, orderQuantity);
         }
@@ -98,6 +106,50 @@ final class ExecutionReports {
             report.setString(Text.FIELD, text);
         }
         return report;
+    }
+
+    /** A confirmed cancel requested over FIX: ClOrdID is the request's, OrigClOrdID the order's. */
+    static ExecutionReport cancelled(FixOrder order, String cancelClOrdId, long eventSequence, long timestampMicros) {
+        ExecutionReport report = of(order, ExecType.CANCELED, eventSequence, timestampMicros);
+        report.setString(ClOrdID.FIELD, cancelClOrdId);
+        report.setString(OrigClOrdID.FIELD, order.clOrdId);
+        return report;
+    }
+
+    /** A cancel whose journal write failed: it may or may not have happened (ADR-0006 §5). */
+    static ExecutionReport pendingCancel(FixOrder order, String cancelClOrdId) {
+        ExecutionReport report = of(order, ExecType.PENDING_CANCEL, gatewayExecId(), nowMicros());
+        report.setChar(OrdStatus.FIELD, OrdStatus.PENDING_CANCEL);
+        report.setString(ClOrdID.FIELD, cancelClOrdId);
+        report.setString(OrigClOrdID.FIELD, order.clOrdId);
+        report.setString(Text.FIELD, "OUTCOME_UNKNOWN");
+        return report;
+    }
+
+    /** Answer to an OrderStatusRequest on a known order. */
+    static ExecutionReport status(FixOrder order) {
+        return of(order, ExecType.ORDER_STATUS, gatewayExecId(), nowMicros());
+    }
+
+    static OrderCancelReject cancelReject(String orderId, String clOrdId, String origClOrdId, char ordStatus,
+            int reason, String text) {
+        OrderCancelReject reject = new OrderCancelReject();
+        reject.setString(OrderID.FIELD, orderId);
+        reject.setString(ClOrdID.FIELD, clOrdId);
+        reject.setString(OrigClOrdID.FIELD, origClOrdId);
+        reject.setChar(OrdStatus.FIELD, ordStatus);
+        reject.setChar(CxlRejResponseTo.FIELD, CxlRejResponseTo.ORDER_CANCEL_REQUEST);
+        reject.setInt(CxlRejReason.FIELD, reason);
+        reject.setString(Text.FIELD, text);
+        return reject;
+    }
+
+    private static String gatewayExecId() {
+        return GATEWAY_EXEC_PREFIX + GATEWAY_EXEC_IDS.incrementAndGet();
+    }
+
+    private static long nowMicros() {
+        return Math.multiplyExact(System.currentTimeMillis(), 1_000L);
     }
 
     private static ExecutionReport base(String orderId, String execId, char execType, char ordStatus,

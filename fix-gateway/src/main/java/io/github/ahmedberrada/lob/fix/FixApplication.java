@@ -1,5 +1,7 @@
 package io.github.ahmedberrada.lob.fix;
 
+import io.github.ahmedberrada.lob.core.CancelOrder;
+import io.github.ahmedberrada.lob.core.CancelRejected;
 import io.github.ahmedberrada.lob.core.Command;
 import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.LimitOrder;
@@ -29,12 +31,14 @@ import quickfix.SessionID;
 import quickfix.SessionNotFound;
 import quickfix.UnsupportedMessageType;
 import quickfix.field.ClOrdID;
+import quickfix.field.CxlRejReason;
 import quickfix.field.ExecType;
 import quickfix.field.MsgType;
 import quickfix.field.OrdRejReason;
 import quickfix.field.OrdStatus;
 import quickfix.field.OrdType;
 import quickfix.field.OrderQty;
+import quickfix.field.OrigClOrdID;
 import quickfix.field.Price;
 import quickfix.field.Side;
 import quickfix.field.Symbol;
@@ -67,6 +71,10 @@ final class FixApplication implements Application, EventListener {
             long lots) {
     }
 
+    /** Attached to an OrderCancelRequest's command: the request's ClOrdID and the order it targets. */
+    private record CancelContext(String clOrdId, FixOrder order) {
+    }
+
     FixApplication(MatchingService service) {
         this(service, FixApplication::sendToTarget);
     }
@@ -80,6 +88,8 @@ final class FixApplication implements Application, EventListener {
     public void fromApp(Message message, SessionID session) throws FieldNotFound, UnsupportedMessageType {
         switch (message.getHeader().getString(MsgType.FIELD)) {
             case MsgType.NEW_ORDER_SINGLE -> onNewOrder(message, session);
+            case MsgType.ORDER_CANCEL_REQUEST -> onCancel(message, session);
+            case MsgType.ORDER_STATUS_REQUEST -> onStatus(message, session);
             default -> throw new UnsupportedMessageType();
         }
     }
@@ -126,6 +136,68 @@ final class FixApplication implements Application, EventListener {
                 onFailure(unwrap(failure), session, clOrdId, symbol, side, quantity);
             }
         });
+    }
+
+    // ---- OrderCancelRequest -----------------------------------------------------------------------
+
+    /**
+     * Cancels one of the session's own orders, found by OrigClOrdID: another member's ClOrdIDs are not
+     * visible, so they read as unknown (Rules of Engagement, OrderCancelRequest).
+     */
+    private void onCancel(Message request, SessionID session) throws FieldNotFound {
+        String clOrdId = request.getString(ClOrdID.FIELD);
+        String origClOrdId = request.getString(OrigClOrdID.FIELD);
+        if (!registry.reserve(session, clOrdId)) {
+            rejectCancel(session, null, clOrdId, origClOrdId, CxlRejReason.DUPLICATE_CLORDID_RECEIVED, "DUPLICATE_CLORDID");
+            return;
+        }
+        registry.refused(session, clOrdId);           // a cancel request never becomes an order
+        OrderRegistry.Slot slot = registry.slot(session, origClOrdId);
+        if (slot != null && slot.isPending()) {
+            rejectCancel(session, null, clOrdId, origClOrdId, CxlRejReason.ORDER_ALREADY_IN_PENDING_CANCEL_OR_PENDING_REPLACE_STATUS, "PENDING");
+            return;
+        }
+        FixOrder order = slot == null ? null : slot.order();
+        if (order == null || order.ordStatus() == OrdStatus.REJECTED
+                || !order.instrument.symbol().equals(request.getString(Symbol.FIELD))
+                || order.side != request.getChar(Side.FIELD)) {
+            rejectCancel(session, order, clOrdId, origClOrdId, CxlRejReason.UNKNOWN_ORDER, "UNKNOWN_ORDER");
+            return;
+        }
+        service.submit(order.instrument.symbol(), new CancelOrder(order.orderId), new CancelContext(clOrdId, order))
+                .whenComplete((batch, failure) -> {
+                    if (failure instanceof Throwable f && unwrap(f) instanceof RequestRefusedException refused) {
+                        rejectCancel(session, order, clOrdId, origClOrdId, CxlRejReason.OTHER, refused.reason().name());
+                    } else if (failure != null) {
+                        LOG.error("Outcome unknown for cancel {} {}", session, clOrdId, failure);
+                        sender.send(ExecutionReports.pendingCancel(order, clOrdId), session);
+                    }
+                });
+    }
+
+    private void rejectCancel(SessionID session, FixOrder order, String clOrdId, String origClOrdId, int reason,
+            String text) {
+        String orderId = order == null ? ExecutionReports.NO_ORDER_ID : order.fixOrderId();
+        char status = order == null ? OrdStatus.REJECTED : order.ordStatus();
+        sender.send(ExecutionReports.cancelReject(orderId, clOrdId, origClOrdId, status, reason, text), session);
+    }
+
+    // ---- OrderStatusRequest -----------------------------------------------------------------------
+
+    /** Reports the current state of one of the session's orders, found by its ClOrdID. */
+    private void onStatus(Message request, SessionID session) throws FieldNotFound {
+        String clOrdId = request.getString(ClOrdID.FIELD);
+        OrderRegistry.Slot slot = registry.slot(session, clOrdId);
+        FixOrder order = slot == null ? null : slot.order();
+        if (order != null) {
+            sender.send(ExecutionReports.status(order), session);
+            return;
+        }
+        char status = slot != null && slot.isPending() ? OrdStatus.PENDING_NEW : OrdStatus.REJECTED;
+        String text = slot == null ? "UNKNOWN_ORDER" : slot.isPending() ? "PENDING" : "REFUSED";
+        Integer reason = slot == null ? OrdRejReason.UNKNOWN_ORDER : null;
+        sender.send(ExecutionReports.withoutOrder(ExecType.ORDER_STATUS, status, clOrdId,
+                request.getString(Symbol.FIELD), request.getChar(Side.FIELD), null, reason, text), session);
     }
 
     /** Field values the venue does not support yet (Rules of Engagement, NewOrderSingle). */
@@ -196,6 +268,14 @@ final class FixApplication implements Application, EventListener {
                                 true), maker.session);
                     }
                 }
+                case OrderCancelled e when context instanceof CancelContext c -> {
+                    c.order().cancel();
+                    sender.send(ExecutionReports.cancelled(c.order(), c.clOrdId(), e.sequence(), time),
+                            c.order().session);
+                }
+                case CancelRejected e when context instanceof CancelContext c ->
+                    rejectCancel(c.order().session, c.order(), c.clOrdId(), c.order().clOrdId,
+                            CxlRejReason.TOO_LATE_TO_CANCEL, "NOT_RESTING");
                 case OrderCancelled e -> {
                     FixOrder cancelled = taker != null && taker.orderId == e.orderId()
                             ? taker : registry.byOrderId(symbol, e.orderId());
