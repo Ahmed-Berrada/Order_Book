@@ -13,10 +13,10 @@ backed by **invariant tests**, and **measured before it is optimised**.
 
 > **Status: Phase 3, Connectivity (in progress).** Price-time matching
 > ([rulebook](docs/rulebook/continuous-trading.md)) is durable, with a write-ahead journal, crash
-> recovery and a replay tool ([resilience rules](docs/rulebook/resilience.md)). The `engine-service`
-> layer now runs every listed instrument on its own writer thread with a bounded queue
-> ([order-entry rules](docs/rulebook/order-entry.md)). The REST API and FIX gateway come next
-> (see [Roadmap](#roadmap)).
+> recovery and a replay tool ([resilience rules](docs/rulebook/resilience.md)). Every listed instrument
+> runs on its own writer thread with a bounded queue ([order-entry rules](docs/rulebook/order-entry.md)),
+> and a [REST API](docs/interfaces/rest-api.md) with OpenAPI exposes order entry and book depth.
+> The FIX gateway comes next (see [Roadmap](#roadmap)).
 
 ---
 
@@ -42,8 +42,8 @@ flowchart LR
     client([HTTP client])
 
     subgraph api ["api — Spring Boot"]
-        ctrl[OrderController<br/>BookController]
-        svc[EngineService<br/>router]
+        ctrl[OrderController<br/>InstrumentController]
+        svc[MatchingService<br/>router]
     end
 
     subgraph journal ["engine-service + engine-journal — plain Java"]
@@ -77,7 +77,7 @@ flowchart LR
 | `engine-core` | Order book, matching, commands and events, snapshot/restore | JDK only, no I/O (Spring is **banned by the build**) |
 | `engine-journal` | Write-ahead journal, event journal, snapshots, recovery, replay tool | `engine-core`, JDK only |
 | `engine-service` | One writer thread and bounded queue per instrument, routing, price conversion, refusals | `engine-journal`, JDK only |
-| `api` | REST, validation, JSON, threads per symbol | `engine-core`, Spring Boot |
+| `api` | REST adapter: JSON, validation, problem details, OpenAPI, configuration | `engine-service`, Spring Boot |
 | `engine-bench` *(phase 6)* | JMH micro-benchmarks | `engine-core`, JMH |
 
 Why the core is isolated:
@@ -232,25 +232,27 @@ classDiagram
     PriceLevel "1" o-- "*" Order : FIFO
 ```
 
-### Sequence diagram: `POST /orders` (phase 3)
+### Sequence diagram: `POST /orders`
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor C as Client
     participant Ctl as OrderController
-    participant Svc as EngineService
-    participant W as SymbolWorker (AAPL thread)
-    participant E as MatchingEngine
+    participant Svc as MatchingService
+    participant W as SymbolWorker (lob-AAPL thread)
+    participant J as JournaledEngine
 
-    C->>Ctl: POST /orders {symbol, side, type, price, qty}
-    Ctl->>Ctl: validate DTO, convert price to ticks
-    Ctl->>Svc: submit(symbol, LimitOrder)
-    Svc->>W: enqueue(command) : Future
-    W->>E: process(LimitOrder)
-    E-->>W: [OrderAccepted, TradeExecuted...]
-    W-->>Svc: complete Future
-    Svc-->>Ctl: events
+    C->>Ctl: POST /api/v1/instruments/AAPL/orders {side, type, price, quantity}
+    Ctl->>Ctl: validate JSON, convert price to ticks (OE-002)
+    Ctl->>Svc: submit("AAPL", LimitOrder)
+    Svc->>W: enqueue : CompletableFuture
+    Note over Ctl: servlet thread released
+    W->>J: process(LimitOrder)
+    J->>J: append to commands.journal, fsync
+    J->>J: match, append events
+    J-->>W: EventBatch
+    W-->>Ctl: complete future
     Ctl-->>C: 201 Created {orderId, status, trades}
 ```
 
@@ -273,7 +275,7 @@ mutated by a single thread and never needs a lock.
 ## Key technical decisions
 
 The full rationale is in [ADR-0001](docs/adr/0001-foundations.md), [ADR-0002](docs/adr/0002-core-engine-model.md)
-[ADR-0003](docs/adr/0003-journal-and-recovery.md) and [ADR-0004](docs/adr/0004-service-layer.md).
+[ADR-0003](docs/adr/0003-journal-and-recovery.md) [ADR-0004](docs/adr/0004-service-layer.md) and [ADR-0005](docs/adr/0005-rest-api.md).
 The matching behaviour itself is specified in the [rulebook](docs/rulebook/continuous-trading.md).
 
 | Decision | Choice | Reason |
@@ -298,10 +300,36 @@ Requirements: **JDK 21+**. Maven is not required because the wrapper is included
 ```bash
 ./mvnw verify                                   # build, tests and quality gates
 ./mvnw -pl engine-core,engine-journal,engine-service -am -Pmutation verify   # mutation testing (PIT), slower
-./mvnw -pl api spring-boot:run                  # start the API on :8080
+./mvnw -pl api -am install -DskipTests && \
+  ./mvnw -pl api spring-boot:run                # start the venue on :8080 (journals in ./data)
 ```
 
 On Windows, use `mvnw.cmd` in place of `./mvnw`.
+
+### Trading through the REST API
+
+The full contract is in [`docs/interfaces/rest-api.md`](docs/interfaces/rest-api.md); a Swagger UI is
+served at <http://localhost:8080/swagger-ui.html>.
+
+```bash
+curl -s -X POST localhost:8080/api/v1/instruments/AAPL/orders -H 'Content-Type: application/json' \
+     -d '{"side":"SELL","type":"LIMIT","price":"185.30","quantity":10}'
+curl -s -X POST localhost:8080/api/v1/instruments/AAPL/orders -H 'Content-Type: application/json' \
+     -d '{"side":"BUY","type":"LIMIT","price":"185.35","quantity":4}'
+```
+
+```json
+{"orderId":2,"status":"FILLED","commandSequence":2,"timestamp":"2026-10-08T12:21:19.603850Z",
+ "filledQuantity":4,"restingQuantity":0,"cancelledQuantity":0,
+ "trades":[{"sequence":4,"makerOrderId":1,"price":"185.30","quantity":4}]}
+```
+
+An off-tick price is refused before it reaches the engine:
+
+```json
+{"status":422,"title":"Price off the tick grid","reason":"OFF_TICK_PRICE",
+ "detail":"The price is not a multiple of the tick size of AAPL","instance":"/api/v1/instruments/AAPL/orders"}
+```
 
 ### Replaying a journal
 
@@ -342,7 +370,10 @@ Verification    OK: 5 event batches identical to the event journal
 | Concurrency | 8 concurrent clients, 2 instruments | Each instrument's acknowledgements equal sequential processing in sequence order |
 | Overload, halt, shutdown | Worker held in a blocking test clock | Full queues refuse, failed writes halt, shutdown drains the queue |
 | Quality gates | JaCoCo, PIT | ≥ 90 % line and branch coverage; ≥ 80 % mutation score on every engine module |
-| Web layer *(phase 3)* | `@WebMvcTest` | Validation and HTTP status codes |
+| REST API | Spring `MockMvcTester` on the real service | Every outcome's HTTP status and problem `reason`; strict JSON (a test fails if it is relaxed) |
+| Refusal mapping | `@WebMvcTest` with a stubbed service | Overload (`Retry-After`), halt, shutdown and unknown-outcome responses |
+| Contract | OpenAPI test | The published document lists exactly the implemented endpoints |
+| End to end | Real port, `java.net.http`, two application starts | Concurrent orders over HTTP; the book survives a restart |
 | Performance *(phase 6)* | JMH | Throughput and p50 / p99 / p99.9 latency, with published methodology |
 
 ---|---|---|
@@ -394,7 +425,7 @@ Order_Book/
 ├── engine-core/        pure-Java matching engine (no Spring, no I/O, enforced)
 ├── engine-journal/     write-ahead journal, snapshots, recovery, replay tool
 ├── engine-service/     writer thread per instrument, routing, price conversion
-├── api/                Spring Boot REST adapter
+├── api/                Spring Boot REST adapter, OpenAPI
 ├── docs/adr/           architecture decision records
 ├── docs/rulebook/      venue rules, cited by tests
 ├── docs/interfaces/    file and wire formats
