@@ -23,6 +23,7 @@
 
     <modules>
         <module>engine-core</module>
+        <module>engine-journal</module>
         <module>api</module>
     </modules>
 
@@ -37,9 +38,20 @@
         <pitest-junit5-plugin.version>1.2.3</pitest-junit5-plugin.version>
     </properties>
 
-    <!-- Test libraries not managed by the Spring Boot BOM. -->
+    <!-- Internal modules, and test libraries not managed by the Spring Boot BOM. -->
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>io.github.ahmedberrada.lob</groupId>
+                <artifactId>engine-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.ahmedberrada.lob</groupId>
+                <artifactId>engine-core</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
             <dependency>
                 <groupId>net.jqwik</groupId>
                 <artifactId>jqwik</artifactId>

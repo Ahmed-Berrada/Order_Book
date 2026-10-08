@@ -12,6 +12,7 @@ import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
 import net.jqwik.api.Tuple;
+import net.jqwik.api.constraints.IntRange;
 
 /**
  * Property-based tests: random command streams, checked against the rulebook invariants and against
@@ -148,6 +149,25 @@ class MatchingEnginePropertyTest {
         List<Event> secondRun = commands.stream().flatMap(c -> second.process(c).stream()).toList();
 
         assertThat(secondRun).isEqualTo(firstRun);
+    }
+
+    @Property
+    @Rulebook({"RS-010", "RS-005"})
+    void restoringASnapshotAtAnyPointChangesNothing(
+            @ForAll("commands") List<Command> commands, @ForAll @IntRange(max = 150) int split) {
+        int at = Math.min(split, commands.size());
+        MatchingEngine uninterrupted = new MatchingEngine(INSTRUMENT);
+        MatchingEngine beforeSnapshot = new MatchingEngine(INSTRUMENT);
+        commands.subList(0, at).forEach(command -> {
+            uninterrupted.process(command);
+            beforeSnapshot.process(command);
+        });
+
+        MatchingEngine restored = MatchingEngine.restore(beforeSnapshot.snapshot());
+        for (Command command : commands.subList(at, commands.size())) {
+            assertThat(restored.process(command)).isEqualTo(uninterrupted.process(command));
+        }
+        assertThat(restored.snapshot()).isEqualTo(uninterrupted.snapshot());
     }
 
     private static long quantityOf(Command command) {
