@@ -112,15 +112,15 @@ final class SymbolWorker implements AutoCloseable {
     }
 
     private void runLoop() {
-        try {
-            while (accepting || !queue.isEmpty()) {
+        while (accepting || !queue.isEmpty()) {
+            try {
                 Task<?> task = queue.poll(10, TimeUnit.MILLISECONDS);
                 if (task != null) {
                     task.run();
                 }
+            } catch (InterruptedException e) {
+                // This thread is stopped by close(), never by interruption: keep serving the queue.
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
         }
     }
 
