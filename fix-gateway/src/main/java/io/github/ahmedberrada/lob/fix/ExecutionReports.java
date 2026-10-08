@@ -42,18 +42,26 @@ final class ExecutionReports {
 
     /** A report on an order's current state, for an engine event with this sequence number. */
     static ExecutionReport of(FixOrder order, char execType, long eventSequence, long timestampMicros) {
-        ExecutionReport report = base(order.fixOrderId(), order.instrument.symbol() + "-" + eventSequence,
-                execType, order.ordStatus(), order.clOrdId, order.instrument.symbol(), order.side,
-                order.orderQuantity, timestampMicros);
+        return of(order, execType, order.instrument.symbol() + "-" + eventSequence, timestampMicros);
+    }
+
+    private static ExecutionReport of(FixOrder order, char execType, String execId, long timestampMicros) {
+        ExecutionReport report = base(order.fixOrderId(), execId, execType, order.ordStatus(), order.clOrdId,
+                order.instrument.symbol(), order.side, order.orderQuantity, timestampMicros);
         report.setDecimal(CumQty.FIELD, BigDecimal.valueOf(order.cumulativeQuantity()));
         report.setDecimal(LeavesQty.FIELD, BigDecimal.valueOf(order.leavesQuantity()));
         report.setDecimal(AvgPx.FIELD, order.averagePrice());
         return report;
     }
 
-    /** A fill: the order's state after it, plus the fill's price and quantity. */
-    static ExecutionReport trade(FixOrder order, long eventSequence, long timestampMicros, long priceTicks, long quantity) {
-        ExecutionReport report = of(order, ExecType.TRADE, eventSequence, timestampMicros);
+    /**
+     * A fill: the order's state after it, plus the fill's price and quantity. Taker and maker are told
+     * of the same trade event; the maker's ExecID gets a {@code -M} suffix so both stay unique.
+     */
+    static ExecutionReport trade(FixOrder order, long eventSequence, long timestampMicros, long priceTicks,
+            long quantity, boolean maker) {
+        String execId = order.instrument.symbol() + "-" + eventSequence + (maker ? "-M" : "");
+        ExecutionReport report = of(order, ExecType.TRADE, execId, timestampMicros);
         report.setDecimal(LastPx.FIELD, order.instrument.toPrice(priceTicks));
         report.setDecimal(LastQty.FIELD, BigDecimal.valueOf(quantity));
         return report;

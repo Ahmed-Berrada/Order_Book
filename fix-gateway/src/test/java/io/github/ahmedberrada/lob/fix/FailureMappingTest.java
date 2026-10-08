@@ -38,7 +38,7 @@ class FailureMappingTest {
 
     private Message reportFor(Throwable failure) throws Exception {
         when(service.instrument("AAPL")).thenReturn(Optional.of(FixVenue.AAPL));
-        when(service.submit(anyString(), any())).thenReturn(CompletableFuture.failedFuture(failure));
+        when(service.submit(anyString(), any(), any())).thenReturn(CompletableFuture.failedFuture(failure));
         sent.clear();
         application.fromApp(Orders.market("B-" + System.nanoTime(), Side.BUY, "1"), SESSION);
         assertThat(sent).hasSize(1);
