@@ -162,6 +162,11 @@ class MatchingServiceTest {
         try (MatchingService service = start()) {
             assertThatNullPointerException().isThrownBy(() -> service.submit("AAPL", null));
             assertThatIllegalArgumentException().isThrownBy(() -> service.book("AAPL", -1));
+            service.submit("AAPL", new LimitOrder(Side.BUY, 100, 1)).join();
+            assertThat(service.book("AAPL", 0).join().bids()).isEmpty();
+        }
+        try (MatchingService smallest = MatchingService.start(directory, List.of(MSFT), OPTIONS, time, 1)) {
+            assertThat(smallest.submit("MSFT", new MarketOrder(Side.BUY, 1)).join().commandSequence()).isEqualTo(1);
         }
     }
 
