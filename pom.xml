@@ -24,6 +24,7 @@
     <modules>
         <module>engine-core</module>
         <module>engine-journal</module>
+        <module>engine-service</module>
         <module>api</module>
     </modules>
 
@@ -51,6 +52,16 @@
                 <artifactId>engine-core</artifactId>
                 <version>${project.version}</version>
                 <type>test-jar</type>
+            </dependency>
+            <dependency>
+                <groupId>io.github.ahmedberrada.lob</groupId>
+                <artifactId>engine-journal</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.ahmedberrada.lob</groupId>
+                <artifactId>engine-service</artifactId>
+                <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>net.jqwik</groupId>

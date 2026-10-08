@@ -147,7 +147,12 @@ public final class JournaledEngine implements AutoCloseable {
     /**
      * Journals a command, processes it, and records its events (RS-001, RS-006, RS-007).
      *
-     * @throws UncheckedIOException  if the journal cannot be written; the instance then stops
+     * <p>Once the command record is written, the command is part of the instrument's history and its
+     * events are returned, even if writing the events or a snapshot then fails. In that case the
+     * instance stops ({@link #isStopped()}) and recovery completes the event journal.
+     *
+     * @throws UncheckedIOException  if the command journal cannot be written. The command may or may
+     *                               not have been recorded; the instance stops
      * @throws IllegalStateException if the instance has stopped or is closed
      */
     public EventBatch process(Command command) {
@@ -169,11 +174,13 @@ public final class JournaledEngine implements AutoCloseable {
         EventBatch batch = new EventBatch(sequence, timestamp, engine.process(command));
         try {
             events.append(Codec.encodeBatch(batch));
+            if (options.snapshotInterval() > 0 && ++commandsSinceSnapshot >= options.snapshotInterval()) {
+                snapshots.write(lastCommandSequence, engine.snapshot());
+                commandsSinceSnapshot = 0;
+            }
         } catch (IOException e) {
-            throw stop("event journal write failed", e);
-        }
-        if (options.snapshotInterval() > 0 && ++commandsSinceSnapshot >= options.snapshotInterval()) {
-            snapshot();
+            // The command is journaled and applied: acknowledge it, but accept nothing more.
+            failed = true;
         }
         return batch;
     }
@@ -192,6 +199,11 @@ public final class JournaledEngine implements AutoCloseable {
     /** Complete current state of the engine, as a snapshot would record it. */
     EngineSnapshot state() {
         return engine.snapshot();
+    }
+
+    /** Whether an I/O failure has stopped this instance; it then refuses every command. */
+    public boolean isStopped() {
+        return failed;
     }
 
     /** Read-only view of the resting orders. */
