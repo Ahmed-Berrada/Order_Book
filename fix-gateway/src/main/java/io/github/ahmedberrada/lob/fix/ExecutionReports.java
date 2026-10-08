@@ -1,0 +1,117 @@
+package io.github.ahmedberrada.lob.fix;
+
+import io.github.ahmedberrada.lob.fix.OrderRegistry.FixOrder;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.concurrent.atomic.AtomicLong;
+import quickfix.UtcTimestampPrecision;
+import quickfix.field.AvgPx;
+import quickfix.field.ClOrdID;
+import quickfix.field.CumQty;
+import quickfix.field.ExecID;
+import quickfix.field.ExecType;
+import quickfix.field.LastPx;
+import quickfix.field.LastQty;
+import quickfix.field.LeavesQty;
+import quickfix.field.OrdRejReason;
+import quickfix.field.OrdStatus;
+import quickfix.field.OrderID;
+import quickfix.field.OrderQty;
+import quickfix.field.Side;
+import quickfix.field.Symbol;
+import quickfix.field.Text;
+import quickfix.field.TransactTime;
+import quickfix.fix44.ExecutionReport;
+
+/**
+ * Builds ExecutionReports (Rules of Engagement, "Execution reports"). Decimal fields are written by tag
+ * as {@code BigDecimal}: QuickFIX/J's typed price and quantity fields are {@code double}.
+ */
+final class ExecutionReports {
+
+    /** No order exists: refused before the engine, or outcome unknown. */
+    static final String NO_ORDER_ID = "NONE";
+
+    /** ExecIDs for reports with no engine event: unique for this process start. */
+    private static final String GATEWAY_EXEC_PREFIX = "GW-" + System.currentTimeMillis() + "-";
+    private static final AtomicLong GATEWAY_EXEC_IDS = new AtomicLong();
+
+    private ExecutionReports() {
+    }
+
+    /** A report on an order's current state, for an engine event with this sequence number. */
+    static ExecutionReport of(FixOrder order, char execType, long eventSequence, long timestampMicros) {
+        ExecutionReport report = base(order.fixOrderId(), order.instrument.symbol() + "-" + eventSequence,
+                execType, order.ordStatus(), order.clOrdId, order.instrument.symbol(), order.side,
+                order.orderQuantity, timestampMicros);
+        report.setDecimal(CumQty.FIELD, BigDecimal.valueOf(order.cumulativeQuantity()));
+        report.setDecimal(LeavesQty.FIELD, BigDecimal.valueOf(order.leavesQuantity()));
+        report.setDecimal(AvgPx.FIELD, order.averagePrice());
+        return report;
+    }
+
+    /** A fill: the order's state after it, plus the fill's price and quantity. */
+    static ExecutionReport trade(FixOrder order, long eventSequence, long timestampMicros, long priceTicks, long quantity) {
+        ExecutionReport report = of(order, ExecType.TRADE, eventSequence, timestampMicros);
+        report.setDecimal(LastPx.FIELD, order.instrument.toPrice(priceTicks));
+        report.setDecimal(LastQty.FIELD, BigDecimal.valueOf(quantity));
+        return report;
+    }
+
+    /** An engine rejection: the order consumed an ID but never rested. */
+    static ExecutionReport engineRejection(FixOrder order, long eventSequence, long timestampMicros,
+            int ordRejReason, String text) {
+        ExecutionReport report = of(order, ExecType.REJECTED, eventSequence, timestampMicros);
+        report.setInt(OrdRejReason.FIELD, ordRejReason);
+        report.setString(Text.FIELD, text);
+        return report;
+    }
+
+    /**
+     * A report with no engine event behind it: a refusal before the engine ({@code ExecType=Rejected}),
+     * or an unknown outcome ({@code ExecType=PendingNew}).
+     */
+    static ExecutionReport withoutOrder(char execType, String clOrdId, String symbol, char side,
+            BigDecimal orderQuantity, Integer ordRejReason, String text) {
+        long nowMicros = Math.multiplyExact(System.currentTimeMillis(), 1_000L);
+        ExecutionReport report = base(NO_ORDER_ID, GATEWAY_EXEC_PREFIX + GATEWAY_EXEC_IDS.incrementAndGet(),
+                execType, execType, clOrdId, symbol, side, 0, nowMicros);
+        if (orderQuantity != null) {
+            report.setDecimal(OrderQty.FIELD, orderQuantity);
+        }
+        report.setDecimal(CumQty.FIELD, BigDecimal.ZERO);
+        report.setDecimal(LeavesQty.FIELD, BigDecimal.ZERO);
+        report.setDecimal(AvgPx.FIELD, BigDecimal.ZERO);
+        if (ordRejReason != null) {
+            report.setInt(OrdRejReason.FIELD, ordRejReason);
+        }
+        if (text != null) {
+            report.setString(Text.FIELD, text);
+        }
+        return report;
+    }
+
+    private static ExecutionReport base(String orderId, String execId, char execType, char ordStatus,
+            String clOrdId, String symbol, char side, long orderQuantity, long timestampMicros) {
+        ExecutionReport report = new ExecutionReport();
+        report.setString(OrderID.FIELD, orderId);
+        report.setString(ExecID.FIELD, execId);
+        report.setChar(ExecType.FIELD, execType);
+        report.setChar(OrdStatus.FIELD, ordStatus);
+        report.setString(ClOrdID.FIELD, clOrdId);
+        report.setString(Symbol.FIELD, symbol);
+        report.setChar(Side.FIELD, side);
+        if (orderQuantity > 0) {
+            report.setDecimal(OrderQty.FIELD, BigDecimal.valueOf(orderQuantity));
+        }
+        report.setUtcTimeStamp(TransactTime.FIELD, utc(timestampMicros), UtcTimestampPrecision.MICROS);
+        return report;
+    }
+
+    /** Microseconds since the epoch (RS-006) as a UTC date-time. */
+    static LocalDateTime utc(long micros) {
+        return LocalDateTime.ofEpochSecond(Math.floorDiv(micros, 1_000_000L),
+                (int) Math.floorMod(micros, 1_000_000L) * 1_000, ZoneOffset.UTC);
+    }
+}
