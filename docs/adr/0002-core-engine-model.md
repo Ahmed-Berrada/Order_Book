@@ -54,7 +54,7 @@ market data without reading the book.
 
 | Topic | Deferred to | Why not now |
 |---|---|---|
-| Event timestamps | Journal (phase 2) | For replay, a timestamp must be taken at ingress and journaled with the command. A clock read inside the engine now would be replaced. |
+| Event timestamps | Journal (phase 2, done in ADR-0003) | For replay, a timestamp must be taken at ingress and journaled with the command. A clock read inside the engine now would be replaced. |
 | Client order ID and duplicate detection | FIX gateway (phase 3) | Uniqueness of `ClOrdID` is defined per member session, and the core has no notion of member yet. |
 | Time in force (DAY, GTC) | Trading phases (phase 4) | Without an end-of-day event, DAY and GTC behave identically. |
 
