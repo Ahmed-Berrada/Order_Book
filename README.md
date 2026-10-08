@@ -11,10 +11,11 @@ a REST API on Spring Boot, and published JMH benchmarks.
 The goal is engineering rigour rather than feature count. The engine is **deterministic**,
 backed by **invariant tests**, and **measured before it is optimised**.
 
-> **Status: Phase 2, Durability & audit.** Price-time matching of LIMIT and MARKET orders
-> ([rulebook](docs/rulebook/continuous-trading.md)) is now durable: a write-ahead command journal,
-> an event journal, snapshots, crash recovery proven by `kill -9` tests, and a replay tool for audits
-> ([resilience rules](docs/rulebook/resilience.md)). The service layer and FIX connectivity come next
+> **Status: Phase 3, Connectivity (in progress).** Price-time matching
+> ([rulebook](docs/rulebook/continuous-trading.md)) is durable, with a write-ahead journal, crash
+> recovery and a replay tool ([resilience rules](docs/rulebook/resilience.md)). The `engine-service`
+> layer now runs every listed instrument on its own writer thread with a bounded queue
+> ([order-entry rules](docs/rulebook/order-entry.md)). The REST API and FIX gateway come next
 > (see [Roadmap](#roadmap)).
 
 ---
@@ -45,7 +46,7 @@ flowchart LR
         svc[EngineService<br/>router]
     end
 
-    subgraph journal ["engine-journal — plain Java, file I/O"]
+    subgraph journal ["engine-service + engine-journal — plain Java"]
         w1[SymbolWorker AAPL<br/>single thread]
         w2[SymbolWorker MSFT<br/>single thread]
         j1[(commands + events<br/>journal AAPL)]
@@ -75,6 +76,7 @@ flowchart LR
 |---|---|---|
 | `engine-core` | Order book, matching, commands and events, snapshot/restore | JDK only, no I/O (Spring is **banned by the build**) |
 | `engine-journal` | Write-ahead journal, event journal, snapshots, recovery, replay tool | `engine-core`, JDK only |
+| `engine-service` | One writer thread and bounded queue per instrument, routing, price conversion, refusals | `engine-journal`, JDK only |
 | `api` | REST, validation, JSON, threads per symbol | `engine-core`, Spring Boot |
 | `engine-bench` *(phase 6)* | JMH micro-benchmarks | `engine-core`, JMH |
 
@@ -101,7 +103,7 @@ so they run in parallel with no locks.
 | **Single Writer** (LMAX-style) | `SymbolWorker`: one thread owns one `OrderBook` | No locks and no races on the critical path. The result is deterministic. Real exchanges work this way. |
 | **Command → Events** | `MatchingEngine.process(Command) : List<Event>` | One input and one output, with no hidden side effects. Tests read as "given these orders, expect these events". Replay comes for free (phase 2). |
 | **Algebraic data types** (sealed interfaces + records) | `Command`, `Event` | Java 21 `switch` pattern matching is **exhaustive**: forgetting to handle a case is a compile error. |
-| **Router** | `EngineService` sends a command to the worker that owns its symbol | Keeps concurrency out of the domain. |
+| **Router** | `MatchingService` sends a command to the `SymbolWorker` that owns its symbol | Keeps concurrency out of the domain. |
 | **Write-ahead log + snapshots** | `JournaledEngine`: journal the command, then process it | Crash recovery is a replay. The same mechanism serves audit and debugging. |
 | **Adapter** (light hexagonal) | `api` translates HTTP and decimal prices to and from core commands and ticks | The domain stays independent of the transport. |
 
@@ -271,7 +273,7 @@ mutated by a single thread and never needs a lock.
 ## Key technical decisions
 
 The full rationale is in [ADR-0001](docs/adr/0001-foundations.md), [ADR-0002](docs/adr/0002-core-engine-model.md)
-and [ADR-0003](docs/adr/0003-journal-and-recovery.md).
+[ADR-0003](docs/adr/0003-journal-and-recovery.md) and [ADR-0004](docs/adr/0004-service-layer.md).
 The matching behaviour itself is specified in the [rulebook](docs/rulebook/continuous-trading.md).
 
 | Decision | Choice | Reason |
@@ -283,6 +285,7 @@ The matching behaviour itself is specified in the [rulebook](docs/rulebook/conti
 | Order IDs | Assigned by the engine, per instrument | Deterministic replay ([ADR-0002](docs/adr/0002-core-engine-model.md)). |
 | Ordering and time | Gap-free sequence numbers; one µs UTC timestamp per command, taken at ingress and journaled | Determinism and reproducible replay ([ADR-0003](docs/adr/0003-journal-and-recovery.md)). |
 | Durability | Write-ahead journal per instrument, CRC-framed, fsync per command by default | No acknowledged order is lost; journals are never rewritten (record keeping). |
+| Overload | Bounded queue per instrument; a full queue refuses at once (`OVERLOADED`) | Predictable latency instead of unbounded queuing ([ADR-0004](docs/adr/0004-service-layer.md)). |
 | Errors | Typed `OrderRejected(reason)`, no exceptions on the hot path | Rejection is a business outcome, not an error. |
 | Instruments | Declared at startup (`application.yml`) | Exchanges do not create symbols on demand. |
 
@@ -294,7 +297,7 @@ Requirements: **JDK 21+**. Maven is not required because the wrapper is included
 
 ```bash
 ./mvnw verify                                   # build, tests and quality gates
-./mvnw -pl engine-core,engine-journal -am -Pmutation verify   # mutation testing (PIT), slower
+./mvnw -pl engine-core,engine-journal,engine-service -am -Pmutation verify   # mutation testing (PIT), slower
 ./mvnw -pl api spring-boot:run                  # start the API on :8080
 ```
 
@@ -336,7 +339,9 @@ Verification    OK: 5 event batches identical to the event journal
 | Crash recovery | Second JVM killed with SIGKILL | No acknowledged command lost; recovered state equals a fresh replay |
 | Journal properties | jqwik | Cutting either journal at any byte recovers exactly the complete commands |
 | Corruption | JUnit | Damaged records, sequence gaps, foreign or swapped files are refused |
-| Quality gates | JaCoCo, PIT | ≥ 90 % line and branch coverage; ≥ 80 % mutation score on `engine-core` and `engine-journal` |
+| Concurrency | 8 concurrent clients, 2 instruments | Each instrument's acknowledgements equal sequential processing in sequence order |
+| Overload, halt, shutdown | Worker held in a blocking test clock | Full queues refuse, failed writes halt, shutdown drains the queue |
+| Quality gates | JaCoCo, PIT | ≥ 90 % line and branch coverage; ≥ 80 % mutation score on every engine module |
 | Web layer *(phase 3)* | `@WebMvcTest` | Validation and HTTP status codes |
 | Performance *(phase 6)* | JMH | Throughput and p50 / p99 / p99.9 latency, with published methodology |
 
@@ -388,6 +393,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 Order_Book/
 ├── engine-core/        pure-Java matching engine (no Spring, no I/O, enforced)
 ├── engine-journal/     write-ahead journal, snapshots, recovery, replay tool
+├── engine-service/     writer thread per instrument, routing, price conversion
 ├── api/                Spring Boot REST adapter
 ├── docs/adr/           architecture decision records
 ├── docs/rulebook/      venue rules, cited by tests
