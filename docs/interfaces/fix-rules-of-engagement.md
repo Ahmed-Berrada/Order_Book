@@ -32,6 +32,7 @@ Unsupported application messages get a `BusinessMessageReject` (`35=j`).
 | 38 | OrderQty | Whole lots |
 | 59 | TimeInForce | Optional. Limit: `0` Day (default) and `1` GTC rest until cancelled, `3` IOC, `4` FOK. Market: `0` Day (default) and `3` mean IOC, `4` FOK; `1` GTC is rejected (OT-001). Other values are refused |
 | 18 | ExecInst | Optional, limit orders only: `6` Participate don't initiate, i.e. post-only (OT-004). Other values are refused |
+| 111 | MaxFloor | Optional, limit GTC orders only: the peak of an [iceberg](../rulebook/iceberg-orders.md) order, in whole lots, at most `OrderQty` (IC-001) |
 | 60 | TransactTime | Required by FIX; the venue's own timestamp is authoritative |
 
 ### OrderCancelRequest (`35=F`)
@@ -80,7 +81,8 @@ cancelled or replaced by another channel (for example an operator over REST) get
 `Canceled` or `Replaced` report on its owner's session.
 
 An order accepted and filled by the same command gets a `New` report, then one `Trade` report per
-fill, in execution order.
+fill, in execution order. An iceberg is reported like any order: `LeavesQty` is its whole remainder,
+hidden quantity included, and its refills produce no report.
 
 ### Rejections
 
@@ -91,9 +93,9 @@ fill, in execution order.
 | Quantity above the instrument maximum | `3` Order exceeds limit | `QUANTITY_ABOVE_MAXIMUM` |
 | Price above the instrument maximum | `3` Order exceeds limit | `PRICE_ABOVE_MAXIMUM` |
 | Duplicate ClOrdID | `6` Duplicate order | `DUPLICATE_CLORDID` |
-| Unsupported field value (Side other than buy/sell, TimeInForce, ExecInst, OrdType), price or ExecInst on a market order, price missing on a limit order | `11` Unsupported order characteristic | `UNSUPPORTED_SIDE`, `UNSUPPORTED_TIME_IN_FORCE`, `UNSUPPORTED_EXEC_INST`, `UNSUPPORTED_ORD_TYPE`, `PRICE_NOT_ALLOWED_FOR_MARKET`, `POST_ONLY_NOT_ALLOWED_FOR_MARKET`, `PRICE_REQUIRED_FOR_LIMIT` |
+| Unsupported field value (Side other than buy/sell, TimeInForce, ExecInst, OrdType), price or ExecInst on a market order, price missing on a limit order | `11` Unsupported order characteristic | `UNSUPPORTED_SIDE`, `UNSUPPORTED_TIME_IN_FORCE`, `UNSUPPORTED_EXEC_INST`, `UNSUPPORTED_ORD_TYPE`, `PRICE_NOT_ALLOWED_FOR_MARKET`, `POST_ONLY_NOT_ALLOWED_FOR_MARKET`, `MAX_FLOOR_NOT_ALLOWED_FOR_MARKET`, `PRICE_REQUIRED_FOR_LIMIT` |
 | Time in force not allowed for the order (GTC market order, post-only IOC or FOK) | `11` Unsupported order characteristic | `INVALID_TIME_IN_FORCE` |
-| Zero, negative or fractional quantity | `13` Incorrect quantity | `INVALID_QUANTITY`, `FRACTIONAL_QUANTITY` |
+| Zero, negative or fractional quantity or MaxFloor; MaxFloor above the quantity or on an IOC or FOK order | `13` Incorrect quantity | `INVALID_QUANTITY`, `FRACTIONAL_QUANTITY`, `INVALID_DISPLAY_QUANTITY` |
 | Off-tick or non-positive price, no liquidity, post-only order that would trade, overload, halt | `99` Other | `OFF_TICK_PRICE`, `INVALID_PRICE`, `NO_LIQUIDITY`, `POST_ONLY_WOULD_TRADE`, `OVERLOADED`, `HALTED` |
 
 Rejections by the engine carry the `OrderID` they consumed (CT-010); refusals before the engine carry
