@@ -13,6 +13,7 @@ import io.github.ahmedberrada.lob.core.OrderAccepted;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
 import io.github.ahmedberrada.lob.core.OrderRejected;
 import io.github.ahmedberrada.lob.core.OrderReplaced;
+import io.github.ahmedberrada.lob.core.OrderReplenished;
 import io.github.ahmedberrada.lob.core.OrderRested;
 import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
@@ -40,7 +41,7 @@ import java.util.List;
 final class Codec {
 
     static final int MAGIC = 0x4C4F424A;            // "LOBJ"
-    static final short FORMAT_VERSION = 2;
+    static final short FORMAT_VERSION = 3;
 
     enum Kind {
         COMMANDS(1), EVENTS(2), SNAPSHOT(3);
@@ -118,6 +119,7 @@ final class Codec {
                     out.writeLong(order.quantity());
                     out.writeByte(tifCode(order.timeInForce()));
                     out.writeBoolean(order.postOnly());
+                    out.writeLong(order.displayQuantity());
                 }
                 case MarketOrder order -> {
                     out.writeByte(2);
@@ -145,7 +147,8 @@ final class Codec {
             long timestamp = in.readLong();
             byte type = in.readByte();
             Command command = switch (type) {
-                case 1 -> new LimitOrder(readSide(in), in.readLong(), in.readLong(), readTif(in), readBoolean(in));
+                case 1 -> new LimitOrder(readSide(in), in.readLong(), in.readLong(), readTif(in), readBoolean(in),
+                        in.readLong());
                 case 2 -> new MarketOrder(readSide(in), in.readLong(), readTif(in));
                 case 3 -> new CancelOrder(in.readLong());
                 case 4 -> new ReplaceOrder(in.readLong(), in.readLong(), in.readLong());
@@ -215,6 +218,7 @@ final class Codec {
                 out.writeByte(sideCode(e.side()));
                 out.writeLong(e.priceTicks());
                 out.writeLong(e.quantity());
+                out.writeLong(e.displayedQuantity());
             }
             case OrderCancelled e -> {
                 out.writeByte(5);
@@ -244,6 +248,14 @@ final class Codec {
                 out.writeLong(e.orderId());
                 out.writeByte(rejectCode(e.reason()));
             }
+            case OrderReplenished e -> {
+                out.writeByte(9);
+                out.writeLong(e.sequence());
+                out.writeLong(e.orderId());
+                out.writeByte(sideCode(e.side()));
+                out.writeLong(e.priceTicks());
+                out.writeLong(e.displayedQuantity());
+            }
         }
     }
 
@@ -254,12 +266,14 @@ final class Codec {
             case 2 -> new OrderRejected(in.readLong(), in.readLong(), readRejectReason(in));
             case 3 -> new TradeExecuted(in.readLong(), in.readLong(), in.readLong(), readSide(in),
                     in.readLong(), in.readLong(), in.readLong(), in.readLong());
-            case 4 -> new OrderRested(in.readLong(), in.readLong(), readSide(in), in.readLong(), in.readLong());
+            case 4 -> new OrderRested(in.readLong(), in.readLong(), readSide(in), in.readLong(), in.readLong(),
+                    in.readLong());
             case 5 -> new OrderCancelled(in.readLong(), in.readLong(), in.readLong(), readCancelReason(in));
             case 6 -> new CancelRejected(in.readLong(), in.readLong(), readRejectReason(in));
             case 7 -> new OrderReplaced(in.readLong(), in.readLong(), readSide(in), in.readLong(), in.readLong(),
                     readBoolean(in));
             case 8 -> new ReplaceRejected(in.readLong(), in.readLong(), readRejectReason(in));
+            case 9 -> new OrderReplenished(in.readLong(), in.readLong(), readSide(in), in.readLong(), in.readLong());
             default -> throw new JournalCorruptedException("unknown event type " + type);
         };
     }
@@ -280,6 +294,8 @@ final class Codec {
                 out.writeLong(order.priceTicks());
                 out.writeLong(order.remainingQuantity());
                 out.writeBoolean(order.postOnly());
+                out.writeLong(order.displayQuantity());
+                out.writeLong(order.displayedQuantity());
             }
         });
     }
@@ -299,7 +315,8 @@ final class Codec {
             }
             List<RestingOrder> orders = new ArrayList<>(Math.min(count, 1 << 16));
             for (int i = 0; i < count; i++) {
-                orders.add(new RestingOrder(in.readLong(), readSide(in), in.readLong(), in.readLong(), readBoolean(in)));
+                orders.add(new RestingOrder(in.readLong(), readSide(in), in.readLong(), in.readLong(), readBoolean(in),
+                        in.readLong(), in.readLong()));
             }
             return new StoredSnapshot(lastCommandSequence,
                     new EngineSnapshot(header.instrument(), nextOrderId, nextSequence, orders));
@@ -334,6 +351,7 @@ final class Codec {
             case UNKNOWN_ORDER -> 6;
             case INVALID_TIME_IN_FORCE -> 7;
             case POST_ONLY_WOULD_TRADE -> 8;
+            case INVALID_DISPLAY_QUANTITY -> 9;
         };
     }
 
@@ -348,6 +366,7 @@ final class Codec {
             case 6 -> RejectReason.UNKNOWN_ORDER;
             case 7 -> RejectReason.INVALID_TIME_IN_FORCE;
             case 8 -> RejectReason.POST_ONLY_WOULD_TRADE;
+            case 9 -> RejectReason.INVALID_DISPLAY_QUANTITY;
             default -> throw new JournalCorruptedException("unknown reject reason " + code);
         };
     }

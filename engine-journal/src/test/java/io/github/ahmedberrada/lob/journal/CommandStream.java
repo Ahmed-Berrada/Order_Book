@@ -32,7 +32,10 @@ final class CommandStream {
                 commands.add(new LimitOrder(side, random.nextLong(95, 106), random.nextLong(1, 30)));
             } else if (kind < 6) {
                 commands.add(new LimitOrder(side, random.nextLong(95, 106), random.nextLong(1, 30),
-                        tifs[random.nextInt(tifs.length)], random.nextInt(3) == 0));
+                        tifs[random.nextInt(tifs.length)], random.nextInt(3) == 0, 0));
+            } else if (kind < 7 && random.nextBoolean()) {
+                commands.add(new LimitOrder(side, random.nextLong(95, 106), random.nextLong(10, 30),
+                        TimeInForce.GTC, false, random.nextLong(1, 10)));
             } else if (kind < 7) {
                 commands.add(new MarketOrder(side, random.nextLong(1, 30), random.nextBoolean() ? TimeInForce.IOC
                         : TimeInForce.FOK));
