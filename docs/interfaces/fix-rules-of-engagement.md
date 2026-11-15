@@ -30,13 +30,28 @@ Unsupported application messages get a `BusinessMessageReject` (`35=j`).
 | 40 | OrdType | `1` Market, `2` Limit |
 | 44 | Price | Required for Limit, forbidden for Market. Multiple of the tick size (OE-002) |
 | 38 | OrderQty | Whole lots |
-| 59 | TimeInForce | Optional; only `0` (Day) is accepted |
+| 59 | TimeInForce | Optional. Limit: `0` Day (default) and `1` GTC rest until cancelled, `3` IOC, `4` FOK. Market: `0` Day (default) and `3` mean IOC, `4` FOK; `1` GTC is rejected (OT-001). Other values are refused |
+| 18 | ExecInst | Optional, limit orders only: `6` Participate don't initiate, i.e. post-only (OT-004). Other values are refused |
 | 60 | TransactTime | Required by FIX; the venue's own timestamp is authoritative |
 
 ### OrderCancelRequest (`35=F`)
 
 `41 OrigClOrdID` names the order to cancel; `11 ClOrdID` identifies the request; `55` and `54` must
 match the original order. A member can only cancel its own orders.
+
+### OrderCancelReplaceRequest (`35=G`)
+
+Changes the price and quantity of a resting limit order (OT-005 to OT-008). `11 ClOrdID` is the
+request's new identifier, `41 OrigClOrdID` any ClOrdID the order has carried; `55` and `54` must match
+the order; `40` must be `2` Limit, with `44 Price`. `38 OrderQty` is the new **total** quantity,
+fills included: the order's remaining quantity becomes `OrderQty − CumQty`, which must be positive.
+TimeInForce and ExecInst cannot be changed and are ignored.
+
+A successful replace is reported with `150=5` (Replaced), the new `ClOrdID`, the previous one in
+`OrigClOrdID`, the new `OrderQty`, `Price` and `LeavesQty`. If the new price crosses the book, `Trade`
+reports follow at once (OT-007). From then on the order answers to its new ClOrdID. Keeping the same
+price with a smaller or equal quantity keeps the order's place in the queue; anything else loses it
+(OT-006).
 
 ### OrderStatusRequest (`35=H`)
 
@@ -48,7 +63,8 @@ match the original order. A member can only cancel its own orders.
 |---|---|---|
 | Order accepted and resting | `0` New | `0` New |
 | Fill | `F` Trade | `1` Partially filled or `2` Filled |
-| Market order remainder cancelled (CT-006) | `4` Canceled | `4` Canceled |
+| Remainder of a market, IOC or FOK order cancelled (CT-006, OT-002, OT-003); `Text` gives the reason | `4` Canceled | `4` Canceled |
+| Replace confirmed | `5` Replaced | `0` New or `1` Partially filled |
 | Cancel confirmed | `4` Canceled | `4` Canceled |
 | Order rejected | `8` Rejected | `8` Rejected |
 | Status request answered | `I` Order status | current status |
@@ -60,8 +76,8 @@ Every report carries `37 OrderID` (`<symbol>-<engine order ID>`, or `NONE` when 
 Fills add `31 LastPx` and `32 LastQty`. **Both** sides of a trade receive a fill report: the taker in
 reply to its order, the maker on its own session, whoever caused the trade (another FIX member or the
 REST API). The maker's report has the same ExecID as the taker's with a `-M` suffix. An order
-cancelled by another channel (for example an operator over REST) gets an unsolicited `Canceled`
-report on its owner's session.
+cancelled or replaced by another channel (for example an operator over REST) gets an unsolicited
+`Canceled` or `Replaced` report on its owner's session.
 
 An order accepted and filled by the same command gets a `New` report, then one `Trade` report per
 fill, in execution order.
@@ -75,16 +91,18 @@ fill, in execution order.
 | Quantity above the instrument maximum | `3` Order exceeds limit | `QUANTITY_ABOVE_MAXIMUM` |
 | Price above the instrument maximum | `3` Order exceeds limit | `PRICE_ABOVE_MAXIMUM` |
 | Duplicate ClOrdID | `6` Duplicate order | `DUPLICATE_CLORDID` |
-| Unsupported field value (Side other than buy/sell, TimeInForce, OrdType), price on a market order or missing on a limit order | `11` Unsupported order characteristic | `UNSUPPORTED_SIDE`, `UNSUPPORTED_TIME_IN_FORCE`, `UNSUPPORTED_ORD_TYPE`, `PRICE_NOT_ALLOWED_FOR_MARKET`, `PRICE_REQUIRED_FOR_LIMIT` |
+| Unsupported field value (Side other than buy/sell, TimeInForce, ExecInst, OrdType), price or ExecInst on a market order, price missing on a limit order | `11` Unsupported order characteristic | `UNSUPPORTED_SIDE`, `UNSUPPORTED_TIME_IN_FORCE`, `UNSUPPORTED_EXEC_INST`, `UNSUPPORTED_ORD_TYPE`, `PRICE_NOT_ALLOWED_FOR_MARKET`, `POST_ONLY_NOT_ALLOWED_FOR_MARKET`, `PRICE_REQUIRED_FOR_LIMIT` |
+| Time in force not allowed for the order (GTC market order, post-only IOC or FOK) | `11` Unsupported order characteristic | `INVALID_TIME_IN_FORCE` |
 | Zero, negative or fractional quantity | `13` Incorrect quantity | `INVALID_QUANTITY`, `FRACTIONAL_QUANTITY` |
-| Off-tick or non-positive price, no liquidity, overload, halt | `99` Other | `OFF_TICK_PRICE`, `INVALID_PRICE`, `NO_LIQUIDITY`, `OVERLOADED`, `HALTED` |
+| Off-tick or non-positive price, no liquidity, post-only order that would trade, overload, halt | `99` Other | `OFF_TICK_PRICE`, `INVALID_PRICE`, `NO_LIQUIDITY`, `POST_ONLY_WOULD_TRADE`, `OVERLOADED`, `HALTED` |
 
 Rejections by the engine carry the `OrderID` they consumed (CT-010); refusals before the engine carry
 `OrderID=NONE` and were not journaled.
 
 ### OrderCancelReject (`35=9`)
 
-`434 CxlRejResponseTo=1`, and `102 CxlRejReason`:
+`434 CxlRejResponseTo` is `1` for a cancel request and `2` for a cancel/replace request, and
+`102 CxlRejReason`:
 
 | Reason | When | Text (58) |
 |---|---|---|
@@ -93,9 +111,11 @@ Rejections by the engine carry the `OrderID` they consumed (CT-010); refusals be
 | `3` Pending status | The order's acknowledgement has not been sent yet | `PENDING` |
 | `6` Duplicate ClOrdID | The cancel request reuses a ClOrdID | `DUPLICATE_CLORDID` |
 | `99` Other | Refused by the venue (overload, halt, shutdown) | `OVERLOADED`, `HALTED`, `STOPPED` |
+| `99` Other | Replace only: invalid new values, or refused by the engine (OT-005); the order is unchanged | `QUANTITY_NOT_ABOVE_FILLED`, `FRACTIONAL_QUANTITY`, `OFF_TICK_PRICE`, `ONLY_LIMIT_PRICE_AND_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `POST_ONLY_WOULD_TRADE` |
 
-A cancel whose journal write fails is answered with an ExecutionReport `150=6 / 39=6` (Pending cancel)
-and `Text=OUTCOME_UNKNOWN`, never with a reject.
+A ClOrdID used by a refused cancel or replace request stays used. A cancel or replace whose journal
+write fails is answered with an ExecutionReport `150=6 / 39=6` (Pending cancel) or `150=E / 39=E`
+(Pending replace) and `Text=OUTCOME_UNKNOWN`, never with a reject.
 
 An OrderStatusRequest on an unknown ClOrdID is answered with `150=I`, `39=8`, `103=5` (Unknown order);
 on an order still awaiting its acknowledgement with `39=A`.
@@ -125,4 +145,6 @@ answered with a `BusinessMessageReject`, reason `6` (Not authorized) (DC-002).
   entered before it still rest and trade, but their fills cannot be reported over FIX, and their
   ClOrdIDs are forgotten. Phase 5 records the member with each command in the journal, which removes
   this limitation.
-- No drop copy session yet; no mass cancel or cancel/replace (phase 4).
+- `TimeInForce=0` (Day), FIX's default, is accepted and behaves as GTC: the venue has no trading day
+  yet. Orders will expire at the end of the day once trading phases exist (phase 4).
+- No mass cancel yet (phase 4, kill switch).
