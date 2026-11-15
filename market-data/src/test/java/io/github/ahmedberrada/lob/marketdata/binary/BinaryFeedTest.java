@@ -20,16 +20,21 @@ import io.github.ahmedberrada.lob.marketdata.binary.BinaryMessage.UpdateEnd;
 import io.github.ahmedberrada.lob.service.BookSnapshot;
 import io.github.ahmedberrada.lob.service.InstrumentConfig;
 import io.github.ahmedberrada.lob.service.MatchingService;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.SplittableRandom;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.AfterEach;
@@ -75,11 +80,27 @@ class BinaryFeedTest {
         }
     }
 
-    /** Reads until the stream has been quiet for a while. */
+    private final AtomicBoolean dropAll = new AtomicBoolean();
+    private final AtomicBoolean heartbeatSeen = new AtomicBoolean();
+
+    /** Loses every packet while {@link #dropAll} is set, and notes heartbeats. */
+    private void lossyNetwork() {
+        client.dropPackets(packet -> {
+            if (packet.isHeartbeat()) {
+                heartbeatSeen.set(true);
+            }
+            return dropAll.get();
+        });
+    }
+
+    /** Reads until a heartbeat arrives: the feed sends one only once it has sent everything. */
     private void drain() throws IOException {
-        while (client.poll(300)) {
-            // keep reading
+        heartbeatSeen.set(false);
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (!heartbeatSeen.get() && System.nanoTime() < deadline) {
+            client.poll(100);
         }
+        assertThat(heartbeatSeen).as("stream went idle").isTrue();
     }
 
     private void trade(int commands) {
@@ -142,12 +163,13 @@ class BinaryFeedTest {
     void aRefusedRetransmissionFallsBackToASnapshot() throws Exception {
         start(10);                                          // keeps only the last 10 messages
         client.start();
+        lossyNetwork();
         trade(5);
         drain();                                            // the client is following the stream
-        client.dropPackets(packet -> true);                 // then loses everything, heartbeats included
+        dropAll.set(true);                                  // then loses everything, heartbeats included
         trade(300);
         drain();
-        client.dropPackets(packet -> false);
+        dropAll.set(false);
         trade(10);
         catchUp();                                          // the gap is far older than the window
 
@@ -172,10 +194,15 @@ class BinaryFeedTest {
             client.poll(100);
         }
 
-        long expected = seen.getFirst().sequence();
+        long previousEnd = 0;
+        long lastSequence = 0;
         for (Packet packet : seen) {
-            assertThat(packet.sequence()).as("gap-free stream").isEqualTo(expected);
-            expected += packet.isHeartbeat() ? 0 : packet.count();
+            // UDP may lose packets on the way, but the stream never reuses or reorders a sequence number
+            assertThat(packet.sequence()).as("increasing sequence").isGreaterThanOrEqualTo(previousEnd);
+            if (!packet.isHeartbeat()) {
+                previousEnd = packet.sequence() + packet.count();
+                lastSequence = previousEnd - 1;
+            }
             List<BinaryMessage> messages = packet.messages();
             if (!messages.isEmpty() && !(messages.getFirst() instanceof Directory)) {
                 assertThat(messages.getLast()).as("a packet ends with an end of update").isInstanceOf(UpdateEnd.class);
@@ -184,9 +211,29 @@ class BinaryFeedTest {
                     messages.stream().map(BinaryCodec::encode).toList()).length)
                     .as("packet size").isLessThanOrEqualTo(BinaryFeed.MAX_PACKET_BYTES);
         }
+        // at the source, every sequence number exists: the whole stream can be fetched again (BF-002, BF-004)
+        for (long from = 1; from <= lastSequence; from += BinaryFeed.MAX_RETRANSMIT) {
+            int count = (int) Math.min(BinaryFeed.MAX_RETRANSMIT, lastSequence - from + 1);
+            Packet again = retransmit(from, count);
+            assertThat(again.sequence()).isEqualTo(from);
+            assertThat(again.messages()).hasSize(count);
+        }
+        assertThat(retransmit(lastSequence + 1_000, 1).isRefused()).isTrue();
         assertThat(seen.getFirst().messages()).containsExactly(
                 new Directory(1, "AAPL", 1, (byte) -2), new Directory(2, "MSFT", 5, (byte) -2));
         assertThat(seen).anyMatch(Packet::isHeartbeat);
+    }
+
+    private Packet retransmit(long from, int count) throws IOException {
+        try (Socket connection = new Socket(LOOPBACK, feed.servicePort());
+                DataOutputStream out = new DataOutputStream(connection.getOutputStream());
+                DataInputStream in = new DataInputStream(connection.getInputStream())) {
+            out.writeInt(11);
+            out.write(ByteBuffer.allocate(11).put((byte) 'X').putLong(from).putShort((short) count).array());
+            byte[] response = new byte[in.readInt()];
+            in.readFully(response);
+            return BinaryCodec.decodePacket(ByteBuffer.wrap(response));
+        }
     }
 
     @Test

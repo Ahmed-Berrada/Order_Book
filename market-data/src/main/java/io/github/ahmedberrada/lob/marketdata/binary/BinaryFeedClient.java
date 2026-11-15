@@ -45,6 +45,8 @@ public final class BinaryFeedClient implements AutoCloseable {
         long feedSequence = -1;                                     // -1: no snapshot yet
     }
 
+    static final int RECEIVE_BUFFER_BYTES = 4 << 20;
+
     private final DatagramSocket socket;
     private final InetSocketAddress service;
     private final Map<Integer, Book> books = new HashMap<>();
@@ -60,6 +62,7 @@ public final class BinaryFeedClient implements AutoCloseable {
     /** Listens for the stream on {@code streamAddress} and uses {@code service} for recovery. */
     public BinaryFeedClient(InetSocketAddress streamAddress, InetSocketAddress service) throws IOException {
         this.socket = new DatagramSocket(streamAddress);
+        this.socket.setReceiveBufferSize(RECEIVE_BUFFER_BYTES);     // bursts outrun a default buffer
         this.service = service;
     }
 
