@@ -97,6 +97,11 @@ final class SymbolWorker implements AutoCloseable {
         });
     }
 
+    /** The engine's complete state and the last command it reflects, copied on the instrument's thread. */
+    CompletableFuture<InstrumentState> state() {
+        return enqueue(() -> new InstrumentState(engine.lastCommandSequence(), engine.state()));
+    }
+
     /** Remaining quantity of a resting order, 0 if it is not resting. */
     CompletableFuture<Long> restingQuantity(long orderId) {
         return enqueue(() -> engine.book().restingQuantity(orderId));
