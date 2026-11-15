@@ -10,8 +10,10 @@ import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
 import io.github.ahmedberrada.lob.core.OrderBook;
+import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.Rulebook;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
 import io.github.ahmedberrada.lob.journal.EventBatch;
 import io.github.ahmedberrada.lob.marketdata.MarketDataMessage.Update;
@@ -41,7 +43,13 @@ class BookImageTest {
                 .as((s, q) -> new MarketOrder(s, q));
         Arbitrary<Command> cancel = Arbitraries.longs().between(1, 120).map(CancelOrder::new);
         Arbitrary<Command> invalid = Arbitraries.of(new LimitOrder(Side.BUY, 100, 0), new LimitOrder(Side.SELL, 999, 1));
-        return Arbitraries.frequencyOf(Tuple.of(6, limit), Tuple.of(2, market), Tuple.of(3, cancel), Tuple.of(1, invalid))
+        Arbitrary<Command> ioc = Combinators.combine(side, Arbitraries.longs().between(95, 105),
+                Arbitraries.longs().between(1, 20), Arbitraries.of(TimeInForce.class), Arbitraries.of(true, false))
+                .as((s, p, q, t, po) -> new LimitOrder(s, p, q, t, po));
+        Arbitrary<Command> replace = Combinators.combine(Arbitraries.longs().between(1, 120),
+                Arbitraries.longs().between(95, 105), Arbitraries.longs().between(1, 20)).as(ReplaceOrder::new);
+        return Arbitraries.frequencyOf(Tuple.of(6, limit), Tuple.of(2, market), Tuple.of(3, cancel), Tuple.of(1, invalid),
+                        Tuple.of(2, ioc), Tuple.of(3, replace))
                 .list().ofMaxSize(120);
     }
 
@@ -51,7 +59,7 @@ class BookImageTest {
     }
 
     @Property(tries = 300)
-    @Rulebook({"MD-002", "MD-003", "MD-004", "MD-005", "MD-006", "MD-007"})
+    @Rulebook({"MD-002", "MD-003", "MD-004", "MD-005", "MD-006", "MD-007", "OT-008"})
     void imageAndSubscribersMatchTheEngineAfterEveryCommand(@ForAll("commands") List<Command> commands,
             @ForAll @IntRange(max = 120) int history, @ForAll @IntRange(max = 120) int subscribeAt) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);

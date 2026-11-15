@@ -2,6 +2,7 @@ package io.github.ahmedberrada.lob.marketdata;
 
 import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
+import io.github.ahmedberrada.lob.core.OrderReplaced;
 import io.github.ahmedberrada.lob.core.OrderRested;
 import io.github.ahmedberrada.lob.core.RestingOrder;
 import io.github.ahmedberrada.lob.core.Side;
@@ -90,6 +91,16 @@ final class BookImage {
                     if (cancelled != null) {                 // a market order's remainder never rested
                         reduce(e.orderId(), cancelled, cancelled.quantity);
                         changed(cancelled.side, changedBids, changedAsks).add(cancelled.priceTicks);
+                    }
+                }
+                case OrderReplaced e -> {
+                    Order replaced = orders.get(e.orderId());
+                    // priority kept: the quantity shrinks in place; otherwise the order leaves the book
+                    // and an OrderRested event re-enters whatever remains after its trades (OT-008)
+                    long removed = e.priorityKept() ? replaced.quantity - e.quantity() : replaced.quantity;
+                    if (removed > 0) {
+                        reduce(e.orderId(), replaced, removed);
+                        changed(replaced.side, changedBids, changedAsks).add(replaced.priceTicks);
                     }
                 }
                 default -> {
