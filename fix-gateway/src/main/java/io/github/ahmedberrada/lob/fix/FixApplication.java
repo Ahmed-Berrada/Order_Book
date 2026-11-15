@@ -41,6 +41,7 @@ import quickfix.field.CxlRejReason;
 import quickfix.field.CxlRejResponseTo;
 import quickfix.field.ExecInst;
 import quickfix.field.ExecType;
+import quickfix.field.MaxFloor;
 import quickfix.field.MsgSeqNum;
 import quickfix.field.MsgType;
 import quickfix.field.OnBehalfOfCompID;
@@ -146,6 +147,9 @@ final class FixApplication implements Application, EventListener {
         long lots;
         try {
             lots = quantity.longValueExact();
+            if (order.isSetField(MaxFloor.FIELD)) {
+                order.getDecimal(MaxFloor.FIELD).longValueExact();
+            }
         } catch (ArithmeticException e) {
             refuse(session, clOrdId, symbol, side, quantity, OrdRejReason.INCORRECT_QUANTITY, "FRACTIONAL_QUANTITY", true);
             return;
@@ -331,6 +335,9 @@ final class FixApplication implements Application, EventListener {
         if (type == OrdType.MARKET && order.isSetField(ExecInst.FIELD)) {
             return Optional.of("POST_ONLY_NOT_ALLOWED_FOR_MARKET");
         }
+        if (type == OrdType.MARKET && order.isSetField(MaxFloor.FIELD)) {
+            return Optional.of("MAX_FLOOR_NOT_ALLOWED_FOR_MARKET");
+        }
         return Optional.empty();
     }
 
@@ -358,8 +365,9 @@ final class FixApplication implements Application, EventListener {
             return new MarketOrder(side, lots, tif == TimeInForce.DAY
                     ? io.github.ahmedberrada.lob.core.TimeInForce.IOC : timeInForce(tif));
         }
+        long display = order.isSetField(MaxFloor.FIELD) ? order.getDecimal(MaxFloor.FIELD).longValueExact() : 0;
         return new LimitOrder(side, instrument.toTicks(order.getDecimal(Price.FIELD)), lots, timeInForce(tif),
-                order.isSetField(ExecInst.FIELD));
+                order.isSetField(ExecInst.FIELD), display);
     }
 
     /**
@@ -438,7 +446,8 @@ final class FixApplication implements Application, EventListener {
                             resting ? "NOT_RESTING" : e.reason().name());
                 }
                 default -> {
-                    // OrderRested is already reported as New or a fill; other commands' events concern no FIX order
+                    // OrderRested is already reported as New or a fill; an iceberg's refill (OrderReplenished)
+                    // changes nothing a member is told; other commands' events concern no FIX order
                 }
             }
         }
@@ -475,6 +484,7 @@ final class FixApplication implements Application, EventListener {
             case INVALID_QUANTITY -> OrdRejReason.INCORRECT_QUANTITY;
             case QUANTITY_ABOVE_MAXIMUM, PRICE_ABOVE_MAXIMUM -> OrdRejReason.ORDER_EXCEEDS_LIMIT;
             case INVALID_TIME_IN_FORCE -> OrdRejReason.UNSUPPORTED_ORDER_CHARACTERISTIC;
+            case INVALID_DISPLAY_QUANTITY -> OrdRejReason.INCORRECT_QUANTITY;
             case INVALID_PRICE, NO_LIQUIDITY, UNKNOWN_ORDER, POST_ONLY_WOULD_TRADE -> OrdRejReason.OTHER;
         };
     }

@@ -26,6 +26,7 @@ import quickfix.field.ExecType;
 import quickfix.field.LastPx;
 import quickfix.field.LastQty;
 import quickfix.field.LeavesQty;
+import quickfix.field.MaxFloor;
 import quickfix.field.MsgType;
 import quickfix.field.OrdRejReason;
 import quickfix.field.OrdStatus;
@@ -158,6 +159,36 @@ class OrderTypesFixTest {
         member1.send(withTif(postOnly(Orders.limit("B-3", Side.BUY, "185.20", "1")), TimeInForce.IMMEDIATE_OR_CANCEL));
         assertReport(member1.next(), Map.of(OrderID.FIELD, "AAPL-4", ExecType.FIELD, "8",
                 OrdRejReason.FIELD, "11", Text.FIELD, "INVALID_TIME_IN_FORCE"));
+    }
+
+    @Test
+    @Rulebook({"IC-001", "IC-003", "IC-004"})
+    void icebergOrdersWithMaxFloor() throws Exception {
+        Message iceberg = Orders.limit("S-1", Side.SELL, "185.25", "30");
+        iceberg.setDecimal(MaxFloor.FIELD, new BigDecimal("10"));
+        assertReport(member2.next(iceberg), Map.of(OrderID.FIELD, "AAPL-1", ExecType.FIELD, "0", LeavesQty.FIELD, "30"));
+        assertThat(venue.service.book("AAPL", 1).join().asks().getFirst().quantity()).isEqualTo(10);
+
+        // 15 lots: the first peak of 10, a refill, then 5 more
+        member1.send(Orders.market("B-1", Side.BUY, "15"));
+        member1.next();
+        assertReport(member1.next(), Map.of(ExecType.FIELD, "F", LastQty.FIELD, "10", LeavesQty.FIELD, "5"));
+        assertReport(member1.next(), Map.of(ExecType.FIELD, "F", LastQty.FIELD, "5", LeavesQty.FIELD, "0"));
+        assertReport(member2.next(), Map.of(ExecType.FIELD, "F", LastQty.FIELD, "10", LeavesQty.FIELD, "20"));
+        assertReport(member2.next(), Map.of(ExecType.FIELD, "F", LastQty.FIELD, "5", LeavesQty.FIELD, "15"));
+
+        Message tooLarge = Orders.limit("S-2", Side.SELL, "185.25", "5");
+        tooLarge.setDecimal(MaxFloor.FIELD, new BigDecimal("6"));
+        assertReport(member2.next(tooLarge), Map.of(OrderID.FIELD, "AAPL-3", ExecType.FIELD, "8",
+                OrdRejReason.FIELD, "13", Text.FIELD, "INVALID_DISPLAY_QUANTITY"));
+        Message fractional = Orders.limit("S-3", Side.SELL, "185.25", "5");
+        fractional.setDecimal(MaxFloor.FIELD, new BigDecimal("2.5"));
+        assertReport(member2.next(fractional), Map.of(OrderID.FIELD, "NONE", OrdRejReason.FIELD, "13",
+                Text.FIELD, "FRACTIONAL_QUANTITY"));
+        Message market = Orders.market("B-2", Side.BUY, "1");
+        market.setDecimal(MaxFloor.FIELD, new BigDecimal("1"));
+        assertReport(member1.next(market), Map.of(OrderID.FIELD, "NONE", OrdRejReason.FIELD, "11",
+                Text.FIELD, "MAX_FLOOR_NOT_ALLOWED_FOR_MARKET"));
     }
 
     // ---- Cancel/replace ----------------------------------------------------------------------------
