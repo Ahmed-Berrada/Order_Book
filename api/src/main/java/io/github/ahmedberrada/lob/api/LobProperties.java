@@ -24,6 +24,7 @@ import org.springframework.validation.annotation.Validated;
  * @param fsync            when the command journal is flushed to the device
  * @param snapshotInterval commands between automatic snapshots; 0 disables them
  * @param instruments      the listed instruments, fixed for the life of the process
+ * @param fix              the FIX gateway (ADR-0006), off unless enabled
  */
 @Validated
 @ConfigurationProperties("lob")
@@ -32,7 +33,23 @@ public record LobProperties(
         @DefaultValue("10000") @Positive int queueCapacity,
         @DefaultValue("EVERY_COMMAND") @NotNull FsyncPolicy fsync,
         @DefaultValue("10000") @PositiveOrZero int snapshotInterval,
-        @NotEmpty List<@Valid InstrumentProperties> instruments) {
+        @NotEmpty List<@Valid InstrumentProperties> instruments,
+        @DefaultValue @Valid FixProperties fix) {
+
+    /**
+     * The FIX acceptor. It listens on the loopback interface unless told otherwise: sessions are not
+     * authenticated until phase 8.
+     *
+     * @param storeDirectory sequence numbers and sent messages; defaults to {@code <data-directory>/fix}
+     */
+    public record FixProperties(
+            @DefaultValue("false") boolean enabled,
+            @DefaultValue("127.0.0.1") @NotBlank String bindAddress,
+            @DefaultValue("9878") int port,
+            @DefaultValue("LOB") @NotBlank String senderCompId,
+            @DefaultValue List<String> members,
+            Path storeDirectory) {
+    }
 
     /** One listed instrument. */
     public record InstrumentProperties(

@@ -60,6 +60,17 @@ Closing the service stops accepting commands (`STOPPED`), lets each worker proce
 queued, then closes the journals (OE-007). A command that races with shutdown is either processed or
 refused, never left waiting forever.
 
+### 7. Event listeners see every command, in order
+
+Added with the FIX gateway (ADR-0006). An `EventListener` registered on the service receives the
+events of every command of every instrument, whoever submitted it, together with an optional context
+the submitter attached (for example the FIX session and ClOrdID). It runs on the instrument's writer
+thread after the command is journaled and processed, and before its future completes. This gives
+listeners a strict per-instrument order with no race against the submitter's callbacks, and lets an
+order gateway report a fill to the owner of a resting order even when another protocol caused the
+trade. Listeners must be quick; a listener that throws is logged and skipped, never fatal to the
+command.
+
 ## Consequences
 
 - ➕ REST and FIX share one tested path to the engine; adding a protocol adds no concurrency code.
