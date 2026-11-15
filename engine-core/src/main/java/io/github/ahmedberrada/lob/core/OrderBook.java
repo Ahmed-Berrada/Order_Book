@@ -57,6 +57,19 @@ public final class OrderBook {
         return order == null ? 0 : order.remainingQuantity;
     }
 
+    /** Every resting order in priority order: bids best first, then asks best first, FIFO within a price. */
+    List<RestingOrder> restingOrders() {
+        List<RestingOrder> orders = new ArrayList<>(ordersById.size());
+        for (Side side : Side.values()) {
+            for (PriceLevel level : levels(side).values()) {
+                for (Order order : level.orders()) {
+                    orders.add(new RestingOrder(order.orderId, order.side, order.priceTicks, order.remainingQuantity));
+                }
+            }
+        }
+        return orders;
+    }
+
     /** Best level of a side, or {@code null} if the side is empty. */
     PriceLevel bestLevel(Side side) {
         var best = levels(side).firstEntry();

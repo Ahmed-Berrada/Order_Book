@@ -11,9 +11,10 @@ a REST API on Spring Boot, and published JMH benchmarks.
 The goal is engineering rigour rather than feature count. The engine is **deterministic**,
 backed by **invariant tests**, and **measured before it is optimised**.
 
-> **Status: Phase 1, Core engine.** Price-time matching of LIMIT and MARKET orders and cancels,
-> specified in the [rulebook](docs/rulebook/continuous-trading.md) and verified by scenario tests,
-> property tests and a reference model. The service layer and FIX connectivity come next
+> **Status: Phase 2, Durability & audit.** Price-time matching of LIMIT and MARKET orders
+> ([rulebook](docs/rulebook/continuous-trading.md)) is now durable: a write-ahead command journal,
+> an event journal, snapshots, crash recovery proven by `kill -9` tests, and a replay tool for audits
+> ([resilience rules](docs/rulebook/resilience.md)). The service layer and FIX connectivity come next
 > (see [Roadmap](#roadmap)).
 
 ---
@@ -44,9 +45,14 @@ flowchart LR
         svc[EngineService<br/>router]
     end
 
-    subgraph core ["engine-core — pure Java, no framework"]
+    subgraph journal ["engine-journal — plain Java, file I/O"]
         w1[SymbolWorker AAPL<br/>single thread]
         w2[SymbolWorker MSFT<br/>single thread]
+        j1[(commands + events<br/>journal AAPL)]
+        j2[(commands + events<br/>journal MSFT)]
+    end
+
+    subgraph core ["engine-core — pure Java, no I/O"]
         b1[(OrderBook AAPL)]
         b2[(OrderBook MSFT)]
     end
@@ -55,15 +61,20 @@ flowchart LR
     tests[[JUnit 5 + jqwik]]
 
     client -->|JSON| ctrl --> svc
-    svc -->|Command| w1 --> b1
-    svc -->|Command| w2 --> b2
+    svc -->|Command| w1
+    svc -->|Command| w2
+    w1 -->|1. append| j1
+    w1 -->|2. process| b1
+    w2 -->|1. append| j2
+    w2 -->|2. process| b2
     bench -.->|calls directly| core
     tests -.->|calls directly| core
 ```
 
 | Module | Responsibility | Allowed dependencies |
 |---|---|---|
-| `engine-core` | Order book, matching, commands and events | JDK only (Spring is **banned by the build**) |
+| `engine-core` | Order book, matching, commands and events, snapshot/restore | JDK only, no I/O (Spring is **banned by the build**) |
+| `engine-journal` | Write-ahead journal, event journal, snapshots, recovery, replay tool | `engine-core`, JDK only |
 | `api` | REST, validation, JSON, threads per symbol | `engine-core`, Spring Boot |
 | `engine-bench` *(phase 6)* | JMH micro-benchmarks | `engine-core`, JMH |
 
@@ -91,6 +102,7 @@ so they run in parallel with no locks.
 | **Command → Events** | `MatchingEngine.process(Command) : List<Event>` | One input and one output, with no hidden side effects. Tests read as "given these orders, expect these events". Replay comes for free (phase 2). |
 | **Algebraic data types** (sealed interfaces + records) | `Command`, `Event` | Java 21 `switch` pattern matching is **exhaustive**: forgetting to handle a case is a compile error. |
 | **Router** | `EngineService` sends a command to the worker that owns its symbol | Keeps concurrency out of the domain. |
+| **Write-ahead log + snapshots** | `JournaledEngine`: journal the command, then process it | Crash recovery is a replay. The same mechanism serves audit and debugging. |
 | **Adapter** (light hexagonal) | `api` translates HTTP and decimal prices to and from core commands and ticks | The domain stays independent of the transport. |
 
 **Rejected for now (YAGNI):** a Strategy for the matching algorithm (there is only one: price-time),
@@ -258,7 +270,8 @@ mutated by a single thread and never needs a lock.
 
 ## Key technical decisions
 
-The full rationale is in [ADR-0001](docs/adr/0001-foundations.md) and [ADR-0002](docs/adr/0002-core-engine-model.md).
+The full rationale is in [ADR-0001](docs/adr/0001-foundations.md), [ADR-0002](docs/adr/0002-core-engine-model.md)
+and [ADR-0003](docs/adr/0003-journal-and-recovery.md).
 The matching behaviour itself is specified in the [rulebook](docs/rulebook/continuous-trading.md).
 
 | Decision | Choice | Reason |
@@ -268,7 +281,8 @@ The matching behaviour itself is specified in the [rulebook](docs/rulebook/conti
 | Time priority | `ArrayDeque<Order>` per price level | FIFO by construction. |
 | Cancel | O(n) inside a price level (v1) | Deliberate. It will be measured with JMH and then optimised to O(1) in phase 6. |
 | Order IDs | Assigned by the engine, per instrument | Deterministic replay ([ADR-0002](docs/adr/0002-core-engine-model.md)). |
-| Ordering and time | Gap-free sequence numbers; timestamps journaled with commands (phase 2) | Determinism and reproducible replay. |
+| Ordering and time | Gap-free sequence numbers; one µs UTC timestamp per command, taken at ingress and journaled | Determinism and reproducible replay ([ADR-0003](docs/adr/0003-journal-and-recovery.md)). |
+| Durability | Write-ahead journal per instrument, CRC-framed, fsync per command by default | No acknowledged order is lost; journals are never rewritten (record keeping). |
 | Errors | Typed `OrderRejected(reason)`, no exceptions on the hot path | Rejection is a business outcome, not an error. |
 | Instruments | Declared at startup (`application.yml`) | Exchanges do not create symbols on demand. |
 
@@ -280,11 +294,33 @@ Requirements: **JDK 21+**. Maven is not required because the wrapper is included
 
 ```bash
 ./mvnw verify                                   # build, tests and quality gates
-./mvnw -pl engine-core -am -Pmutation verify    # mutation testing (PIT), slower
+./mvnw -pl engine-core,engine-journal -am -Pmutation verify   # mutation testing (PIT), slower
 ./mvnw -pl api spring-boot:run                  # start the API on :8080
 ```
 
 On Windows, use `mvnw.cmd` in place of `./mvnw`.
+
+### Replaying a journal
+
+`lob-replay` rebuilds an instrument's book from its journal, at any command, and can check that the
+current code regenerates exactly the recorded events. It never modifies the files.
+
+```bash
+./mvnw -q install -DskipTests
+CP=engine-core/target/engine-core-0.1.0-SNAPSHOT.jar:engine-journal/target/engine-journal-0.1.0-SNAPSHOT.jar
+java -cp "$CP" io.github.ahmedberrada.lob.journal.ReplayTool <instrument-dir> [--to <sequence>] [--verify]
+```
+
+```
+Instrument      AAPL (max quantity 1000 lots, max price 100000 ticks)
+Commands        5 replayed, last at 2026-10-08T09:11:38.669599Z
+Book            3 resting orders
+  side          price     quantity   orders
+  SELL          18510           45        1
+  BUY           18500           10        1
+  BUY           18495           30        1
+Verification    OK: 5 event batches identical to the event journal
+```
 
 ---
 
@@ -297,7 +333,10 @@ On Windows, use `mvnw.cmd` in place of `./mvnw`.
 | Reference model | jqwik + naive oracle in test sources | Random command streams give exactly the same events as a deliberately simple implementation |
 | Architecture | ArchUnit | Core uses only the JDK: no clock, randomness, threads, I/O or floating point |
 | Traceability | `RulebookTraceabilityTest` | Every rulebook rule is cited by a test (`@Rulebook("CT-xxx")`) |
-| Quality gates | JaCoCo, PIT | ≥ 90 % line and branch coverage; ≥ 80 % mutation score on `engine-core` |
+| Crash recovery | Second JVM killed with SIGKILL | No acknowledged command lost; recovered state equals a fresh replay |
+| Journal properties | jqwik | Cutting either journal at any byte recovers exactly the complete commands |
+| Corruption | JUnit | Damaged records, sequence gaps, foreign or swapped files are refused |
+| Quality gates | JaCoCo, PIT | ≥ 90 % line and branch coverage; ≥ 80 % mutation score on `engine-core` and `engine-journal` |
 | Web layer *(phase 3)* | `@WebMvcTest` | Validation and HTTP status codes |
 | Performance *(phase 6)* | JMH | Throughput and p50 / p99 / p99.9 latency, with published methodology |
 
@@ -318,8 +357,8 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 |---|---|---|
 | 0 | **Foundations**: multi-module build, CI, enforced module boundary, ADR | ✅ |
 | 1 | **Core engine**: rulebook, LIMIT / MARKET / cancel, property tests, reference model, quality gates | ✅ |
-| 2 | **Durability & audit**: write-ahead journal, snapshots, crash recovery, replay | ⏳ |
-| 3 | **Connectivity**: thread per symbol, FIX order entry, market data feeds, admin REST | |
+| 2 | **Durability & audit**: write-ahead journal, snapshots, crash recovery, replay | ✅ |
+| 3 | **Connectivity**: thread per symbol, FIX order entry, market data feeds, admin REST | ⏳ |
 | 4 | **Venue functionality**: advanced orders, auctions, trading phases, circuit breakers | |
 | 5 | **Pre-trade risk & members** | |
 | 6 | **Performance**: JMH, zero-allocation hot path, published latency | |
@@ -347,10 +386,12 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 
 ```
 Order_Book/
-├── engine-core/        pure-Java matching engine (no Spring, enforced)
+├── engine-core/        pure-Java matching engine (no Spring, no I/O, enforced)
+├── engine-journal/     write-ahead journal, snapshots, recovery, replay tool
 ├── api/                Spring Boot REST adapter
 ├── docs/adr/           architecture decision records
 ├── docs/rulebook/      venue rules, cited by tests
+├── docs/interfaces/    file and wire formats
 ├── docs/ROADMAP.md     phased plan and exit criteria
 ├── .github/workflows/  CI
 └── mvnw, mvnw.cmd      Maven wrapper
