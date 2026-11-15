@@ -40,8 +40,10 @@ class MatchingEnginePropertyTest {
         Arbitrary<Boolean> postOnly = Arbitraries.frequency(Tuple.of(4, false), Tuple.of(1, true));
         Arbitrary<Long> orderId = Arbitraries.longs().between(0, 80);
 
-        Arbitrary<Command> limit = Combinators.combine(side, price, quantity, limitTif, postOnly)
-                .as((s, p, q, t, po) -> new LimitOrder(s, p, q, t, po));
+        Arbitrary<Long> display = Arbitraries.frequency(
+                Tuple.of(5, 0L), Tuple.of(3, 1L), Tuple.of(3, 3L), Tuple.of(1, 25L), Tuple.of(1, -1L));
+        Arbitrary<Command> limit = Combinators.combine(side, price, quantity, limitTif, postOnly, display)
+                .as((s, p, q, t, po, d) -> new LimitOrder(s, p, q, t, po, d));
         Arbitrary<Command> market = Combinators.combine(side, quantity, marketTif)
                 .as((s, q, t) -> new MarketOrder(s, q, t));
         Arbitrary<Command> cancel = orderId.map(id -> new CancelOrder(id));
@@ -56,7 +58,7 @@ class MatchingEnginePropertyTest {
     @Property
     @Rulebook({"CT-001", "CT-002", "CT-003", "CT-004", "CT-005", "CT-006", "CT-007", "CT-008", "CT-009",
             "CT-010", "CT-011", "CT-012", "OT-001", "OT-002", "OT-003", "OT-004", "OT-005", "OT-006", "OT-007",
-            "OT-008"})
+            "OT-008", "IC-001", "IC-002", "IC-003", "IC-004", "IC-005", "IC-006"})
     void producesExactlyTheSameEventsAsTheReferenceModel(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
         ReferenceEngine reference = new ReferenceEngine(INSTRUMENT);
@@ -68,7 +70,7 @@ class MatchingEnginePropertyTest {
     }
 
     @Property
-    @Rulebook("CT-013")
+    @Rulebook({"CT-013", "IC-002"})
     void bookIsNeverCrossedAndHoldsOnlyPositiveQuantities(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
 
@@ -83,6 +85,16 @@ class MatchingEnginePropertyTest {
                     assertThat(level.quantity()).isPositive();
                     assertThat(level.orderCount()).isPositive();
                 });
+                // every resting order shows something, and never more than it holds (IC-002)
+                List<OrderBook.Level> displayed = book.displayedDepth(side);
+                List<OrderBook.Level> full = book.depth(side);
+                assertThat(displayed).hasSameSizeAs(full);
+                for (int i = 0; i < full.size(); i++) {
+                    assertThat(displayed.get(i).priceTicks()).isEqualTo(full.get(i).priceTicks());
+                    assertThat(displayed.get(i).orderCount()).isEqualTo(full.get(i).orderCount());
+                    assertThat(displayed.get(i).quantity()).isBetween((long) full.get(i).orderCount(),
+                            full.get(i).quantity());
+                }
             }
         }
     }
@@ -110,6 +122,7 @@ class MatchingEnginePropertyTest {
                     case OrderReplaced e -> accepted.put(e.orderId(), filled.getOrDefault(e.orderId(), 0L)
                             + cancelled.getOrDefault(e.orderId(), 0L) + e.quantity());
                     case ReplaceRejected e -> { }
+                    case OrderReplenished e -> { }
                 }
             }
 

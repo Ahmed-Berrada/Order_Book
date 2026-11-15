@@ -45,11 +45,14 @@ public final class MatchingEngine {
                 throw new IllegalArgumentException("duplicate order ID: " + order);
             }
             if (order.remainingQuantity() <= 0 || order.remainingQuantity() > snapshot.instrument().maxOrderQuantity()
-                    || order.priceTicks() <= 0 || order.priceTicks() > snapshot.instrument().maxPriceTicks()) {
+                    || order.priceTicks() <= 0 || order.priceTicks() > snapshot.instrument().maxPriceTicks()
+                    || !hasValidPeak(order)) {
                 throw new IllegalArgumentException("invalid resting order: " + order);
             }
-            engine.book.rest(new Order(order.orderId(), order.side(), order.priceTicks(), order.remainingQuantity(),
-                    order.postOnly()));
+            Order restored = new Order(order.orderId(), order.side(), order.priceTicks(), order.remainingQuantity(),
+                    order.postOnly(), order.displayQuantity());
+            restored.displayed = order.displayedQuantity();
+            engine.book.rest(restored);
         }
         OrderBook book = engine.book;
         if (book.bestBid().isPresent() && book.bestAsk().isPresent()
@@ -57,6 +60,16 @@ public final class MatchingEngine {
             throw new IllegalArgumentException("snapshot book is crossed");
         }
         return engine;
+    }
+
+    /** A fully visible order shows everything; an iceberg a peak between 1 and its display size. */
+    private static boolean hasValidPeak(RestingOrder order) {
+        if (order.displayQuantity() == 0) {
+            return order.displayedQuantity() == order.remainingQuantity();
+        }
+        // a negative display size fails here too: no positive peak is below it
+        return order.displayedQuantity() > 0
+                && order.displayedQuantity() <= Math.min(order.displayQuantity(), order.remainingQuantity());
     }
 
     /** Captures the complete engine state (ADR-0003). */
@@ -98,6 +111,10 @@ public final class MatchingEngine {
         if (reason == null && order.postOnly() && wouldTrade(order.side(), order.priceTicks())) {
             reason = RejectReason.POST_ONLY_WOULD_TRADE;
         }
+        if (reason == null && (order.displayQuantity() < 0 || order.displayQuantity() > order.quantity()
+                || (order.displayQuantity() != 0 && order.timeInForce() != TimeInForce.GTC))) {
+            reason = RejectReason.INVALID_DISPLAY_QUANTITY;
+        }
         if (reason != null) {
             events.add(new OrderRejected(nextSequence++, orderId, reason));
             return;
@@ -114,8 +131,9 @@ public final class MatchingEngine {
             return;
         }
         if (order.timeInForce() == TimeInForce.GTC) {
-            book.rest(new Order(orderId, order.side(), order.priceTicks(), remaining, order.postOnly()));
-            events.add(new OrderRested(nextSequence++, orderId, order.side(), order.priceTicks(), remaining));
+            // a display quantity equal to the quantity means fully visible (IC-001)
+            long display = order.displayQuantity() == order.quantity() ? 0 : order.displayQuantity();
+            rest(new Order(orderId, order.side(), order.priceTicks(), remaining, order.postOnly(), display), events);
         } else {
             // A FOK order passed its check, so only an IOC order can have a remainder here.
             events.add(new OrderCancelled(nextSequence++, orderId, remaining, CancelReason.IMMEDIATE_OR_CANCEL));
@@ -185,9 +203,15 @@ public final class MatchingEngine {
         book.remove(order.orderId);
         long remaining = match(order.orderId, order.side, replace.priceTicks(), replace.quantity(), events);
         if (remaining > 0) {
-            book.rest(new Order(order.orderId, order.side, replace.priceTicks(), remaining, order.postOnly));
-            events.add(new OrderRested(nextSequence++, order.orderId, order.side, replace.priceTicks(), remaining));
+            rest(new Order(order.orderId, order.side, replace.priceTicks(), remaining, order.postOnly,
+                    order.displayQuantity), events);
         }
+    }
+
+    private void rest(Order order, List<Event> events) {
+        book.rest(order);
+        events.add(new OrderRested(nextSequence++, order.orderId, order.side, order.priceTicks,
+                order.remainingQuantity, order.displayed));
     }
 
     /** Whether an order at this price would trade with the opposite side right now (OT-004). */
@@ -211,12 +235,16 @@ public final class MatchingEngine {
                 break;
             }
             Order maker = level.first();
-            long fill = Math.min(remaining, maker.remainingQuantity);
+            long fill = Math.min(remaining, maker.displayed);           // never into hidden quantity (IC-003)
             remaining -= fill;
-            book.fillFirst(level, fill);
+            boolean replenished = book.fillFirst(level, fill);
             events.add(new TradeExecuted(
                     nextSequence++, takerOrderId, maker.orderId, takerSide,
                     level.priceTicks(), fill, remaining, maker.remainingQuantity));
+            if (replenished) {
+                events.add(new OrderReplenished(
+                        nextSequence++, maker.orderId, maker.side, maker.priceTicks, maker.displayed));
+            }
         }
         return remaining;
     }
