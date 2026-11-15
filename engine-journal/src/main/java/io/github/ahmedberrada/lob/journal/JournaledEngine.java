@@ -196,8 +196,11 @@ public final class JournaledEngine implements AutoCloseable {
         commandsSinceSnapshot = 0;
     }
 
-    /** Complete current state of the engine, as a snapshot would record it. */
-    EngineSnapshot state() {
+    /**
+     * Complete current state of the engine, as a snapshot would record it, as of
+     * {@link #lastCommandSequence()}. Like every method here, call it on the engine's own thread.
+     */
+    public EngineSnapshot state() {
         return engine.snapshot();
     }
 

@@ -107,6 +107,14 @@ public final class MatchingService implements AutoCloseable {
         return withWorker(symbol, worker -> worker.book(depth));
     }
 
+    /**
+     * The complete state of an instrument and the last command it reflects. Together with an
+     * {@link EventListener} registered beforehand, it lets a consumer rebuild the book without a gap.
+     */
+    public CompletableFuture<InstrumentState> state(String symbol) {
+        return withWorker(symbol, SymbolWorker::state);
+    }
+
     /** Remaining quantity of a resting order, or 0 if the order is not resting. */
     public CompletableFuture<Long> restingQuantity(String symbol, long orderId) {
         return withWorker(symbol, worker -> worker.restingQuantity(orderId));
