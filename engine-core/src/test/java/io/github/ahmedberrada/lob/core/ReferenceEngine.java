@@ -16,13 +16,15 @@ final class ReferenceEngine {
         final long id;
         final Side side;
         final long price;
+        final boolean postOnly;
         long remaining;
 
-        Resting(long id, Side side, long price, long remaining) {
+        Resting(long id, Side side, long price, long remaining, boolean postOnly) {
             this.id = id;
             this.side = side;
             this.price = price;
             this.remaining = remaining;
+            this.postOnly = postOnly;
         }
     }
 
@@ -39,10 +41,66 @@ final class ReferenceEngine {
         List<Event> events = new ArrayList<>();
         switch (command) {
             case CancelOrder cancel -> cancel(cancel.orderId(), events);
-            case LimitOrder order -> newOrder(order.side(), order.priceTicks(), true, order.quantity(), events);
-            case MarketOrder order -> newOrder(order.side(), 0, false, order.quantity(), events);
+            case LimitOrder order -> newOrder(order.side(), order.priceTicks(), true, order.quantity(),
+                    order.timeInForce(), order.postOnly(), events);
+            case MarketOrder order -> newOrder(order.side(), 0, false, order.quantity(),
+                    order.timeInForce(), false, events);
+            case ReplaceOrder replace -> replace(replace, events);
         }
         return events;
+    }
+
+    private Resting find(long orderId) {
+        return resting.stream().filter(o -> o.id == orderId).findFirst().orElse(null);
+    }
+
+    private boolean crosses(Resting candidate, Side side, long price, boolean isLimit) {
+        return candidate.side != side
+                && (!isLimit || (side == Side.BUY ? candidate.price <= price : candidate.price >= price));
+    }
+
+    private RejectReason validate(long price, boolean isLimit, long quantity) {
+        if (quantity <= 0) {
+            return RejectReason.INVALID_QUANTITY;
+        } else if (quantity > instrument.maxOrderQuantity()) {
+            return RejectReason.QUANTITY_ABOVE_MAXIMUM;
+        } else if (isLimit && price <= 0) {
+            return RejectReason.INVALID_PRICE;
+        } else if (isLimit && price > instrument.maxPriceTicks()) {
+            return RejectReason.PRICE_ABOVE_MAXIMUM;
+        }
+        return null;
+    }
+
+    private void replace(ReplaceOrder replace, List<Event> events) {
+        Resting order = find(replace.orderId());
+        RejectReason reason;
+        if (order == null) {
+            reason = RejectReason.UNKNOWN_ORDER;
+        } else {
+            reason = validate(replace.priceTicks(), true, replace.quantity());
+            if (reason == null && order.postOnly
+                    && resting.stream().anyMatch(o -> crosses(o, order.side, replace.priceTicks(), true))) {
+                reason = RejectReason.POST_ONLY_WOULD_TRADE;
+            }
+        }
+        if (reason != null) {
+            events.add(new ReplaceRejected(++lastSequence, replace.orderId(), reason));
+            return;
+        }
+        boolean kept = replace.priceTicks() == order.price && replace.quantity() <= order.remaining;
+        events.add(new OrderReplaced(++lastSequence, order.id, order.side, replace.priceTicks(),
+                replace.quantity(), kept));
+        if (kept) {
+            order.remaining = replace.quantity();
+            return;
+        }
+        resting.remove(order);
+        long left = fill(order.id, order.side, replace.priceTicks(), true, replace.quantity(), events);
+        if (left > 0) {
+            resting.add(new Resting(order.id, order.side, replace.priceTicks(), left, order.postOnly));
+            events.add(new OrderRested(++lastSequence, order.id, order.side, replace.priceTicks(), left));
+        }
     }
 
     private void cancel(long orderId, List<Event> events) {
@@ -56,35 +114,69 @@ final class ReferenceEngine {
         events.add(new CancelRejected(++lastSequence, orderId, RejectReason.UNKNOWN_ORDER));
     }
 
-    private void newOrder(Side side, long price, boolean isLimit, long quantity, List<Event> events) {
+    private void newOrder(Side side, long price, boolean isLimit, long quantity, TimeInForce tif, boolean postOnly,
+            List<Event> events) {
         long id = ++lastOrderId;
-        RejectReason reason = null;
-        if (quantity <= 0) {
-            reason = RejectReason.INVALID_QUANTITY;
-        } else if (quantity > instrument.maxOrderQuantity()) {
-            reason = RejectReason.QUANTITY_ABOVE_MAXIMUM;
-        } else if (isLimit && price <= 0) {
-            reason = RejectReason.INVALID_PRICE;
-        } else if (isLimit && price > instrument.maxPriceTicks()) {
-            reason = RejectReason.PRICE_ABOVE_MAXIMUM;
-        } else if (!isLimit && resting.stream().noneMatch(o -> o.side != side)) {
-            reason = RejectReason.NO_LIQUIDITY;
+        RejectReason reason = validate(price, isLimit, quantity);
+        boolean anyCross = resting.stream().anyMatch(o -> crosses(o, side, price, isLimit));
+        if (reason == null) {
+            reason = attributeFailure(side, isLimit, tif, postOnly, anyCross);
         }
         if (reason != null) {
             events.add(new OrderRejected(++lastSequence, id, reason));
             return;
         }
         events.add(new OrderAccepted(++lastSequence, id));
+        complete(id, side, price, isLimit, quantity, tif, postOnly, events);
+    }
 
+    private RejectReason attributeFailure(Side side, boolean isLimit, TimeInForce tif, boolean postOnly,
+            boolean anyCross) {
+        RejectReason reason = null;
+        if (isLimit && postOnly && tif != TimeInForce.GTC) {
+            reason = RejectReason.INVALID_TIME_IN_FORCE;
+        } else if (isLimit && postOnly && anyCross) {
+            reason = RejectReason.POST_ONLY_WOULD_TRADE;
+        } else if (!isLimit && tif == TimeInForce.GTC) {
+            reason = RejectReason.INVALID_TIME_IN_FORCE;
+        } else if (!isLimit && resting.stream().noneMatch(o -> o.side != side)) {
+            reason = RejectReason.NO_LIQUIDITY;
+        }
+        return reason;
+    }
+
+    private void complete(long id, Side side, long price, boolean isLimit, long quantity, TimeInForce tif,
+            boolean postOnly, List<Event> events) {
+        if (tif == TimeInForce.FOK) {
+            long available = resting.stream().filter(o -> crosses(o, side, price, isLimit))
+                    .mapToLong(o -> o.remaining).sum();
+            if (available < quantity) {
+                events.add(new OrderCancelled(++lastSequence, id, quantity, CancelReason.FILL_OR_KILL));
+                return;
+            }
+        }
+        long left = fill(id, side, price, isLimit, quantity, events);
+        if (left == 0) {
+            return;
+        }
+        if (!isLimit) {
+            events.add(new OrderCancelled(++lastSequence, id, left, CancelReason.UNFILLED_MARKET_REMAINDER));
+        } else if (tif == TimeInForce.GTC) {
+            resting.add(new Resting(id, side, price, left, postOnly));
+            events.add(new OrderRested(++lastSequence, id, side, price, left));
+        } else {
+            events.add(new OrderCancelled(++lastSequence, id, left, CancelReason.IMMEDIATE_OR_CANCEL));
+        }
+    }
+
+    private long fill(long id, Side side, long price, boolean isLimit, long quantity, List<Event> events) {
         long left = quantity;
         while (left > 0) {
             Resting best = null;
             for (Resting candidate : resting) {
-                boolean crosses = candidate.side != side
-                        && (!isLimit || (side == Side.BUY ? candidate.price <= price : candidate.price >= price));
                 boolean better = best == null
                         || (side == Side.BUY ? candidate.price < best.price : candidate.price > best.price);
-                if (crosses && better) {
+                if (crosses(candidate, side, price, isLimit) && better) {
                     best = candidate;
                 }
             }
@@ -99,12 +191,6 @@ final class ReferenceEngine {
             }
             events.add(new TradeExecuted(++lastSequence, id, best.id, side, best.price, fill, left, best.remaining));
         }
-
-        if (left > 0 && isLimit) {
-            resting.add(new Resting(id, side, price, left));
-            events.add(new OrderRested(++lastSequence, id, side, price, left));
-        } else if (left > 0) {
-            events.add(new OrderCancelled(++lastSequence, id, left, CancelReason.UNFILLED_MARKET_REMAINDER));
-        }
+        return left;
     }
 }

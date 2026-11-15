@@ -7,7 +7,7 @@ import java.util.Objects;
 
 /**
  * Price-time priority matching engine for one instrument, as specified in
- * {@code docs/rulebook/continuous-trading.md}.
+ * {@code docs/rulebook/continuous-trading.md} and {@code docs/rulebook/order-types.md}.
  *
  * <p>Not thread-safe by contract: an instance is owned by exactly one thread (ADR-0001 §2).
  * Deterministic: the same commands always produce the same events (CT-015).
@@ -48,7 +48,8 @@ public final class MatchingEngine {
                     || order.priceTicks() <= 0 || order.priceTicks() > snapshot.instrument().maxPriceTicks()) {
                 throw new IllegalArgumentException("invalid resting order: " + order);
             }
-            engine.book.rest(new Order(order.orderId(), order.side(), order.priceTicks(), order.remainingQuantity()));
+            engine.book.rest(new Order(order.orderId(), order.side(), order.priceTicks(), order.remainingQuantity(),
+                    order.postOnly()));
         }
         OrderBook book = engine.book;
         if (book.bestBid().isPresent() && book.bestAsk().isPresent()
@@ -72,7 +73,7 @@ public final class MatchingEngine {
         return book;
     }
 
-    /** Applies one command and returns its events, in the order of rulebook CT-012. */
+    /** Applies one command and returns its events, in the order of rulebook CT-012 and OT-008. */
     public List<Event> process(Command command) {
         Objects.requireNonNull(command, "command");
         List<Event> events = new ArrayList<>();
@@ -80,6 +81,7 @@ public final class MatchingEngine {
             case LimitOrder order -> onLimitOrder(order, events);
             case MarketOrder order -> onMarketOrder(order, events);
             case CancelOrder cancel -> onCancel(cancel, events);
+            case ReplaceOrder replace -> onReplace(replace, events);
         }
         return Collections.unmodifiableList(events);
     }
@@ -90,22 +92,42 @@ public final class MatchingEngine {
         if (reason == null) {
             reason = validatePrice(order.priceTicks());
         }
+        if (reason == null && order.postOnly() && order.timeInForce() != TimeInForce.GTC) {
+            reason = RejectReason.INVALID_TIME_IN_FORCE;
+        }
+        if (reason == null && order.postOnly() && wouldTrade(order.side(), order.priceTicks())) {
+            reason = RejectReason.POST_ONLY_WOULD_TRADE;
+        }
         if (reason != null) {
             events.add(new OrderRejected(nextSequence++, orderId, reason));
             return;
         }
         events.add(new OrderAccepted(nextSequence++, orderId));
 
+        if (order.timeInForce() == TimeInForce.FOK
+                && book.availableQuantity(order.side(), order.priceTicks(), order.quantity()) < order.quantity()) {
+            events.add(new OrderCancelled(nextSequence++, orderId, order.quantity(), CancelReason.FILL_OR_KILL));
+            return;
+        }
         long remaining = match(orderId, order.side(), order.priceTicks(), order.quantity(), events);
-        if (remaining > 0) {
-            book.rest(new Order(orderId, order.side(), order.priceTicks(), remaining));
+        if (remaining == 0) {
+            return;
+        }
+        if (order.timeInForce() == TimeInForce.GTC) {
+            book.rest(new Order(orderId, order.side(), order.priceTicks(), remaining, order.postOnly()));
             events.add(new OrderRested(nextSequence++, orderId, order.side(), order.priceTicks(), remaining));
+        } else {
+            // A FOK order passed its check, so only an IOC order can have a remainder here.
+            events.add(new OrderCancelled(nextSequence++, orderId, remaining, CancelReason.IMMEDIATE_OR_CANCEL));
         }
     }
 
     private void onMarketOrder(MarketOrder order, List<Event> events) {
         long orderId = nextOrderId++;
         RejectReason reason = validateQuantity(order.quantity());
+        if (reason == null && order.timeInForce() == TimeInForce.GTC) {
+            reason = RejectReason.INVALID_TIME_IN_FORCE;
+        }
         if (reason == null && book.bestLevel(order.side().opposite()) == null) {
             reason = RejectReason.NO_LIQUIDITY;
         }
@@ -115,7 +137,13 @@ public final class MatchingEngine {
         }
         events.add(new OrderAccepted(nextSequence++, orderId));
 
-        long remaining = match(orderId, order.side(), marketLimit(order.side()), order.quantity(), events);
+        long limit = marketLimit(order.side());
+        if (order.timeInForce() == TimeInForce.FOK
+                && book.availableQuantity(order.side(), limit, order.quantity()) < order.quantity()) {
+            events.add(new OrderCancelled(nextSequence++, orderId, order.quantity(), CancelReason.FILL_OR_KILL));
+            return;
+        }
+        long remaining = match(orderId, order.side(), limit, order.quantity(), events);
         if (remaining > 0) {
             events.add(new OrderCancelled(
                     nextSequence++, orderId, remaining, CancelReason.UNFILLED_MARKET_REMAINDER));
@@ -130,6 +158,42 @@ public final class MatchingEngine {
             events.add(new OrderCancelled(
                     nextSequence++, order.orderId, order.remainingQuantity, CancelReason.CLIENT_REQUEST));
         }
+    }
+
+    private void onReplace(ReplaceOrder replace, List<Event> events) {
+        Order order = book.find(replace.orderId());
+        RejectReason reason = order == null ? RejectReason.UNKNOWN_ORDER : validateQuantity(replace.quantity());
+        if (reason == null) {
+            reason = validatePrice(replace.priceTicks());
+        }
+        if (reason == null && order.postOnly && wouldTrade(order.side, replace.priceTicks())) {
+            reason = RejectReason.POST_ONLY_WOULD_TRADE;
+        }
+        if (reason != null) {
+            events.add(new ReplaceRejected(nextSequence++, replace.orderId(), reason));
+            return;
+        }
+
+        boolean keepsPriority = replace.priceTicks() == order.priceTicks
+                && replace.quantity() <= order.remainingQuantity;
+        events.add(new OrderReplaced(nextSequence++, order.orderId, order.side,
+                replace.priceTicks(), replace.quantity(), keepsPriority));
+        if (keepsPriority) {
+            book.reduce(order, replace.quantity());
+            return;
+        }
+        book.remove(order.orderId);
+        long remaining = match(order.orderId, order.side, replace.priceTicks(), replace.quantity(), events);
+        if (remaining > 0) {
+            book.rest(new Order(order.orderId, order.side, replace.priceTicks(), remaining, order.postOnly));
+            events.add(new OrderRested(nextSequence++, order.orderId, order.side, replace.priceTicks(), remaining));
+        }
+    }
+
+    /** Whether an order at this price would trade with the opposite side right now (OT-004). */
+    private boolean wouldTrade(Side side, long priceTicks) {
+        PriceLevel best = book.bestLevel(side.opposite());
+        return best != null && isWithinLimit(side, priceTicks, best.priceTicks());
     }
 
     /**

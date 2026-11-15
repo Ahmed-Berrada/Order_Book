@@ -12,6 +12,10 @@ public enum RejectReason {
     PRICE_ABOVE_MAXIMUM,
     /** Market order arrived while the opposite side of the book was empty. */
     NO_LIQUIDITY,
-    /** Cancel targeted an order that is not resting. */
-    UNKNOWN_ORDER
+    /** Cancel or replace targeted an order that is not resting. */
+    UNKNOWN_ORDER,
+    /** Time in force not allowed for this order (OT-001, OT-004). */
+    INVALID_TIME_IN_FORCE,
+    /** A post-only order, or the replace of one, would have traded on arrival (OT-004, OT-005). */
+    POST_ONLY_WOULD_TRADE
 }
