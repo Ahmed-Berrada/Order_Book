@@ -12,6 +12,7 @@ import quickfix.field.CumQty;
 import quickfix.field.CxlRejReason;
 import quickfix.field.CxlRejResponseTo;
 import quickfix.field.ExecID;
+import quickfix.field.ExecRestatementReason;
 import quickfix.field.ExecType;
 import quickfix.field.LastPx;
 import quickfix.field.LastQty;
@@ -121,6 +122,17 @@ final class ExecutionReports {
     static ExecutionReport cancelled(FixOrder order, long eventSequence, long timestampMicros, String reason) {
         ExecutionReport report = of(order, ExecType.CANCELED, eventSequence, timestampMicros);
         report.setString(Text.FIELD, reason);
+        return report;
+    }
+
+    /**
+     * A stop order was triggered (ST-005). FIX 4.4 has no ExecType for it (5.0 added {@code L}), so it is
+     * reported as Restated, with reason Other and {@code Text=STOP_TRIGGERED}.
+     */
+    static ExecutionReport triggered(FixOrder order, long eventSequence, long timestampMicros) {
+        ExecutionReport report = of(order, ExecType.RESTATED, eventSequence, timestampMicros);
+        report.setInt(ExecRestatementReason.FIELD, ExecRestatementReason.OTHER);
+        report.setString(Text.FIELD, "STOP_TRIGGERED");
         return report;
     }
 
