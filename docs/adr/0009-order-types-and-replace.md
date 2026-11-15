@@ -20,7 +20,9 @@ combination (`IocLimitOrder`, …) would multiply the cases of every `switch` fo
 algorithm is the same, only the treatment of the remainder differs.
 
 `DAY` is not offered yet. Without a trading day (phase 4, trading phases) it would behave exactly like
-`GTC`, and accepting it would promise an expiry the venue does not implement.
+`GTC`, and accepting it would promise an expiry the venue does not implement. The FIX gateway is the
+exception: an absent `TimeInForce` means Day in FIX, and the gateway has accepted Day since phase 3c,
+so it keeps accepting it as GTC and lists the gap in the Rules of Engagement' limitations.
 
 ### 2. FOK is checked before matching, not rolled back after
 
@@ -74,7 +76,8 @@ release on, every version change will ship with a reader for the previous one.
 
 ## Consequences
 
-- ➕ Members can send the order types their systems already use, over REST and FIX.
+- ➕ Members can send the order types their systems already use, over REST and FIX
+  (`TimeInForce`, `ExecInst=6`, `OrderCancelReplaceRequest`).
 - ➕ An amendment cannot be used to gain priority, and cannot make a post-only order take liquidity.
 - ➖ A FOK order scans price levels twice (check, then match). Phase 6 will measure whether it matters.
 - ➖ Version 1 journals can no longer be read by the current build.
