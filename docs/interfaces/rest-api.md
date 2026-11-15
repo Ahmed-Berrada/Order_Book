@@ -13,8 +13,8 @@ REST is not the low-latency path: members trading at speed will use FIX (phase 3
 - **Prices are decimal strings** in responses (`"185.25"`), never binary floating point. Requests may
   send a price as a string or a JSON number; it must be an exact multiple of the tick size (OE-002).
 - **Quantities are whole lots.** A fractional quantity such as `10.5` is a `400`, never truncated.
-- **Unknown fields are refused** with `400`: a misspelt or unsupported field (for example a display
-  quantity, which does not exist yet) must not be silently ignored on an order.
+- **Unknown fields are refused** with `400`: a misspelt or unsupported field (for example a stop
+  price, which does not exist yet) must not be silently ignored on an order.
 - Timestamps are UTC ISO-8601 with microseconds, e.g. `2026-10-08T09:11:38.669599Z`. All events of a
   command share the command's timestamp (RS-006).
 
@@ -42,10 +42,12 @@ Listed instruments.
 |---|---|---|
 | `timeInForce` | `GTC`, `IOC`, `FOK` (`GTC` is rejected on a `MARKET` order) | `GTC` for `LIMIT`, `IOC` for `MARKET` |
 | `postOnly` | `true` or `false`; `LIMIT` only, and only with `GTC` | `false` |
+| `displayQuantity` | The peak of an [iceberg](../rulebook/iceberg-orders.md) order, at most `quantity`; `LIMIT` `GTC` only | `0`, fully visible |
 
 ```json
 {"side":"BUY","type":"LIMIT","price":"185.25","quantity":10,"timeInForce":"IOC"}
 {"side":"SELL","type":"LIMIT","price":"185.40","quantity":10,"postOnly":true}
+{"side":"SELL","type":"LIMIT","price":"185.40","quantity":5000,"displayQuantity":100}
 ```
 
 `201 Created`, with `Location: /api/v1/instruments/{symbol}/orders/{orderId}`:
@@ -117,10 +119,13 @@ unchanged.
 ```
 
 An order that is not resting (filled, cancelled or unknown) returns `resting: false`.
+`restingQuantity` is the full remainder, hidden quantity included: it is meant for the order's owner.
+Until members and authentication exist (phases 5 and 8) the API is bound to `127.0.0.1`.
 
 ### `GET /api/v1/instruments/{symbol}/book?depth=10`
 
-`depth` is 1 to 100 (default 10).
+`depth` is 1 to 100 (default 10). Quantities are what the market may see: an iceberg counts with its
+peak only (IC-002).
 
 ```json
 {
@@ -135,11 +140,11 @@ An order that is not resting (filled, cancelled or unknown) returns `resting: fa
 
 | Status | When | `reason` |
 |---|---|---|
-| `400` | Malformed JSON, missing or unknown field, fractional quantity, price or `postOnly` on a market order, depth out of range | — |
+| `400` | Malformed JSON, missing or unknown field, fractional quantity, price, `postOnly` or `displayQuantity` on a market order, depth out of range | — |
 | `404` | Unknown symbol (OE-001) | `UNKNOWN_INSTRUMENT` |
 | `404` | Cancel or replace of an order that is not resting (CT-008, OT-005) | `UNKNOWN_ORDER` |
 | `422` | Off-tick price (OE-002) | `OFF_TICK_PRICE` |
-| `422` | Rejected by the engine (CT-007, CT-009, OT-001, OT-004); the body carries the `orderId` it consumed | `INVALID_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `NO_LIQUIDITY`, `INVALID_TIME_IN_FORCE`, `POST_ONLY_WOULD_TRADE` |
+| `422` | Rejected by the engine (CT-007, CT-009, OT-001, OT-004); the body carries the `orderId` it consumed | `INVALID_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `NO_LIQUIDITY`, `INVALID_TIME_IN_FORCE`, `POST_ONLY_WOULD_TRADE`, `INVALID_DISPLAY_QUANTITY` |
 | `422` | Replace refused by the engine (OT-005); the order is unchanged | the same reasons |
 | `503` | Queue full (OE-005), with `Retry-After: 1` | `OVERLOADED` |
 | `503` | Instrument halted (OE-006) or venue shutting down (OE-007) | `HALTED`, `STOPPED` |

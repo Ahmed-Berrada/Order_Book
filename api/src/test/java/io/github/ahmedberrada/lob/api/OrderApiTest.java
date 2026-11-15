@@ -135,6 +135,27 @@ class OrderApiTest {
     }
 
     @Test
+    @Rulebook({"IC-001", "IC-002", "IC-004"})
+    void icebergOrdersShowOnlyTheirPeak() {
+        assertThat(post("{\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"185.30\",\"quantity\":50,"
+                + "\"displayQuantity\":10}")).hasStatus(HttpStatus.CREATED).bodyJson()
+                .isLenientlyEqualTo("{\"orderId\":1,\"status\":\"NEW\",\"restingQuantity\":50}");
+        assertThat(mvc.get().uri("/api/v1/instruments/AAPL/book")).bodyJson()
+                .isLenientlyEqualTo("{\"asks\":[{\"price\":\"185.30\",\"quantity\":10,\"orders\":1}]}");
+        // a market order through two peaks: its batch also holds the iceberg's refills
+        assertThat(post(market("BUY", 15))).hasStatus(HttpStatus.CREATED).bodyJson().isLenientlyEqualTo("""
+                {"orderId":2,"status":"FILLED","filledQuantity":15,
+                 "trades":[{"makerOrderId":1,"quantity":10},{"makerOrderId":1,"quantity":5}]}""");
+        assertThat(mvc.get().uri("/api/v1/instruments/AAPL/book")).bodyJson()
+                .isLenientlyEqualTo("{\"asks\":[{\"price\":\"185.30\",\"quantity\":5,\"orders\":1}]}");
+        assertThat(post("{\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"185.30\",\"quantity\":5,"
+                + "\"displayQuantity\":6}")).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT).bodyJson()
+                .isLenientlyEqualTo("{\"reason\":\"INVALID_DISPLAY_QUANTITY\",\"orderId\":3}");
+        assertThat(post("{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":1,\"displayQuantity\":1}"))
+                .hasStatus(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     @Rulebook({"OT-005", "OT-006", "OT-007"})
     void replaceKeepsOrLosesPriorityAndCanTrade() {
         post(limit("BUY", "185.00", 10));                      // 1
