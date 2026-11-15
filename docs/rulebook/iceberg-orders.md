@@ -1,7 +1,5 @@
 # Rulebook: iceberg orders
 
-- **Status:** Draft
-
 An iceberg order shows only part of its quantity, the **peak**, in the book, and refills it from a
 hidden reserve as it trades. This chapter extends [continuous trading](continuous-trading.md) and
 [order types](order-types.md); every rule ID is cited by tests through `@Rulebook("IC-xxx")`. Design:
