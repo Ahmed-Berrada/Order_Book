@@ -15,3 +15,6 @@ Thumbs.db
 
 # Benchmarks output (published results are committed under docs/ explicitly)
 jmh-result*.json
+
+# jqwik failure database
+.jqwik-database
