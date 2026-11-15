@@ -6,7 +6,9 @@ import io.github.ahmedberrada.lob.core.Instrument;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
+import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.TimeInForce;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.SplittableRandom;
@@ -24,11 +26,19 @@ final class CommandStream {
         List<Command> commands = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             Side side = random.nextBoolean() ? Side.BUY : Side.SELL;
-            int kind = random.nextInt(10);
-            if (kind < 6) {
+            int kind = random.nextInt(12);
+            TimeInForce[] tifs = TimeInForce.values();
+            if (kind < 5) {
                 commands.add(new LimitOrder(side, random.nextLong(95, 106), random.nextLong(1, 30)));
+            } else if (kind < 6) {
+                commands.add(new LimitOrder(side, random.nextLong(95, 106), random.nextLong(1, 30),
+                        tifs[random.nextInt(tifs.length)], random.nextInt(3) == 0));
             } else if (kind < 7) {
-                commands.add(new MarketOrder(side, random.nextLong(1, 30)));
+                commands.add(new MarketOrder(side, random.nextLong(1, 30), random.nextBoolean() ? TimeInForce.IOC
+                        : TimeInForce.FOK));
+            } else if (kind < 9) {
+                commands.add(new ReplaceOrder(random.nextLong(1, i + 2), random.nextLong(95, 106),
+                        random.nextLong(1, 30)));
             } else {
                 commands.add(new CancelOrder(random.nextLong(1, i + 2)));
             }

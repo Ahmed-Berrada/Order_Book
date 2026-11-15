@@ -12,10 +12,14 @@ import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.OrderAccepted;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
 import io.github.ahmedberrada.lob.core.OrderRejected;
+import io.github.ahmedberrada.lob.core.OrderReplaced;
 import io.github.ahmedberrada.lob.core.OrderRested;
 import io.github.ahmedberrada.lob.core.RejectReason;
+import io.github.ahmedberrada.lob.core.ReplaceOrder;
+import io.github.ahmedberrada.lob.core.ReplaceRejected;
 import io.github.ahmedberrada.lob.core.RestingOrder;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -36,7 +40,7 @@ import java.util.List;
 final class Codec {
 
     static final int MAGIC = 0x4C4F424A;            // "LOBJ"
-    static final short FORMAT_VERSION = 1;
+    static final short FORMAT_VERSION = 2;
 
     enum Kind {
         COMMANDS(1), EVENTS(2), SNAPSHOT(3);
@@ -112,15 +116,24 @@ final class Codec {
                     out.writeByte(sideCode(order.side()));
                     out.writeLong(order.priceTicks());
                     out.writeLong(order.quantity());
+                    out.writeByte(tifCode(order.timeInForce()));
+                    out.writeBoolean(order.postOnly());
                 }
                 case MarketOrder order -> {
                     out.writeByte(2);
                     out.writeByte(sideCode(order.side()));
                     out.writeLong(order.quantity());
+                    out.writeByte(tifCode(order.timeInForce()));
                 }
                 case CancelOrder cancel -> {
                     out.writeByte(3);
                     out.writeLong(cancel.orderId());
+                }
+                case ReplaceOrder replace -> {
+                    out.writeByte(4);
+                    out.writeLong(replace.orderId());
+                    out.writeLong(replace.priceTicks());
+                    out.writeLong(replace.quantity());
                 }
             }
         });
@@ -132,9 +145,10 @@ final class Codec {
             long timestamp = in.readLong();
             byte type = in.readByte();
             Command command = switch (type) {
-                case 1 -> new LimitOrder(readSide(in), in.readLong(), in.readLong());
-                case 2 -> new MarketOrder(readSide(in), in.readLong());
+                case 1 -> new LimitOrder(readSide(in), in.readLong(), in.readLong(), readTif(in), readBoolean(in));
+                case 2 -> new MarketOrder(readSide(in), in.readLong(), readTif(in));
                 case 3 -> new CancelOrder(in.readLong());
+                case 4 -> new ReplaceOrder(in.readLong(), in.readLong(), in.readLong());
                 default -> throw new JournalCorruptedException("unknown command type " + type);
             };
             return new JournalEntry(sequence, timestamp, command);
@@ -215,6 +229,21 @@ final class Codec {
                 out.writeLong(e.orderId());
                 out.writeByte(rejectCode(e.reason()));
             }
+            case OrderReplaced e -> {
+                out.writeByte(7);
+                out.writeLong(e.sequence());
+                out.writeLong(e.orderId());
+                out.writeByte(sideCode(e.side()));
+                out.writeLong(e.priceTicks());
+                out.writeLong(e.quantity());
+                out.writeBoolean(e.priorityKept());
+            }
+            case ReplaceRejected e -> {
+                out.writeByte(8);
+                out.writeLong(e.sequence());
+                out.writeLong(e.orderId());
+                out.writeByte(rejectCode(e.reason()));
+            }
         }
     }
 
@@ -228,6 +257,9 @@ final class Codec {
             case 4 -> new OrderRested(in.readLong(), in.readLong(), readSide(in), in.readLong(), in.readLong());
             case 5 -> new OrderCancelled(in.readLong(), in.readLong(), in.readLong(), readCancelReason(in));
             case 6 -> new CancelRejected(in.readLong(), in.readLong(), readRejectReason(in));
+            case 7 -> new OrderReplaced(in.readLong(), in.readLong(), readSide(in), in.readLong(), in.readLong(),
+                    readBoolean(in));
+            case 8 -> new ReplaceRejected(in.readLong(), in.readLong(), readRejectReason(in));
             default -> throw new JournalCorruptedException("unknown event type " + type);
         };
     }
@@ -247,6 +279,7 @@ final class Codec {
                 out.writeByte(sideCode(order.side()));
                 out.writeLong(order.priceTicks());
                 out.writeLong(order.remainingQuantity());
+                out.writeBoolean(order.postOnly());
             }
         });
     }
@@ -266,7 +299,7 @@ final class Codec {
             }
             List<RestingOrder> orders = new ArrayList<>(Math.min(count, 1 << 16));
             for (int i = 0; i < count; i++) {
-                orders.add(new RestingOrder(in.readLong(), readSide(in), in.readLong(), in.readLong()));
+                orders.add(new RestingOrder(in.readLong(), readSide(in), in.readLong(), in.readLong(), readBoolean(in)));
             }
             return new StoredSnapshot(lastCommandSequence,
                     new EngineSnapshot(header.instrument(), nextOrderId, nextSequence, orders));
@@ -299,6 +332,8 @@ final class Codec {
             case PRICE_ABOVE_MAXIMUM -> 4;
             case NO_LIQUIDITY -> 5;
             case UNKNOWN_ORDER -> 6;
+            case INVALID_TIME_IN_FORCE -> 7;
+            case POST_ONLY_WOULD_TRADE -> 8;
         };
     }
 
@@ -311,6 +346,8 @@ final class Codec {
             case 4 -> RejectReason.PRICE_ABOVE_MAXIMUM;
             case 5 -> RejectReason.NO_LIQUIDITY;
             case 6 -> RejectReason.UNKNOWN_ORDER;
+            case 7 -> RejectReason.INVALID_TIME_IN_FORCE;
+            case 8 -> RejectReason.POST_ONLY_WOULD_TRADE;
             default -> throw new JournalCorruptedException("unknown reject reason " + code);
         };
     }
@@ -319,6 +356,8 @@ final class Codec {
         return switch (reason) {
             case CLIENT_REQUEST -> 1;
             case UNFILLED_MARKET_REMAINDER -> 2;
+            case IMMEDIATE_OR_CANCEL -> 3;
+            case FILL_OR_KILL -> 4;
         };
     }
 
@@ -327,7 +366,37 @@ final class Codec {
         return switch (code) {
             case 1 -> CancelReason.CLIENT_REQUEST;
             case 2 -> CancelReason.UNFILLED_MARKET_REMAINDER;
+            case 3 -> CancelReason.IMMEDIATE_OR_CANCEL;
+            case 4 -> CancelReason.FILL_OR_KILL;
             default -> throw new JournalCorruptedException("unknown cancel reason " + code);
+        };
+    }
+
+    private static int tifCode(TimeInForce timeInForce) {
+        return switch (timeInForce) {
+            case GTC -> 1;
+            case IOC -> 2;
+            case FOK -> 3;
+        };
+    }
+
+    private static TimeInForce readTif(DataInputStream in) throws IOException {
+        byte code = in.readByte();
+        return switch (code) {
+            case 1 -> TimeInForce.GTC;
+            case 2 -> TimeInForce.IOC;
+            case 3 -> TimeInForce.FOK;
+            default -> throw new JournalCorruptedException("unknown time in force " + code);
+        };
+    }
+
+    /** A boolean is one byte, 0 or 1; anything else is corruption. */
+    private static boolean readBoolean(DataInputStream in) throws IOException {
+        byte code = in.readByte();
+        return switch (code) {
+            case 0 -> false;
+            case 1 -> true;
+            default -> throw new JournalCorruptedException("invalid boolean " + code);
         };
     }
 
