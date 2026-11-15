@@ -29,6 +29,7 @@ lob:
     port: 9878
     sender-comp-id: LOB
     members: [MEMBER1, MEMBER2]
+    drop-copy-sessions: [RISK]
   instruments:
     - symbol: AAPL
       tick-size: "0.01"

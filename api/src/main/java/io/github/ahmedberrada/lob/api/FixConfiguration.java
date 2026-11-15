@@ -23,6 +23,6 @@ class FixConfiguration {
         LobProperties.FixProperties fix = properties.fix();
         Path store = fix.storeDirectory() != null ? fix.storeDirectory() : properties.dataDirectory().resolve("fix");
         return FixGateway.start(service, new FixGatewayConfig(fix.bindAddress(), fix.port(), fix.senderCompId(),
-                fix.members(), store));
+                fix.members(), fix.dropCopySessions(), store));
     }
 }

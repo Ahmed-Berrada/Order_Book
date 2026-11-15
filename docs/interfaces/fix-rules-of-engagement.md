@@ -111,10 +111,10 @@ the venue has recovered.
 Drop copy sessions are provisioned like member sessions (`lob.fix.drop-copy-sessions`) and carry no
 orders. Every ExecutionReport sent to any member is copied to each drop copy session (DC-001), with:
 
-| Tag | Field | Value |
-|---|---|---|
-| 797 | CopyMsgIndicator | `Y` |
-| 115 | OnBehalfOfCompID | the member the report was sent to |
+| Tag | Field | Where | Value |
+|---|---|---|---|
+| 797 | CopyMsgIndicator | body | `Y` |
+| 115 | OnBehalfOfCompID | header | the member the report was sent to |
 
 The body is identical to the member's report. Any application message a drop copy session sends is
 answered with a `BusinessMessageReject`, reason `6` (Not authorized) (DC-002).
