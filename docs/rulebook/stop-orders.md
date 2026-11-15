@@ -1,7 +1,5 @@
 # Rulebook: stop orders
 
-- **Status:** Draft
-
 A stop order waits outside the book until the market trades at or through its stop price, then enters
 the book as a market order (stop) or a limit order (stop-limit). This chapter extends
 [continuous trading](continuous-trading.md); every rule ID is cited by tests through
