@@ -237,6 +237,27 @@ class BinaryFeedTest {
     }
 
     @Test
+    void theServiceDropsMalformedRequestsAndKeepsServing() throws Exception {
+        start(1_000_000);
+        for (int length : new int[] {Integer.MAX_VALUE, -1, 0}) {
+            try (Socket connection = new Socket(LOOPBACK, feed.servicePort());
+                    DataOutputStream out = new DataOutputStream(connection.getOutputStream())) {
+                out.writeInt(length);                          // a hostile length prefix
+                out.flush();
+                assertThat(connection.getInputStream().read()).as("connection closed").isEqualTo(-1);
+            }
+        }
+        try (Socket connection = new Socket(LOOPBACK, feed.servicePort());
+                DataOutputStream out = new DataOutputStream(connection.getOutputStream())) {
+            out.writeInt(1);
+            out.write('?');                                    // unknown request type
+            out.flush();
+            assertThat(connection.getInputStream().read()).isEqualTo(-1);
+        }
+        assertThat(retransmit(1, 1).messages()).hasSize(1);    // still serving
+    }
+
+    @Test
     void configurationIsValidated() {
         InetSocketAddress any = new InetSocketAddress(LOOPBACK, 0);
         assertThatIllegalArgumentException().isThrownBy(() -> new BinaryFeedConfig(any, any, "", 1, Duration.ofSeconds(1), 1));
