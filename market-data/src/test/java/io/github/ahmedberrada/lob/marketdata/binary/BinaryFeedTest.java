@@ -31,8 +31,10 @@ import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.SplittableRandom;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -104,7 +106,13 @@ class BinaryFeedTest {
     }
 
     private void trade(int commands) {
+        trade(commands, true);
+    }
+
+    /** Random orders on both instruments; without waiting, updates pile up and get batched. */
+    private void trade(int commands, boolean wait) {
         SplittableRandom random = new SplittableRandom(7);
+        List<CompletableFuture<?>> pending = new ArrayList<>();
         for (int i = 0; i < commands; i++) {
             String symbol = random.nextBoolean() ? "AAPL" : "MSFT";
             Side side = random.nextBoolean() ? Side.BUY : Side.SELL;
@@ -113,8 +121,14 @@ class BinaryFeedTest {
                 case 1 -> new MarketOrder(side, random.nextLong(1, 10));
                 default -> new LimitOrder(side, random.nextLong(9_990, 10_010), random.nextLong(1, 10));
             };
-            service.submit(symbol, command).join();
+            var acknowledged = service.submit(symbol, command);
+            if (wait) {
+                acknowledged.join();
+            } else {
+                pending.add(acknowledged);
+            }
         }
+        pending.forEach(CompletableFuture::join);
     }
 
     /** Polls until the client has applied the feed sequence the publisher reached for every instrument. */
@@ -154,6 +168,7 @@ class BinaryFeedTest {
         catchUp();
 
         assertThat(client.retransmissions()).isPositive();
+        assertThat(client.snapshots()).as("losses inside the window need no new snapshot").isEqualTo(1);
         assertThat(client.tradesSeen()).isPositive();
         assertThat(client.bids("AAPL")).isNotEmpty();
     }
@@ -187,7 +202,7 @@ class BinaryFeedTest {
             return false;
         });
         client.start();
-        trade(500);
+        trade(2_000, false);                               // a burst: updates queue up behind the sender
         catchUp();
         long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
         while (seen.stream().noneMatch(Packet::isHeartbeat) && System.nanoTime() < deadline) {
@@ -211,6 +226,8 @@ class BinaryFeedTest {
                     messages.stream().map(BinaryCodec::encode).toList()).length)
                     .as("packet size").isLessThanOrEqualTo(BinaryFeed.MAX_PACKET_BYTES);
         }
+        assertThat(seen).as("updates were batched").anyMatch(packet -> packet.messages().stream()
+                .filter(UpdateEnd.class::isInstance).count() > 1);
         // at the source, every sequence number exists: the whole stream can be fetched again (BF-002, BF-004)
         for (long from = 1; from <= lastSequence; from += BinaryFeed.MAX_RETRANSMIT) {
             int count = (int) Math.min(BinaryFeed.MAX_RETRANSMIT, lastSequence - from + 1);
