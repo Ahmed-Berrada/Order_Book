@@ -102,6 +102,17 @@ class BookImageTest {
     }
 
     @Test
+    @Rulebook("MD-007")
+    void eventsTheStartingStateIncludesAreNotAppliedAgain() {
+        MatchingEngine engine = new MatchingEngine(INSTRUMENT);
+        EventBatch included = new EventBatch(1, 0, engine.process(new LimitOrder(Side.BUY, 100, 5)));
+        BookImage image = new BookImage("MD", new InstrumentState(1, engine.snapshot()));
+
+        assertThat(image.apply(included)).isEmpty();
+        assertThat(image.levels(Side.BUY)).containsExactly(new BookLevel(100, 5, 1));
+    }
+
+    @Test
     @Rulebook({"MD-001", "MD-005", "MD-006"})
     void updatesListOnlyChangedLevelsAndRemovalsAsZero() {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
