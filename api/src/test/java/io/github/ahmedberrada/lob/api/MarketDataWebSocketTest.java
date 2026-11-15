@@ -40,7 +40,7 @@ class MarketDataWebSocketTest {
     @BeforeEach
     void start() {
         venue = new SpringApplicationBuilder(LobEngineApplication.class)
-                .run("--server.port=0", "--lob.data-directory=" + directory, "--lob.fsync=OS", "--lob.fix.enabled=false");
+                .run("--server.port=0", "--lob.data-directory=" + directory, "--lob.fsync=OS", "--lob.fix.enabled=false", "--lob.binary-feed.enabled=false");
     }
 
     @AfterEach
