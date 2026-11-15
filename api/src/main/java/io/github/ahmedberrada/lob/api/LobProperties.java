@@ -50,6 +50,7 @@ public record LobProperties(
      * The FIX acceptor. It listens on the loopback interface unless told otherwise: sessions are not
      * authenticated until phase 8.
      *
+     * @param dropCopySessions read-only sessions receiving a copy of every execution report (DC-001)
      * @param storeDirectory sequence numbers and sent messages; defaults to {@code <data-directory>/fix}
      */
     public record FixProperties(
@@ -58,6 +59,7 @@ public record LobProperties(
             @DefaultValue("9878") int port,
             @DefaultValue("LOB") @NotBlank String senderCompId,
             @DefaultValue List<String> members,
+            @DefaultValue List<String> dropCopySessions,
             Path storeDirectory) {
     }
 
