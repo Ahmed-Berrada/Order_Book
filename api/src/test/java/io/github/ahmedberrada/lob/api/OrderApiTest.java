@@ -156,6 +156,41 @@ class OrderApiTest {
     }
 
     @Test
+    @Rulebook({"ST-001", "ST-002", "ST-003", "ST-005"})
+    void stopOrdersParkThenTradeWhenTriggered() {
+        post(limit("SELL", "185.30", 2));                      // 1
+        post(limit("SELL", "185.40", 5));                      // 2
+        assertThat(post("{\"side\":\"BUY\",\"type\":\"STOP\",\"stopPrice\":\"185.30\",\"quantity\":3}"))
+                .hasStatus(HttpStatus.CREATED).bodyJson().isLenientlyEqualTo("""
+                {"orderId":3,"status":"PARKED","filledQuantity":0,"restingQuantity":0,"trades":[]}""");
+        assertThat(post("{\"side\":\"BUY\",\"type\":\"STOP_LIMIT\",\"stopPrice\":\"185.40\","
+                + "\"price\":\"185.35\",\"quantity\":2}")).bodyJson()
+                .isLenientlyEqualTo("{\"orderId\":4,\"status\":\"PARKED\"}");
+
+        // order 5 trades at 185.30 and releases stop 3, whose fills at 185.30 and 185.40 release stop 4;
+        // order 5's response holds its own fill only
+        assertThat(post(limit("BUY", "185.30", 1))).bodyJson().isLenientlyEqualTo("""
+                {"orderId":5,"status":"FILLED","filledQuantity":1,
+                 "trades":[{"makerOrderId":1,"price":"185.30","quantity":1}]}""");
+        assertThat(mvc.get().uri("/api/v1/instruments/AAPL/book")).bodyJson().isLenientlyEqualTo("""
+                {"bids":[{"price":"185.35","quantity":2,"orders":1}],"asks":[{"price":"185.40","quantity":3}]}""");
+        assertThat(post("{\"side\":\"SELL\",\"type\":\"STOP\",\"stopPrice\":\"185.50\",\"quantity\":1}"))
+                .hasStatus(HttpStatus.UNPROCESSABLE_CONTENT).bodyJson()
+                .isLenientlyEqualTo("{\"reason\":\"STOP_PRICE_ALREADY_REACHED\",\"orderId\":6}");
+    }
+
+    @Test
+    @Rulebook("ST-005")
+    void anOrderFilledAsAMakerByAStopItReleasedSeesTheFill() {
+        post(limit("SELL", "185.30", 1));                      // 1
+        post("{\"side\":\"SELL\",\"type\":\"STOP\",\"stopPrice\":\"185.30\",\"quantity\":2}"); // 2
+        // order 3 buys 5: 1 fills against order 1, the rest rests and is then hit by the released stop
+        assertThat(post(limit("BUY", "185.30", 5))).bodyJson().isLenientlyEqualTo("""
+                {"orderId":3,"status":"PARTIALLY_FILLED","filledQuantity":3,"restingQuantity":2,
+                 "trades":[{"makerOrderId":1,"quantity":1},{"makerOrderId":2,"quantity":2}]}""");
+    }
+
+    @Test
     @Rulebook({"OT-005", "OT-006", "OT-007"})
     void replaceKeepsOrLosesPriorityAndCanTrade() {
         post(limit("BUY", "185.00", 10));                      // 1
@@ -233,9 +268,14 @@ class OrderApiTest {
             "{\"type\":\"MARKET\",\"quantity\":1}",                                        // missing side
             "{\"side\":\"BUY\",\"type\":\"LIMIT\",\"quantity\":1}",                       // limit without price
             "{\"side\":\"BUY\",\"type\":\"MARKET\",\"price\":\"1.00\",\"quantity\":1}",   // market with price
-            "{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":1,\"displayQty\":1}",   // unknown field
+            "{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":1,\"trailing\":1}",     // unknown field
             "{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":1,\"timeInForce\":\"DAY\"}", // unknown TIF
             "{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":1,\"postOnly\":false}", // post-only market
+            "{\"side\":\"BUY\",\"type\":\"STOP\",\"quantity\":1}",                      // stop without stop price
+            "{\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"1.00\",\"stopPrice\":\"1.00\",\"quantity\":1}",
+            "{\"side\":\"BUY\",\"type\":\"STOP\",\"stopPrice\":\"1.00\",\"price\":\"1.00\",\"quantity\":1}",
+            "{\"side\":\"BUY\",\"type\":\"STOP_LIMIT\",\"stopPrice\":\"1.00\",\"quantity\":1}",
+            "{\"side\":\"BUY\",\"type\":\"STOP\",\"stopPrice\":\"1.00\",\"quantity\":1,\"timeInForce\":\"IOC\"}",
             "{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":10.5}",                   // fractional lots
             "{\"side\":\"HOLD\",\"type\":\"MARKET\",\"quantity\":1}",                     // unknown side
             "{\"side\":\"BUY\",",                                                         // malformed JSON
