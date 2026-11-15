@@ -1,6 +1,6 @@
 package io.github.ahmedberrada.lob.api;
 
-/** A cancel targeted an order that is not resting (CT-008). The cancel was journaled. */
+/** A cancel or replace targeted an order that is not resting (CT-008, OT-005). It was journaled. */
 final class OrderNotRestingException extends RuntimeException {
 
     private final long orderId;

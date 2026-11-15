@@ -48,6 +48,14 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @ExceptionHandler
+    ResponseEntity<ProblemDetail> replaceRejected(ReplaceRejectedException e) {
+        ResponseEntity<ProblemDetail> response = problem(HttpStatus.UNPROCESSABLE_CONTENT, "Replace rejected",
+                e.getMessage(), e.reason().name());
+        response.getBody().setProperty("orderId", e.orderId());
+        return response;
+    }
+
+    @ExceptionHandler
     ResponseEntity<ProblemDetail> notResting(OrderNotRestingException e) {
         ResponseEntity<ProblemDetail> response = problem(HttpStatus.NOT_FOUND, "Order not resting",
                 e.getMessage(), RejectReason.UNKNOWN_ORDER.name());

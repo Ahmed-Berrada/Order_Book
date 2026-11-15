@@ -5,6 +5,8 @@ import io.github.ahmedberrada.lob.core.CancelRejected;
 import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
 import io.github.ahmedberrada.lob.core.OrderRejected;
+import io.github.ahmedberrada.lob.core.RejectReason;
+import io.github.ahmedberrada.lob.core.ReplaceRejected;
 import io.github.ahmedberrada.lob.service.InstrumentConfig;
 import io.github.ahmedberrada.lob.service.MatchingService;
 import io.github.ahmedberrada.lob.service.RequestRefusedException;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -58,6 +61,21 @@ class OrderController {
             OrderCancelled cancelled = (OrderCancelled) event;
             return new CancelResponse(orderId, cancelled.cancelledQuantity(), batch.commandSequence(),
                     Timestamps.of(batch));
+        });
+    }
+
+    @PutMapping("/{orderId}")
+    CompletableFuture<ReplaceResponse> replaceOrder(@PathVariable String symbol, @PathVariable long orderId,
+            @Valid @RequestBody ReplaceRequest request) {
+        InstrumentConfig instrument = instrument(symbol);
+        return service.submit(symbol, request.toCommand(orderId, instrument)).thenApply(batch -> {
+            if (batch.events().getFirst() instanceof ReplaceRejected rejected) {
+                if (rejected.reason() == RejectReason.UNKNOWN_ORDER) {
+                    throw new OrderNotRestingException(orderId);
+                }
+                throw new ReplaceRejectedException(orderId, rejected.reason());
+            }
+            return ReplaceResponse.from(batch, instrument);
         });
     }
 
