@@ -42,6 +42,8 @@ public final class BinaryFeed implements AutoCloseable {
     /** Packets are kept under this size unless a single update is larger (it is never split, BF-003). */
     static final int MAX_PACKET_BYTES = 1_400;
     static final int MAX_RETRANSMIT = 1_000;
+    /** The longest valid request (a retransmission) is 11 bytes; anything longer is not a client. */
+    static final int MAX_REQUEST_BYTES = 64;
 
     private record Item(int locate, Update update) {
     }
@@ -214,7 +216,11 @@ public final class BinaryFeed implements AutoCloseable {
         try (socket; DataInputStream in = new DataInputStream(socket.getInputStream());
                 DataOutputStream out = new DataOutputStream(socket.getOutputStream())) {
             while (true) {
-                byte[] request = new byte[in.readInt()];
+                int length = in.readInt();
+                if (length < 1 || length > MAX_REQUEST_BYTES) {
+                    return;                                          // never allocate what a peer asks for
+                }
+                byte[] request = new byte[length];
                 in.readFully(request);
                 ByteBuffer buffer = ByteBuffer.wrap(request);
                 byte[] response = switch ((char) buffer.get()) {
