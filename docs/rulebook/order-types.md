@@ -1,7 +1,5 @@
 # Rulebook: order types and amendments
 
-- **Status:** Draft
-
 This chapter extends [continuous trading](continuous-trading.md) with time in force, post-only orders
 and cancel/replace. Every rule ID is cited by tests through `@Rulebook("OT-xxx")`. Design:
 [ADR-0009](../adr/0009-order-types-and-replace.md).
