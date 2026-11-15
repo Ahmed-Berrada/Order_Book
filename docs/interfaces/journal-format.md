@@ -1,4 +1,4 @@
-# Journal file formats (version 3)
+# Journal file formats (version 4)
 
 Binary formats of the files written by `engine-journal`. Rules and rationale are in the rulebook
 chapter [`resilience.md`](../rulebook/resilience.md) and [ADR-0003](../adr/0003-journal-and-recovery.md).
@@ -32,7 +32,7 @@ Every file is a sequence of frames:
 | Size | Field | Value |
 |---|---|---|
 | 4 | magic | `0x4C4F424A` (`"LOBJ"`) |
-| 2 | format version | `3` |
+| 2 | format version | `4` |
 | 1 | file kind | `1` commands, `2` events, `3` snapshot |
 | 2+n | symbol | modified UTF-8 |
 | 8 | max order quantity | lots |
@@ -46,7 +46,7 @@ A journal must name the instrument it is opened for, or recovery stops (RS-004).
 |---|---|---|
 | 8 | sequence | 1, 2, 3… with no gaps |
 | 8 | timestamp | microseconds since 1970-01-01T00:00:00Z, never decreasing |
-| 1 | type | `1` limit, `2` market, `3` cancel, `4` replace |
+| 1 | type | `1` limit, `2` market, `3` cancel, `4` replace, `5` stop |
 
 Then, by type:
 
@@ -56,6 +56,7 @@ Then, by type:
 | 2 MARKET | side (1), quantity (8), time in force (1) |
 | 3 CANCEL | order ID (8) |
 | 4 REPLACE | order ID (8), new price ticks (8), new quantity (8) |
+| 5 STOP | side (1), stop price ticks (8), limit price ticks (8; `0` for stop-market), quantity (8) |
 
 A boolean is one byte, `0` or `1`; any other value is corruption.
 
@@ -80,6 +81,8 @@ Each event starts with its type (1 byte) and its event sequence number (8 bytes)
 | 7 | `OrderReplaced` | order ID (8), side (1), price (8), quantity (8), priority kept (1) |
 | 8 | `ReplaceRejected` | order ID (8), reject reason (1) |
 | 9 | `OrderReplenished` | order ID (8), side (1), price (8), displayed quantity (8) |
+| 10 | `OrderParked` | order ID (8), side (1), stop price (8), quantity (8) |
+| 11 | `StopTriggered` | order ID (8) |
 
 ## Snapshot (`snapshot-*.snap`: a single frame)
 
@@ -94,6 +97,10 @@ Each event starts with its type (1 byte) and its event sequence number (8 bytes)
 Then each resting order, in priority order (bids best first, then asks best first, oldest first within
 a price): order ID (8), side (1), price (8), remaining quantity (8), post-only (1), display quantity (8;
 `0` for a fully visible order), displayed quantity (8).
+
+After the resting orders: the last trade price (8; `0` before the first trade), the number of parked
+stops (4), then each stop in order of order ID: order ID (8), side (1), stop price (8), limit price (8),
+quantity (8).
 
 ## Enumeration codes
 
@@ -115,6 +122,7 @@ Codes are fixed here and never derived from Java enum order, so old journals kee
 | INVALID_TIME_IN_FORCE | 7 |
 | POST_ONLY_WOULD_TRADE | 8 |
 | INVALID_DISPLAY_QUANTITY | 9 |
+| STOP_PRICE_ALREADY_REACHED | 10 |
 
 | Cancel reason | Code |
 |---|---|
@@ -139,3 +147,4 @@ does not know.
 | 1 | Limit, market and cancel commands (phase 2) |
 | 2 | Time in force and post-only on orders, replace command, `OrderReplaced` and `ReplaceRejected` events, post-only in snapshots (ADR-0009). Version 1 files are refused: no production journal exists yet |
 | 3 | Iceberg orders: display quantity on limit orders and in snapshots, displayed quantity on `OrderRested`, `OrderReplenished` event (ADR-0010). Earlier versions are refused |
+| 4 | Stop orders: stop command, `OrderParked` and `StopTriggered` events, last trade price and parked stops in snapshots (ADR-0011). Earlier versions are refused |
