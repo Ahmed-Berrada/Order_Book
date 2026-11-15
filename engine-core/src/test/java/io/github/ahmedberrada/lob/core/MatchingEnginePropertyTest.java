@@ -33,20 +33,30 @@ class MatchingEnginePropertyTest {
                 Tuple.of(30, Arbitraries.longs().between(1, 20)),
                 Tuple.of(1, Arbitraries.of(-3L, 0L, 50L, 51L)));
 
-        Arbitrary<Command> limit = Combinators.combine(side, price, quantity)
-                .as((s, p, q) -> new LimitOrder(s, p, q));
-        Arbitrary<Command> market = Combinators.combine(side, quantity)
-                .as((s, q) -> new MarketOrder(s, q));
-        Arbitrary<Command> cancel = Arbitraries.longs().between(0, 80)
-                .map(id -> new CancelOrder(id));
+        Arbitrary<TimeInForce> limitTif = Arbitraries.frequency(
+                Tuple.of(6, TimeInForce.GTC), Tuple.of(1, TimeInForce.IOC), Tuple.of(1, TimeInForce.FOK));
+        Arbitrary<TimeInForce> marketTif = Arbitraries.frequency(
+                Tuple.of(6, TimeInForce.IOC), Tuple.of(2, TimeInForce.FOK), Tuple.of(1, TimeInForce.GTC));
+        Arbitrary<Boolean> postOnly = Arbitraries.frequency(Tuple.of(4, false), Tuple.of(1, true));
+        Arbitrary<Long> orderId = Arbitraries.longs().between(0, 80);
 
-        return Arbitraries.frequencyOf(Tuple.of(6, limit), Tuple.of(1, market), Tuple.of(2, cancel))
+        Arbitrary<Command> limit = Combinators.combine(side, price, quantity, limitTif, postOnly)
+                .as((s, p, q, t, po) -> new LimitOrder(s, p, q, t, po));
+        Arbitrary<Command> market = Combinators.combine(side, quantity, marketTif)
+                .as((s, q, t) -> new MarketOrder(s, q, t));
+        Arbitrary<Command> cancel = orderId.map(id -> new CancelOrder(id));
+        Arbitrary<Command> replace = Combinators.combine(orderId, price, quantity)
+                .as((id, p, q) -> new ReplaceOrder(id, p, q));
+
+        return Arbitraries.frequencyOf(
+                        Tuple.of(6, limit), Tuple.of(1, market), Tuple.of(2, cancel), Tuple.of(2, replace))
                 .list().ofMaxSize(150);
     }
 
     @Property
     @Rulebook({"CT-001", "CT-002", "CT-003", "CT-004", "CT-005", "CT-006", "CT-007", "CT-008", "CT-009",
-            "CT-010", "CT-011", "CT-012"})
+            "CT-010", "CT-011", "CT-012", "OT-001", "OT-002", "OT-003", "OT-004", "OT-005", "OT-006", "OT-007",
+            "OT-008"})
     void producesExactlyTheSameEventsAsTheReferenceModel(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
         ReferenceEngine reference = new ReferenceEngine(INSTRUMENT);
@@ -78,7 +88,7 @@ class MatchingEnginePropertyTest {
     }
 
     @Property
-    @Rulebook("CT-014")
+    @Rulebook({"CT-014", "OT-009"})
     void quantityIsConserved(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
         Map<Long, Long> accepted = new HashMap<>();
@@ -97,6 +107,9 @@ class MatchingEnginePropertyTest {
                     case OrderRejected e -> { }
                     case OrderRested e -> { }
                     case CancelRejected e -> { }
+                    case OrderReplaced e -> accepted.put(e.orderId(), filled.getOrDefault(e.orderId(), 0L)
+                            + cancelled.getOrDefault(e.orderId(), 0L) + e.quantity());
+                    case ReplaceRejected e -> { }
                 }
             }
 
@@ -128,7 +141,7 @@ class MatchingEnginePropertyTest {
             for (Event event : events) {
                 assertThat(event.sequence()).isEqualTo(expectedSequence++);
             }
-            if (!(command instanceof CancelOrder)) {
+            if (command instanceof LimitOrder || command instanceof MarketOrder) {
                 long orderId = switch (events.getFirst()) {
                     case OrderAccepted e -> e.orderId();
                     case OrderRejected e -> e.orderId();
@@ -175,6 +188,7 @@ class MatchingEnginePropertyTest {
             case LimitOrder order -> order.quantity();
             case MarketOrder order -> order.quantity();
             case CancelOrder cancel -> throw new AssertionError("a cancel is never accepted");
+            case ReplaceOrder replace -> throw new AssertionError("a replace is never accepted");
         };
     }
 }

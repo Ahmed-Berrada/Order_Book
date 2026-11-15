@@ -57,6 +57,12 @@ final class PriceLevel {
         }
     }
 
+    /** Lowers an order's quantity without moving it in the queue. */
+    void reduce(Order order, long newQuantity) {
+        totalQuantity -= order.remainingQuantity - newQuantity;
+        order.remainingQuantity = newQuantity;
+    }
+
     /** Removes an order from anywhere in the queue. O(n) in v1, by decision (ADR-0001 §5). */
     void remove(Order order) {
         orders.remove(order);

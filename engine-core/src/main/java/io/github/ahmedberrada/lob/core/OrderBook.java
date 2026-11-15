@@ -63,7 +63,8 @@ public final class OrderBook {
         for (Side side : Side.values()) {
             for (PriceLevel level : levels(side).values()) {
                 for (Order order : level.orders()) {
-                    orders.add(new RestingOrder(order.orderId, order.side, order.priceTicks, order.remainingQuantity));
+                    orders.add(new RestingOrder(
+                            order.orderId, order.side, order.priceTicks, order.remainingQuantity, order.postOnly));
                 }
             }
         }
@@ -91,6 +92,34 @@ public final class OrderBook {
         if (level.isEmpty()) {
             levels(maker.side).remove(level.priceTicks());
         }
+    }
+
+    /** A resting order, or {@code null} if it is not resting. */
+    Order find(long orderId) {
+        return ordersById.get(orderId);
+    }
+
+    /** Reduces a resting order's quantity in place, keeping its place in the queue (OT-006). */
+    void reduce(Order order, long newQuantity) {
+        levels(order.side).get(order.priceTicks).reduce(order, newQuantity);
+    }
+
+    /**
+     * Opposite quantity available to a taker within its limit, counted from the best level and capped
+     * at {@code needed} (OT-003).
+     */
+    long availableQuantity(Side takerSide, long limitPriceTicks, long needed) {
+        long available = 0;
+        for (PriceLevel level : levels(takerSide.opposite()).values()) {
+            boolean withinLimit = takerSide == Side.BUY
+                    ? level.priceTicks() <= limitPriceTicks
+                    : level.priceTicks() >= limitPriceTicks;
+            if (!withinLimit || available >= needed) {
+                break;
+            }
+            available += level.totalQuantity();
+        }
+        return Math.min(available, needed);
     }
 
     /** Removes a resting order, or returns {@code null} if it is not resting. */
