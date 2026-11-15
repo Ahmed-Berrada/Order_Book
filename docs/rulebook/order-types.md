@@ -8,8 +8,8 @@ Terms used below:
 - **Time in force**: how long the unfilled part of an order stays active.
 - **Replace** (amend): a change to the price or quantity of a resting order, which keeps its order ID.
 
-Hidden (iceberg) and stop orders, self-trade prevention, auctions and the DAY time in force are
-specified in later chapters.
+Iceberg orders are specified in [iceberg-orders.md](iceberg-orders.md); stop orders, self-trade
+prevention, auctions and the DAY time in force in later chapters.
 
 ## Time in force
 
