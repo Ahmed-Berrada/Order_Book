@@ -1,12 +1,29 @@
 spring:
   application:
     name: lob-engine
+  jackson:
+    deserialization:
+      # ADR-0005 §3: on order entry, an unknown field or a fractional quantity is an error.
+      fail-on-unknown-properties: true
+      accept-float-as-int: false
+  mvc:
+    async:
+      request-timeout: 5s
+    problemdetails:
+      enabled: true
 
-# Instruments are declared at startup, like on a real exchange.
-# One single-writer thread is created per symbol (ADR-0001). Wired in step 2.
+# The venue (ADR-0005 §5). Instruments are declared at startup, like on a real exchange.
 lob:
+  data-directory: ${LOB_DATA_DIR:./data}
+  queue-capacity: 10000
+  fsync: EVERY_COMMAND
+  snapshot-interval: 10000
   instruments:
     - symbol: AAPL
       tick-size: "0.01"
+      max-order-quantity: 1000000
+      max-price: "100000.00"
     - symbol: MSFT
       tick-size: "0.01"
+      max-order-quantity: 1000000
+      max-price: "100000.00"
