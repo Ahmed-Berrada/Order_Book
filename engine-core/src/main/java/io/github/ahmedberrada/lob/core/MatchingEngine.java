@@ -23,6 +23,46 @@ public final class MatchingEngine {
         this.instrument = Objects.requireNonNull(instrument, "instrument");
     }
 
+    /**
+     * Rebuilds an engine from a snapshot. The result is indistinguishable from the engine the snapshot
+     * was taken from: same queues, same next order ID, same next sequence number.
+     *
+     * @throws IllegalArgumentException if the snapshot is inconsistent
+     */
+    public static MatchingEngine restore(EngineSnapshot snapshot) {
+        Objects.requireNonNull(snapshot, "snapshot");
+        if (snapshot.nextOrderId() < 1 || snapshot.nextSequence() < 1) {
+            throw new IllegalArgumentException("next order ID and next sequence must be positive");
+        }
+        MatchingEngine engine = new MatchingEngine(snapshot.instrument());
+        engine.nextOrderId = snapshot.nextOrderId();
+        engine.nextSequence = snapshot.nextSequence();
+        for (RestingOrder order : snapshot.restingOrders()) {
+            if (order.orderId() < 1 || order.orderId() >= snapshot.nextOrderId()) {
+                throw new IllegalArgumentException("order ID out of range: " + order);
+            }
+            if (engine.book.restingQuantity(order.orderId()) != 0) {
+                throw new IllegalArgumentException("duplicate order ID: " + order);
+            }
+            if (order.remainingQuantity() <= 0 || order.remainingQuantity() > snapshot.instrument().maxOrderQuantity()
+                    || order.priceTicks() <= 0 || order.priceTicks() > snapshot.instrument().maxPriceTicks()) {
+                throw new IllegalArgumentException("invalid resting order: " + order);
+            }
+            engine.book.rest(new Order(order.orderId(), order.side(), order.priceTicks(), order.remainingQuantity()));
+        }
+        OrderBook book = engine.book;
+        if (book.bestBid().isPresent() && book.bestAsk().isPresent()
+                && book.bestBid().getAsLong() >= book.bestAsk().getAsLong()) {
+            throw new IllegalArgumentException("snapshot book is crossed");
+        }
+        return engine;
+    }
+
+    /** Captures the complete engine state (ADR-0003). */
+    public EngineSnapshot snapshot() {
+        return new EngineSnapshot(instrument, nextOrderId, nextSequence, book.restingOrders());
+    }
+
     public Instrument instrument() {
         return instrument;
     }
