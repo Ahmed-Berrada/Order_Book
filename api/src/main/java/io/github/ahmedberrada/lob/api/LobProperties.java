@@ -25,6 +25,7 @@ import org.springframework.validation.annotation.Validated;
  * @param snapshotInterval commands between automatic snapshots; 0 disables them
  * @param instruments      the listed instruments, fixed for the life of the process
  * @param fix              the FIX gateway (ADR-0006), off unless enabled
+ * @param marketData       the market data feed (ADR-0007)
  */
 @Validated
 @ConfigurationProperties("lob")
@@ -34,7 +35,16 @@ public record LobProperties(
         @DefaultValue("EVERY_COMMAND") @NotNull FsyncPolicy fsync,
         @DefaultValue("10000") @PositiveOrZero int snapshotInterval,
         @NotEmpty List<@Valid InstrumentProperties> instruments,
-        @DefaultValue @Valid FixProperties fix) {
+        @DefaultValue @Valid FixProperties fix,
+        @DefaultValue @Valid MarketDataProperties marketData) {
+
+    /**
+     * The WebSocket market data feed.
+     *
+     * @param queueCapacity messages buffered per connection before it is closed as a slow consumer (MD-008)
+     */
+    public record MarketDataProperties(@DefaultValue("1000") @Positive int queueCapacity) {
+    }
 
     /**
      * The FIX acceptor. It listens on the loopback interface unless told otherwise: sessions are not
