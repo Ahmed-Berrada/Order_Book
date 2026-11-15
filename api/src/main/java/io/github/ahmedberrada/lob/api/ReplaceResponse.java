@@ -1,13 +1,9 @@
 package io.github.ahmedberrada.lob.api;
 
-import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.OrderReplaced;
-import io.github.ahmedberrada.lob.core.OrderRested;
-import io.github.ahmedberrada.lob.core.TradeExecuted;
 import io.github.ahmedberrada.lob.journal.EventBatch;
 import io.github.ahmedberrada.lob.service.InstrumentConfig;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -27,29 +23,11 @@ public record ReplaceResponse(
 
     static ReplaceResponse from(EventBatch batch, InstrumentConfig instrument) {
         OrderReplaced replaced = (OrderReplaced) batch.events().getFirst();
-        long filled = 0;
-        long resting = replaced.priorityKept() ? replaced.quantity() : 0;
-        List<OrderResponse.Trade> trades = new ArrayList<>();
-        long orderId = replaced.orderId();
-        for (Event event : batch.events().subList(1, batch.events().size())) {
-            // attributed by order ID: icebergs' refills and released stops' events can follow (ST-005)
-            switch (event) {
-                case TradeExecuted e when e.takerOrderId() == orderId || e.makerOrderId() == orderId -> {
-                    boolean taker = e.takerOrderId() == orderId;
-                    filled += e.quantity();
-                    trades.add(new OrderResponse.Trade(e.sequence(), taker ? e.makerOrderId() : e.takerOrderId(),
-                            Prices.format(instrument, e.priceTicks()), e.quantity()));
-                    if (!taker) {
-                        resting = e.makerRemainingQuantity();
-                    }
-                }
-                case OrderRested e when e.orderId() == orderId -> resting = e.quantity();
-                default -> {
-                    // another order's event
-                }
-            }
-        }
+        // kept priority: the order rests with its new quantity unless a released stop fills it
+        OrderFills fills = OrderFills.of(replaced.orderId(), replaced.priorityKept() ? replaced.quantity() : 0,
+                batch.events(), 1, instrument);
         return new ReplaceResponse(replaced.orderId(), Prices.format(instrument, replaced.priceTicks()),
-                replaced.priorityKept(), batch.commandSequence(), Timestamps.of(batch), filled, resting, trades);
+                replaced.priorityKept(), batch.commandSequence(), Timestamps.of(batch), fills.filled, fills.resting,
+                fills.trades);
     }
 }
