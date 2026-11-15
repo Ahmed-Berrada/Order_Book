@@ -20,7 +20,9 @@ backed by **invariant tests**, and **measured before it is optimised**.
 > are published as a level-2 feed over [WebSocket](docs/interfaces/market-data-websocket.md) and as a
 > sequenced [binary feed](docs/interfaces/market-data-binary.md) with retransmission
 > ([feed rules](docs/rulebook/market-data.md), [binary feed and drop copy rules](docs/rulebook/feeds.md)).
-> Venue functionality (order types, auctions, circuit breakers) comes next (see [Roadmap](#roadmap)).
+> **Phase 4, Venue functionality, in progress:** IOC, FOK, post-only and cancel/replace with priority
+> rules are in force ([order types](docs/rulebook/order-types.md)); auctions, trading phases and circuit
+> breakers come next (see [Roadmap](#roadmap)).
 
 ---
 
@@ -298,8 +300,8 @@ mutated by a single thread and never needs a lock.
 
 The full rationale is in [ADR-0001](docs/adr/0001-foundations.md), [ADR-0002](docs/adr/0002-core-engine-model.md)
 [ADR-0003](docs/adr/0003-journal-and-recovery.md) [ADR-0004](docs/adr/0004-service-layer.md), [ADR-0005](docs/adr/0005-rest-api.md),
-[ADR-0006](docs/adr/0006-fix-gateway.md), [ADR-0007](docs/adr/0007-market-data.md) and
-[ADR-0008](docs/adr/0008-binary-feed-and-drop-copy.md).
+[ADR-0006](docs/adr/0006-fix-gateway.md), [ADR-0007](docs/adr/0007-market-data.md),
+[ADR-0008](docs/adr/0008-binary-feed-and-drop-copy.md) and [ADR-0009](docs/adr/0009-order-types-and-replace.md).
 The matching behaviour itself is specified in the [rulebook](docs/rulebook/continuous-trading.md).
 
 | Decision | Choice | Reason |
@@ -467,26 +469,13 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 1 | **Core engine**: rulebook, LIMIT / MARKET / cancel, property tests, reference model, quality gates | ✅ |
 | 2 | **Durability & audit**: write-ahead journal, snapshots, crash recovery, replay | ✅ |
 | 3 | **Connectivity**: service layer, REST API, FIX order entry and drop copy, WebSocket and binary market data | ✅ |
-| 4 | **Venue functionality**: advanced orders, auctions, trading phases, circuit breakers | ⏳ |
+| 4 | **Venue functionality**: IOC / FOK / post-only / cancel-replace ✅; iceberg and stop orders, self-trade prevention, auctions, trading phases, circuit breakers | ⏳ |
 | 5 | **Pre-trade risk & members** | |
 | 6 | **Performance**: JMH, zero-allocation hot path, published latency | |
 | 7 | **Regulatory evidence**: MiFID II compliance matrix, RTS 22 / 24 reporting, surveillance | |
 | 8 | **Security & supply chain**: mTLS, OIDC, SBOM, signed releases | |
 | 9 | **Operations & resilience**: observability, failover, runbooks, chaos tests | |
 | 10 | **Post-trade & analytics** *(optional)* | |
-
----|---|---|---|
-| 0 | **Foundations** | Maven multi-module, wrapper, CI, enforced module boundary, ADR | ✅ |
-| 1 | **Core engine** | `OrderBook`: LIMIT / MARKET / cancel, JUnit scenarios, jqwik invariants | ⏳ |
-| 2 | **Service** | One thread per symbol, Spring Boot REST API, web tests | |
-| 3 | **JMH baseline** | `engine-bench` module, published throughput and latency | |
-| 4 | **Measured optimisation** | O(1) cancel (intrusive list), fewer allocations, before/after benchmarks | |
-| 5 | **Journal & replay** | Append-only command journal; exact state recovery after a crash | |
-| 6 | **Market data** | WebSocket feed: top of book and L2 diffs | |
-| 7 | **Advanced orders** | IOC, FOK, post-only, cancel/replace, self-trade prevention | |
-| 8 | **Pre-trade risk** | Fat-finger checks, price bands, max quantity, circuit breaker | |
-| 9 | **Low latency** | LMAX Disruptor, zero-allocation hot path, ZGC, SBE binary encoding | |
-| 10 | **Options** | Call/put chains per strike and expiry, one book per contract | |
 
 ---
 

@@ -21,6 +21,7 @@ import quickfix.field.OrdStatus;
 import quickfix.field.OrderID;
 import quickfix.field.OrderQty;
 import quickfix.field.OrigClOrdID;
+import quickfix.field.Price;
 import quickfix.field.Side;
 import quickfix.field.Symbol;
 import quickfix.field.Text;
@@ -50,8 +51,8 @@ final class ExecutionReports {
     }
 
     private static ExecutionReport of(FixOrder order, char execType, String execId, long timestampMicros) {
-        ExecutionReport report = base(order.fixOrderId(), execId, execType, order.ordStatus(), order.clOrdId,
-                order.instrument.symbol(), order.side, order.orderQuantity, timestampMicros);
+        ExecutionReport report = base(order.fixOrderId(), execId, execType, order.ordStatus(), order.clOrdId(),
+                order.instrument.symbol(), order.side, order.orderQuantity(), timestampMicros);
         report.setDecimal(CumQty.FIELD, BigDecimal.valueOf(order.cumulativeQuantity()));
         report.setDecimal(LeavesQty.FIELD, BigDecimal.valueOf(order.leavesQuantity()));
         report.setDecimal(AvgPx.FIELD, order.averagePrice());
@@ -112,7 +113,23 @@ final class ExecutionReports {
     static ExecutionReport cancelled(FixOrder order, String cancelClOrdId, long eventSequence, long timestampMicros) {
         ExecutionReport report = of(order, ExecType.CANCELED, eventSequence, timestampMicros);
         report.setString(ClOrdID.FIELD, cancelClOrdId);
-        report.setString(OrigClOrdID.FIELD, order.clOrdId);
+        report.setString(OrigClOrdID.FIELD, order.clOrdId());
+        return report;
+    }
+
+    /** A cancel of the remainder of an IOC, FOK or market order, or by another channel; Text is the reason. */
+    static ExecutionReport cancelled(FixOrder order, long eventSequence, long timestampMicros, String reason) {
+        ExecutionReport report = of(order, ExecType.CANCELED, eventSequence, timestampMicros);
+        report.setString(Text.FIELD, reason);
+        return report;
+    }
+
+    /** A confirmed replace (OT-008); call after {@link FixOrder#replaced}. */
+    static ExecutionReport replaced(FixOrder order, String origClOrdId, long eventSequence, long timestampMicros,
+            long priceTicks) {
+        ExecutionReport report = of(order, ExecType.REPLACED, eventSequence, timestampMicros);
+        report.setString(OrigClOrdID.FIELD, origClOrdId);
+        report.setDecimal(Price.FIELD, order.instrument.toPrice(priceTicks));
         return report;
     }
 
@@ -121,7 +138,17 @@ final class ExecutionReports {
         ExecutionReport report = of(order, ExecType.PENDING_CANCEL, gatewayExecId(), nowMicros());
         report.setChar(OrdStatus.FIELD, OrdStatus.PENDING_CANCEL);
         report.setString(ClOrdID.FIELD, cancelClOrdId);
-        report.setString(OrigClOrdID.FIELD, order.clOrdId);
+        report.setString(OrigClOrdID.FIELD, order.clOrdId());
+        report.setString(Text.FIELD, "OUTCOME_UNKNOWN");
+        return report;
+    }
+
+    /** A replace whose journal write failed: it may or may not have happened (ADR-0006 §5). */
+    static ExecutionReport pendingReplace(FixOrder order, String replaceClOrdId) {
+        ExecutionReport report = of(order, ExecType.PENDING_REPLACE, gatewayExecId(), nowMicros());
+        report.setChar(OrdStatus.FIELD, OrdStatus.PENDING_REPLACE);
+        report.setString(ClOrdID.FIELD, replaceClOrdId);
+        report.setString(OrigClOrdID.FIELD, order.clOrdId());
         report.setString(Text.FIELD, "OUTCOME_UNKNOWN");
         return report;
     }
@@ -133,12 +160,17 @@ final class ExecutionReports {
 
     static OrderCancelReject cancelReject(String orderId, String clOrdId, String origClOrdId, char ordStatus,
             int reason, String text) {
+        return cancelReject(orderId, clOrdId, origClOrdId, ordStatus, reason, text, CxlRejResponseTo.ORDER_CANCEL_REQUEST);
+    }
+
+    static OrderCancelReject cancelReject(String orderId, String clOrdId, String origClOrdId, char ordStatus,
+            int reason, String text, char responseTo) {
         OrderCancelReject reject = new OrderCancelReject();
         reject.setString(OrderID.FIELD, orderId);
         reject.setString(ClOrdID.FIELD, clOrdId);
         reject.setString(OrigClOrdID.FIELD, origClOrdId);
         reject.setChar(OrdStatus.FIELD, ordStatus);
-        reject.setChar(CxlRejResponseTo.FIELD, CxlRejResponseTo.ORDER_CANCEL_REQUEST);
+        reject.setChar(CxlRejResponseTo.FIELD, responseTo);
         reject.setInt(CxlRejReason.FIELD, reason);
         reject.setString(Text.FIELD, text);
         return reject;

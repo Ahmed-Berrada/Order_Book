@@ -18,6 +18,7 @@ import quickfix.field.BusinessRejectReason;
 import quickfix.field.ClOrdID;
 import quickfix.field.CumQty;
 import quickfix.field.ExecID;
+import quickfix.field.ExecInst;
 import quickfix.field.ExecType;
 import quickfix.field.LastPx;
 import quickfix.field.LastQty;
@@ -128,19 +129,24 @@ class NewOrderTest {
         Message offTick = Orders.limit("B-1", Side.BUY, "185.255", "1");
         Message unknownSymbol = Orders.order("B-2", "TSLA", Side.BUY, OrdType.MARKET, "1");
         Message fractional = Orders.market("B-3", Side.BUY, "1.5");
-        Message ioc = Orders.limit("B-4", Side.BUY, "185.25", "1");
-        ioc.setChar(TimeInForce.FIELD, TimeInForce.IMMEDIATE_OR_CANCEL);
+        Message gtd = Orders.limit("B-4", Side.BUY, "185.25", "1");
+        gtd.setChar(TimeInForce.FIELD, TimeInForce.GOOD_TILL_DATE);
         Message limitWithoutPrice = Orders.order("B-5", "AAPL", Side.BUY, OrdType.LIMIT, "1");
         Message marketWithPrice = Orders.market("B-6", Side.BUY, "1");
         marketWithPrice.setString(Price.FIELD, "185.25");
         Message sellShort = Orders.market("B-7", Side.SELL_SHORT, "1");
         Message stopOrder = Orders.order("B-8", "AAPL", Side.BUY, OrdType.STOP, "1");
+        Message allOrNone = Orders.limit("B-10", Side.BUY, "185.25", "1");          // ExecInst G: all or none
+        allOrNone.setString(ExecInst.FIELD, "G");
+        Message postOnlyMarket = Orders.market("B-11", Side.BUY, "1");
+        postOnlyMarket.setString(ExecInst.FIELD, String.valueOf(ExecInst.PARTICIPATE_DONT_INITIATE));
 
         Object[][] cases = {
             {offTick, "99", "OFF_TICK_PRICE"}, {unknownSymbol, "1", "UNKNOWN_INSTRUMENT"},
-            {fractional, "13", "FRACTIONAL_QUANTITY"}, {ioc, "11", "UNSUPPORTED_TIME_IN_FORCE"},
+            {fractional, "13", "FRACTIONAL_QUANTITY"}, {gtd, "11", "UNSUPPORTED_TIME_IN_FORCE"},
             {limitWithoutPrice, "11", "PRICE_REQUIRED_FOR_LIMIT"}, {marketWithPrice, "11", "PRICE_NOT_ALLOWED_FOR_MARKET"},
             {sellShort, "11", "UNSUPPORTED_SIDE"}, {stopOrder, "11", "UNSUPPORTED_ORD_TYPE"},
+            {allOrNone, "11", "UNSUPPORTED_EXEC_INST"}, {postOnlyMarket, "11", "POST_ONLY_NOT_ALLOWED_FOR_MARKET"},
         };
         for (Object[] c : cases) {
             member1.send((Message) c[0]);

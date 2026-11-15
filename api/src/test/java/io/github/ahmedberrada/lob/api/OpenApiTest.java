@@ -34,9 +34,13 @@ class OpenApiTest {
                 "/api/v1/instruments/{symbol}/orders",
                 "/api/v1/instruments/{symbol}/orders/{orderId}");
         document.extractingPath("$.paths['/api/v1/instruments/{symbol}/orders/{orderId}']").asMap()
-                .containsOnlyKeys("get", "delete");
+                .containsOnlyKeys("get", "put", "delete");
         document.extractingPath("$.components.schemas.OrderRequest.required").asArray()
                 .containsExactlyInAnyOrder("side", "type", "quantity");
+        document.extractingPath("$.components.schemas.OrderRequest.properties.timeInForce.enum").asArray()
+                .containsExactly("GTC", "IOC", "FOK");
+        document.extractingPath("$.components.schemas.ReplaceRequest.required").asArray()
+                .containsExactlyInAnyOrder("price", "quantity");
     }
 
     @Test

@@ -9,11 +9,16 @@ import io.github.ahmedberrada.lob.core.CancelRejected;
 import io.github.ahmedberrada.lob.core.Command;
 import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.LimitOrder;
+import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
 import io.github.ahmedberrada.lob.core.OrderRejected;
+import io.github.ahmedberrada.lob.core.OrderReplaced;
 import io.github.ahmedberrada.lob.core.RejectReason;
+import io.github.ahmedberrada.lob.core.ReplaceOrder;
+import io.github.ahmedberrada.lob.core.ReplaceRejected;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.TimeInForce;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -51,9 +56,49 @@ class CodecTest {
         for (CancelReason reason : CancelReason.values()) {
             events.add(new OrderCancelled(1, 1, 1, reason));
         }
+        for (RejectReason reason : RejectReason.values()) {
+            events.add(new ReplaceRejected(1, 1, reason));
+        }
+        events.add(new OrderReplaced(1, 1, Side.SELL, 5, 6, true));
+        events.add(new OrderReplaced(1, 1, Side.BUY, 5, 6, false));
         EventBatch batch = new EventBatch(1, 0, events);
 
         assertThat(Codec.decodeBatch(Codec.encodeBatch(batch))).isEqualTo(batch);
+    }
+
+    @Test
+    void everyTimeInForceAndAttributeHasACode() throws IOException {
+        for (TimeInForce tif : TimeInForce.values()) {
+            for (boolean postOnly : new boolean[] {false, true}) {
+                JournalEntry limit = new JournalEntry(1, 1, new LimitOrder(Side.SELL, 3, 4, tif, postOnly));
+                assertThat(Codec.decodeEntry(Codec.encodeEntry(limit))).isEqualTo(limit);
+            }
+            JournalEntry market = new JournalEntry(1, 1, new MarketOrder(Side.BUY, 4, tif));
+            assertThat(Codec.decodeEntry(Codec.encodeEntry(market))).isEqualTo(market);
+        }
+        JournalEntry replace = new JournalEntry(1, 1, new ReplaceOrder(7, 8, 9));
+        assertThat(Codec.decodeEntry(Codec.encodeEntry(replace))).isEqualTo(replace);
+    }
+
+    @Test
+    void invalidAttributesAreCorruption() throws IOException {
+        // limit: header 17 bytes (sequence, timestamp, type), side 1, price 8, quantity 8, tif 1, post-only 1
+        byte[] limit = Codec.encodeEntry(new JournalEntry(1, 1, new LimitOrder(Side.BUY, 1, 1)));
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 34, 0)))
+                .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("time in force");
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 34, 4)))
+                .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("time in force");
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 35, 2)))
+                .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("boolean");
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 35, 0xFF)))
+                .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("boolean");
+    }
+
+    @Test
+    void versionOneJournalsAreRefused() {
+        byte[] valid = Codec.encodeHeader(new Codec.Header(Codec.Kind.COMMANDS, CommandStream.INSTRUMENT));
+        assertThat(Codec.FORMAT_VERSION).isEqualTo((short) 2);
+        assertCorrupt(withByte(valid, 5, 1), "version 1");
     }
 
     @Test

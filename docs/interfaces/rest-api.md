@@ -13,8 +13,8 @@ REST is not the low-latency path: members trading at speed will use FIX (phase 3
 - **Prices are decimal strings** in responses (`"185.25"`), never binary floating point. Requests may
   send a price as a string or a JSON number; it must be an exact multiple of the tick size (OE-002).
 - **Quantities are whole lots.** A fractional quantity such as `10.5` is a `400`, never truncated.
-- **Unknown fields are refused** with `400`: a misspelt or unsupported field (for example a time in
-  force, which does not exist yet) must not be silently ignored on an order.
+- **Unknown fields are refused** with `400`: a misspelt or unsupported field (for example a display
+  quantity, which does not exist yet) must not be silently ignored on an order.
 - Timestamps are UTC ISO-8601 with microseconds, e.g. `2026-10-08T09:11:38.669599Z`. All events of a
   command share the command's timestamp (RS-006).
 
@@ -35,7 +35,18 @@ Listed instruments.
 {"side":"SELL","type":"MARKET","quantity":5}
 ```
 
-`price` is required for `LIMIT` and must be absent for `MARKET`.
+`price` is required for `LIMIT` and must be absent for `MARKET`. Optional fields
+([order types](../rulebook/order-types.md)):
+
+| Field | Values | Default |
+|---|---|---|
+| `timeInForce` | `GTC`, `IOC`, `FOK` (`GTC` is rejected on a `MARKET` order) | `GTC` for `LIMIT`, `IOC` for `MARKET` |
+| `postOnly` | `true` or `false`; `LIMIT` only, and only with `GTC` | `false` |
+
+```json
+{"side":"BUY","type":"LIMIT","price":"185.25","quantity":10,"timeInForce":"IOC"}
+{"side":"SELL","type":"LIMIT","price":"185.40","quantity":10,"postOnly":true}
+```
 
 `201 Created`, with `Location: /api/v1/instruments/{symbol}/orders/{orderId}`:
 
@@ -59,7 +70,7 @@ Listed instruments.
 | `NEW` | Rests in the book, nothing filled |
 | `PARTIALLY_FILLED` | Partly filled, the rest rests in the book |
 | `FILLED` | Completely filled |
-| `CANCELLED` | A market order's unfilled remainder was cancelled (CT-006), possibly after fills |
+| `CANCELLED` | The unfilled remainder of a market, IOC or FOK order was cancelled (CT-006, OT-002, OT-003), possibly after fills |
 
 ### `DELETE /api/v1/instruments/{symbol}/orders/{orderId}`
 
@@ -70,6 +81,34 @@ Listed instruments.
 ```
 
 `404` if the order is not resting (CT-008). The cancel request is still journaled.
+
+### `PUT /api/v1/instruments/{symbol}/orders/{orderId}`
+
+Replaces a resting order's price and **remaining** quantity (OT-005). The order keeps its ID.
+
+```json
+{"price":"185.50","quantity":6}
+```
+
+`200 OK`:
+
+```json
+{
+  "orderId": 1,
+  "price": "185.50",
+  "priorityKept": false,
+  "commandSequence": 4,
+  "timestamp": "2026-11-15T10:00:00.000001Z",
+  "filledQuantity": 4,
+  "restingQuantity": 2,
+  "trades": [{"sequence": 9, "makerOrderId": 2, "price": "185.50", "quantity": 4}]
+}
+```
+
+`priorityKept` is true only when the price is unchanged and the quantity not increased (OT-006). A
+replace that crosses the book trades immediately (OT-007). `404 UNKNOWN_ORDER` if the order is not
+resting; `422` with the engine's reason if the replace is refused, in which case the order is
+unchanged.
 
 ### `GET /api/v1/instruments/{symbol}/orders/{orderId}`
 
@@ -96,11 +135,12 @@ An order that is not resting (filled, cancelled or unknown) returns `resting: fa
 
 | Status | When | `reason` |
 |---|---|---|
-| `400` | Malformed JSON, missing or unknown field, fractional quantity, price on a market order, depth out of range | — |
+| `400` | Malformed JSON, missing or unknown field, fractional quantity, price or `postOnly` on a market order, depth out of range | — |
 | `404` | Unknown symbol (OE-001) | `UNKNOWN_INSTRUMENT` |
-| `404` | Cancel of an order that is not resting (CT-008) | `UNKNOWN_ORDER` |
+| `404` | Cancel or replace of an order that is not resting (CT-008, OT-005) | `UNKNOWN_ORDER` |
 | `422` | Off-tick price (OE-002) | `OFF_TICK_PRICE` |
-| `422` | Rejected by the engine (CT-007, CT-009); the body carries the `orderId` it consumed | `INVALID_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `NO_LIQUIDITY` |
+| `422` | Rejected by the engine (CT-007, CT-009, OT-001, OT-004); the body carries the `orderId` it consumed | `INVALID_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `NO_LIQUIDITY`, `INVALID_TIME_IN_FORCE`, `POST_ONLY_WOULD_TRADE` |
+| `422` | Replace refused by the engine (OT-005); the order is unchanged | the same reasons |
 | `503` | Queue full (OE-005), with `Retry-After: 1` | `OVERLOADED` |
 | `503` | Instrument halted (OE-006) or venue shutting down (OE-007) | `HALTED`, `STOPPED` |
 | `500` | The command's journal write failed: **its outcome is unknown** (ADR-0003 §8) | `OUTCOME_UNKNOWN` |
