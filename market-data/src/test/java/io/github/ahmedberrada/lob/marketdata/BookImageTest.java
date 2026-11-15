@@ -121,6 +121,21 @@ class BookImageTest {
     }
 
     @Test
+    @Rulebook({"MD-005", "OT-008"})
+    void replacesShrinkLevelsInPlaceAndANoOpReplacePublishesNothing() {
+        MatchingEngine engine = new MatchingEngine(INSTRUMENT);
+        BookImage image = new BookImage("MD", new InstrumentState(0, engine.snapshot()));
+        image.apply(new EventBatch(1, 0, engine.process(new LimitOrder(Side.BUY, 100, 5))));
+
+        assertThat(image.apply(new EventBatch(2, 0, engine.process(new ReplaceOrder(1, 100, 5))))).isEmpty();
+        Update reduced = image.apply(new EventBatch(3, 0, engine.process(new ReplaceOrder(1, 100, 2)))).orElseThrow();
+        assertThat(reduced.bids()).containsExactly(new BookLevel(100, 2, 1));
+        Update moved = image.apply(new EventBatch(4, 0, engine.process(new ReplaceOrder(1, 101, 2)))).orElseThrow();
+        assertThat(moved.bids()).containsExactly(new BookLevel(101, 2, 1), new BookLevel(100, 0, 0));
+        assertThat(image.levels(Side.BUY)).containsExactly(new BookLevel(101, 2, 1));
+    }
+
+    @Test
     @Rulebook({"MD-001", "MD-005", "MD-006"})
     void updatesListOnlyChangedLevelsAndRemovalsAsZero() {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
