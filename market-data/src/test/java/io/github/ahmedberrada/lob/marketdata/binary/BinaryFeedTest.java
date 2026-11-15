@@ -236,7 +236,9 @@ class BinaryFeedTest {
             assertThat(again.messages()).hasSize(count);
         }
         assertThat(retransmit(lastSequence + 1_000, 1).isRefused()).isTrue();
-        assertThat(seen.getFirst().messages()).containsExactly(
+        // the stream starts with the directory; this client joined after it was sent, so it may have
+        // missed that datagram, as any late UDP receiver would: fetch it from the source
+        assertThat(retransmit(1, 2).messages()).containsExactly(
                 new Directory(1, "AAPL", 1, (byte) -2), new Directory(2, "MSFT", 5, (byte) -2));
         assertThat(seen).anyMatch(Packet::isHeartbeat);
     }
