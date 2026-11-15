@@ -1,7 +1,5 @@
 # Rulebook: market data
 
-- **Status:** Draft
-
 What the venue publishes about its order books, and the guarantees a subscriber can rely on. As in the
 other chapters, each rule ID is cited by at least one test through `@Rulebook("MD-xxx")`. Design:
 [ADR-0007](../adr/0007-market-data.md); wire format:
