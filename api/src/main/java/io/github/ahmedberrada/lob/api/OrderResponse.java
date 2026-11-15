@@ -3,6 +3,7 @@ package io.github.ahmedberrada.lob.api;
 import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.OrderAccepted;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
+import io.github.ahmedberrada.lob.core.OrderReplenished;
 import io.github.ahmedberrada.lob.core.OrderRested;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
 import io.github.ahmedberrada.lob.journal.EventBatch;
@@ -46,6 +47,7 @@ public record OrderResponse(
                 }
                 case OrderRested e -> resting = e.quantity();
                 case OrderCancelled e -> cancelled = e.cancelledQuantity();
+                case OrderReplenished e -> { }         // a maker's iceberg refilled (IC-006)
                 default -> throw new IllegalArgumentException("unexpected event for an accepted order: " + event);
             }
         }

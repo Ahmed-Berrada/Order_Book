@@ -2,6 +2,7 @@ package io.github.ahmedberrada.lob.api;
 
 import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.OrderReplaced;
+import io.github.ahmedberrada.lob.core.OrderReplenished;
 import io.github.ahmedberrada.lob.core.OrderRested;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
 import io.github.ahmedberrada.lob.journal.EventBatch;
@@ -37,6 +38,7 @@ public record ReplaceResponse(
                             Prices.format(instrument, e.priceTicks()), e.quantity()));
                 }
                 case OrderRested e -> resting = e.quantity();
+                case OrderReplenished e -> { }         // a maker's iceberg refilled (IC-006)
                 default -> throw new IllegalArgumentException("unexpected event after a replace: " + event);
             }
         }

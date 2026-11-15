@@ -19,6 +19,7 @@ import java.math.BigDecimal;
  * @param price       decimal price; required for LIMIT, absent for MARKET
  * @param timeInForce optional; GTC for a LIMIT order and IOC for a MARKET order by default
  * @param postOnly    optional, LIMIT orders only; false by default
+ * @param displayQuantity optional, LIMIT orders only: the peak of an iceberg order (IC-001)
  */
 public record OrderRequest(
         @NotNull Side side,
@@ -26,7 +27,8 @@ public record OrderRequest(
         BigDecimal price,
         @NotNull Long quantity,
         TimeInForce timeInForce,
-        Boolean postOnly) {
+        Boolean postOnly,
+        Long displayQuantity) {
 
     @JsonIgnore
     @AssertTrue(message = "price is required for LIMIT orders and must be absent for MARKET orders")
@@ -35,16 +37,17 @@ public record OrderRequest(
     }
 
     @JsonIgnore
-    @AssertTrue(message = "postOnly applies to LIMIT orders only")
-    public boolean isPostOnlyConsistentWithType() {
-        return type != OrderType.MARKET || postOnly == null;
+    @AssertTrue(message = "postOnly and displayQuantity apply to LIMIT orders only")
+    public boolean isLimitOnlyFieldsConsistentWithType() {
+        return type != OrderType.MARKET || (postOnly == null && displayQuantity == null);
     }
 
     /** The engine command, with the price converted to ticks (OE-002). */
     Command toCommand(InstrumentConfig instrument) {
         return switch (type) {
             case LIMIT -> new LimitOrder(side, instrument.toTicks(price), quantity,
-                    timeInForce == null ? TimeInForce.GTC : timeInForce, Boolean.TRUE.equals(postOnly));
+                    timeInForce == null ? TimeInForce.GTC : timeInForce, Boolean.TRUE.equals(postOnly),
+                    displayQuantity == null ? 0 : displayQuantity);
             case MARKET -> new MarketOrder(side, quantity, timeInForce == null ? TimeInForce.IOC : timeInForce);
         };
     }
