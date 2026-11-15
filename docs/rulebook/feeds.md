@@ -1,7 +1,5 @@
 # Rulebook: binary market data feed and drop copy
 
-- **Status:** Draft
-
 Two feeds for professional members: a sequenced binary market data feed for low-latency consumers,
 and a FIX drop copy for members' risk and back-office systems. Rule IDs are cited by tests through
 `@Rulebook`. Design: [ADR-0008](../adr/0008-binary-feed-and-drop-copy.md); formats:
