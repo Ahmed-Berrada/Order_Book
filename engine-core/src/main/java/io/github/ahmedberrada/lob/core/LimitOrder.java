@@ -4,12 +4,14 @@ import java.util.Objects;
 
 /**
  * New order that trades at its limit price or better (rulebook CT-004). What happens to its remainder
- * depends on its time in force (OT-001); a post-only order never takes liquidity (OT-004).
+ * depends on its time in force (OT-001); a post-only order never takes liquidity (OT-004). A non-zero
+ * display quantity below the quantity makes it an iceberg (IC-001).
  *
  * <p>Price and quantity are not validated here: an invalid value is a business outcome, reported by
  * the engine as {@link OrderRejected} (CT-009).
  */
-public record LimitOrder(Side side, long priceTicks, long quantity, TimeInForce timeInForce, boolean postOnly)
+public record LimitOrder(
+        Side side, long priceTicks, long quantity, TimeInForce timeInForce, boolean postOnly, long displayQuantity)
         implements Command {
 
     public LimitOrder {
@@ -17,7 +19,12 @@ public record LimitOrder(Side side, long priceTicks, long quantity, TimeInForce 
         Objects.requireNonNull(timeInForce, "timeInForce");
     }
 
-    /** A good-till-cancelled order that may take liquidity. */
+    /** A fully visible order. */
+    public LimitOrder(Side side, long priceTicks, long quantity, TimeInForce timeInForce, boolean postOnly) {
+        this(side, priceTicks, quantity, timeInForce, postOnly, 0);
+    }
+
+    /** A good-till-cancelled, fully visible order that may take liquidity. */
     public LimitOrder(Side side, long priceTicks, long quantity) {
         this(side, priceTicks, quantity, TimeInForce.GTC, false);
     }

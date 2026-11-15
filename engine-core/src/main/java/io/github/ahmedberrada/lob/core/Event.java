@@ -6,7 +6,7 @@ package io.github.ahmedberrada.lob.core;
  */
 public sealed interface Event
         permits OrderAccepted, OrderRejected, TradeExecuted, OrderRested, OrderCancelled, CancelRejected,
-                OrderReplaced, ReplaceRejected {
+                OrderReplaced, ReplaceRejected, OrderReplenished {
 
     /** Position of this event in the instrument's event stream: 1, 2, 3… with no gaps (CT-011). */
     long sequence();
