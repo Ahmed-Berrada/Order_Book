@@ -31,6 +31,7 @@ jobs:
             engine-journal/target/site/jacoco/
             engine-service/target/site/jacoco/
             fix-gateway/target/site/jacoco/
+            market-data/target/site/jacoco/
             api/target/site/jacoco/
           if-no-files-found: ignore
 
@@ -47,7 +48,7 @@ jobs:
 
       # ADR-0002 §7: PIT mutation score of each engine module must stay at or above 80 %.
       - name: Mutation testing
-        run: ./mvnw -B -ntp -pl engine-core,engine-journal,engine-service -am -Pmutation verify
+        run: ./mvnw -B -ntp -pl engine-core,engine-journal,engine-service,market-data -am -Pmutation verify
 
       - name: Upload mutation report
         if: always()
@@ -58,4 +59,5 @@ jobs:
             engine-core/target/pit-reports/
             engine-journal/target/pit-reports/
             engine-service/target/pit-reports/
+            market-data/target/pit-reports/
           if-no-files-found: ignore
