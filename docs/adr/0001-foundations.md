@@ -1,6 +1,6 @@
 # ADR-0001: Foundational architecture
 
-- **Status:** Accepted
+- **Status:** Accepted. The order ID generator in §2 is superseded by [ADR-0002](0002-core-engine-model.md).
 - **Date:** 2026-10-05
 
 ## Context
@@ -28,7 +28,8 @@ The `api` routes each command to the worker that owns its symbol and waits on a 
 
 - Within a book, processing is sequential. Price-time priority requires a total order of events.
 - Across books, processing is parallel. Instruments never interact.
-- Shared state is limited to the order ID generator (`AtomicLong`).
+- Shared state is limited to the order ID generator (`AtomicLong`). *Superseded: IDs are assigned per
+  instrument by the engine, see ADR-0002.*
 
 ### 3. Command → Events
 
