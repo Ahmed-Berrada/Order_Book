@@ -37,6 +37,7 @@
         <jacoco.version>0.8.15</jacoco.version>
         <pitest.version>1.30.0</pitest.version>
         <pitest-junit5-plugin.version>1.2.3</pitest-junit5-plugin.version>
+        <springdoc.version>3.1.1</springdoc.version>
     </properties>
 
     <!-- Internal modules, and test libraries not managed by the Spring Boot BOM. -->
@@ -62,6 +63,11 @@
                 <groupId>io.github.ahmedberrada.lob</groupId>
                 <artifactId>engine-service</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>${springdoc.version}</version>
             </dependency>
             <dependency>
                 <groupId>net.jqwik</groupId>

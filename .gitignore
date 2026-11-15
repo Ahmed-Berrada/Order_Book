@@ -18,3 +18,7 @@ jmh-result*.json
 
 # jqwik failure database
 .jqwik-database
+
+# Journals written by a locally running venue
+/data/
+api/data/
