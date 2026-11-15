@@ -191,6 +191,22 @@ class OrderApiTest {
     }
 
     @Test
+    @Rulebook({"OT-007", "ST-005"})
+    void anAggressiveReplaceThatReleasesAStopSeesTheStopsFillAgainstIt() {
+        post(limit("SELL", "185.10", 1));                      // 1
+        post(limit("BUY", "185.00", 5));                       // 2
+        post("{\"side\":\"SELL\",\"type\":\"STOP\",\"stopPrice\":\"185.10\",\"quantity\":2}"); // 3
+
+        // order 2 moves to 185.10, buys 1 from order 1 and triggers stop 3, which sells 2 into order 2
+        assertThat(put(2, "{\"price\":\"185.10\",\"quantity\":5}")).hasStatusOk().bodyJson().isLenientlyEqualTo("""
+                {"orderId":2,"priorityKept":false,"filledQuantity":3,"restingQuantity":2,
+                 "trades":[{"makerOrderId":1,"quantity":1},{"makerOrderId":3,"quantity":2}]}""");
+        // priority kept, and nothing else happens
+        assertThat(put(2, "{\"price\":\"185.10\",\"quantity\":1}")).bodyJson()
+                .isLenientlyEqualTo("{\"priorityKept\":true,\"restingQuantity\":1,\"trades\":[]}");
+    }
+
+    @Test
     @Rulebook({"OT-005", "OT-006", "OT-007"})
     void replaceKeepsOrLosesPriorityAndCanTrade() {
         post(limit("BUY", "185.00", 10));                      // 1
