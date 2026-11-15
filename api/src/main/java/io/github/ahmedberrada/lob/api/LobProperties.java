@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -26,6 +27,7 @@ import org.springframework.validation.annotation.Validated;
  * @param instruments      the listed instruments, fixed for the life of the process
  * @param fix              the FIX gateway (ADR-0006), off unless enabled
  * @param marketData       the market data feed (ADR-0007)
+ * @param binaryFeed       the binary market data feed (ADR-0008), off unless enabled
  */
 @Validated
 @ConfigurationProperties("lob")
@@ -36,7 +38,26 @@ public record LobProperties(
         @DefaultValue("10000") @PositiveOrZero int snapshotInterval,
         @NotEmpty List<@Valid InstrumentProperties> instruments,
         @DefaultValue @Valid FixProperties fix,
-        @DefaultValue @Valid MarketDataProperties marketData) {
+        @DefaultValue @Valid MarketDataProperties marketData,
+        @DefaultValue @Valid BinaryFeedProperties binaryFeed) {
+
+    /**
+     * The binary feed (docs/interfaces/market-data-binary.md).
+     *
+     * @param streamHost    where packets go: a multicast group or a unicast address
+     * @param servicePort   TCP retransmission and snapshot service, on {@code serviceAddress}
+     * @param retention     messages kept for retransmission
+     */
+    public record BinaryFeedProperties(
+            @DefaultValue("false") boolean enabled,
+            @DefaultValue("127.0.0.1") @NotBlank String streamHost,
+            @DefaultValue("9900") @Positive int streamPort,
+            @DefaultValue("127.0.0.1") @NotBlank String serviceAddress,
+            @DefaultValue("9901") @PositiveOrZero int servicePort,
+            @DefaultValue("1000000") @Positive int retention,
+            @DefaultValue("1s") Duration heartbeat,
+            @DefaultValue("100000") @Positive int queueCapacity) {
+    }
 
     /**
      * The WebSocket market data feed.
@@ -50,6 +71,7 @@ public record LobProperties(
      * The FIX acceptor. It listens on the loopback interface unless told otherwise: sessions are not
      * authenticated until phase 8.
      *
+     * @param dropCopySessions read-only sessions receiving a copy of every execution report (DC-001)
      * @param storeDirectory sequence numbers and sent messages; defaults to {@code <data-directory>/fix}
      */
     public record FixProperties(
@@ -58,6 +80,7 @@ public record LobProperties(
             @DefaultValue("9878") int port,
             @DefaultValue("LOB") @NotBlank String senderCompId,
             @DefaultValue List<String> members,
+            @DefaultValue List<String> dropCopySessions,
             Path storeDirectory) {
     }
 

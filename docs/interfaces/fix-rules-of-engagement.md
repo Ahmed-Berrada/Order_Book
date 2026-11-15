@@ -106,6 +106,19 @@ If the venue cannot journal a command, its outcome is unknown (ADR-0003 §8). Th
 ExecutionReport `150=A / 39=A` with `Text=OUTCOME_UNKNOWN`, and must send an OrderStatusRequest once
 the venue has recovered.
 
+## Drop copy
+
+Drop copy sessions are provisioned like member sessions (`lob.fix.drop-copy-sessions`) and carry no
+orders. Every ExecutionReport sent to any member is copied to each drop copy session (DC-001), with:
+
+| Tag | Field | Where | Value |
+|---|---|---|---|
+| 797 | CopyMsgIndicator | body | `Y` |
+| 115 | OnBehalfOfCompID | header | the member the report was sent to |
+
+The body is identical to the member's report. Any application message a drop copy session sends is
+answered with a `BusinessMessageReject`, reason `6` (Not authorized) (DC-002).
+
 ## Current limitations
 
 - Order ownership (which session owns which order) is held in memory. After a venue restart, orders

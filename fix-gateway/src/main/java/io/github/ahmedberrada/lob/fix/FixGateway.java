@@ -1,6 +1,8 @@
 package io.github.ahmedberrada.lob.fix;
 
 import io.github.ahmedberrada.lob.service.MatchingService;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import quickfix.Acceptor;
 import quickfix.ConfigError;
@@ -29,7 +31,9 @@ public final class FixGateway implements AutoCloseable {
     public static FixGateway start(MatchingService service, FixGatewayConfig config) throws ConfigError {
         Objects.requireNonNull(service, "service");
         SessionSettings settings = settings(config);
-        FixApplication application = new FixApplication(service);
+        List<SessionID> dropCopies = config.dropCopyCompIds().stream()
+                .map(target -> new SessionID(BEGIN_STRING, config.senderCompId(), target)).toList();
+        FixApplication application = new FixApplication(service, dropCopies);
         service.addListener(application);
         Acceptor acceptor = new ThreadedSocketAcceptor(application, new FileStoreFactory(settings), settings,
                 new SLF4JLogFactory(settings), new DefaultMessageFactory());
@@ -49,7 +53,9 @@ public final class FixGateway implements AutoCloseable {
         settings.setString("DataDictionary", "FIX44.xml");
         settings.setString("FileStorePath", config.storeDirectory().toString());
         settings.setString("SLF4JLogHeartbeats", "N");
-        for (String member : config.memberCompIds()) {
+        List<String> sessions = new ArrayList<>(config.memberCompIds());
+        sessions.addAll(config.dropCopyCompIds());
+        for (String member : sessions) {
             SessionID session = new SessionID(BEGIN_STRING, config.senderCompId(), member);
             settings.setString(session, "TargetCompID", member);
         }
