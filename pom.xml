@@ -26,6 +26,7 @@
         <module>engine-journal</module>
         <module>engine-service</module>
         <module>fix-gateway</module>
+        <module>market-data</module>
         <module>api</module>
     </modules>
 
@@ -69,6 +70,11 @@
             <dependency>
                 <groupId>io.github.ahmedberrada.lob</groupId>
                 <artifactId>fix-gateway</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.ahmedberrada.lob</groupId>
+                <artifactId>market-data</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
