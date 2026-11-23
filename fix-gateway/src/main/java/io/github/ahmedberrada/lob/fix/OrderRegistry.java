@@ -34,11 +34,11 @@ final class OrderRegistry {
     /** A FIX order: its owner and its cumulative execution state. */
     static final class FixOrder {
         final SessionID session;
-        final String clOrdId;
         final InstrumentConfig instrument;
         final char side;
         final long orderId;
-        final long orderQuantity;
+        private String clOrdId;
+        private long orderQuantity;
         private long cumulativeQuantity;
         private long notionalTicks;
         private long leavesQuantity;
@@ -65,6 +65,26 @@ final class OrderRegistry {
             notionalTicks = Math.addExact(notionalTicks, Math.multiplyExact(priceTicks, quantity));
             leavesQuantity = remaining;
             ordStatus = remaining == 0 ? quickfix.field.OrdStatus.FILLED : quickfix.field.OrdStatus.PARTIALLY_FILLED;
+        }
+
+        /**
+         * A replace took effect (OT-005): new ClOrdID, new total quantity, and the remaining quantity the
+         * engine accepted. Trades of an aggressive replace follow as fills.
+         */
+        synchronized void replaced(String newClOrdId, long remainingQuantity) {
+            clOrdId = newClOrdId;
+            orderQuantity = cumulativeQuantity + remainingQuantity;
+            leavesQuantity = remainingQuantity;
+            ordStatus = cumulativeQuantity == 0 ? quickfix.field.OrdStatus.NEW
+                    : quickfix.field.OrdStatus.PARTIALLY_FILLED;
+        }
+
+        synchronized String clOrdId() {
+            return clOrdId;
+        }
+
+        synchronized long orderQuantity() {
+            return orderQuantity;
         }
 
         synchronized void cancel() {
@@ -115,6 +135,11 @@ final class OrderRegistry {
     void created(FixOrder order) {
         orders.put(new OrderKey(order.instrument.symbol(), order.orderId), order);
         slot(order.session, order.clOrdId).order = order;
+    }
+
+    /** A replace gave the order a new ClOrdID; the old ones still find it. */
+    void renamed(FixOrder order, String newClOrdId) {
+        slot(order.session, newClOrdId).order = order;
     }
 
     /** The order the engine knows as {@code orderId}, if a FIX session created it. */
