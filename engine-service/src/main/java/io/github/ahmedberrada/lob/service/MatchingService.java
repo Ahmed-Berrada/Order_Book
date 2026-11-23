@@ -99,12 +99,20 @@ public final class MatchingService implements AutoCloseable {
         listeners.add(Objects.requireNonNull(listener, "listener"));
     }
 
-    /** The best {@code depth} levels of each side of an instrument's book. */
+    /** The best {@code depth} levels of each side of an instrument's book, iceberg peaks only (IC-002). */
     public CompletableFuture<BookSnapshot> book(String symbol, int depth) {
         if (depth < 0) {
             throw new IllegalArgumentException("depth must not be negative: " + depth);
         }
         return withWorker(symbol, worker -> worker.book(depth));
+    }
+
+    /**
+     * The complete state of an instrument and the last command it reflects. Together with an
+     * {@link EventListener} registered beforehand, it lets a consumer rebuild the book without a gap.
+     */
+    public CompletableFuture<InstrumentState> state(String symbol) {
+        return withWorker(symbol, SymbolWorker::state);
     }
 
     /** Remaining quantity of a resting order, or 0 if the order is not resting. */

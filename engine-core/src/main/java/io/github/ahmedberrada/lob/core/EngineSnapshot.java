@@ -10,12 +10,21 @@ import java.util.Objects;
  *
  * @param nextOrderId  ID the next new order will receive
  * @param nextSequence sequence number the next event will carry
+ * @param lastTradePriceTicks price of the most recent trade, or 0 before the first one (ST-002)
+ * @param parkedStops  stop orders waiting for their trigger, in order of order ID (ST-008)
  */
 public record EngineSnapshot(
-        Instrument instrument, long nextOrderId, long nextSequence, List<RestingOrder> restingOrders) {
+        Instrument instrument, long nextOrderId, long nextSequence, List<RestingOrder> restingOrders,
+        long lastTradePriceTicks, List<ParkedStop> parkedStops) {
 
     public EngineSnapshot {
         Objects.requireNonNull(instrument, "instrument");
         restingOrders = List.copyOf(restingOrders);
+        parkedStops = List.copyOf(parkedStops);
+    }
+
+    /** A state with no trade yet and no parked stop. */
+    public EngineSnapshot(Instrument instrument, long nextOrderId, long nextSequence, List<RestingOrder> restingOrders) {
+        this(instrument, nextOrderId, nextSequence, restingOrders, 0, List.of());
     }
 }

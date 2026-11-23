@@ -88,13 +88,21 @@ final class SymbolWorker implements AutoCloseable {
         });
     }
 
-    /** Copies the best {@code depth} levels of each side, on the instrument's thread. */
+    /**
+     * Copies the best {@code depth} levels of each side as the market may see them, without hidden
+     * quantity (IC-002), on the instrument's thread.
+     */
     CompletableFuture<BookSnapshot> book(int depth) {
         return enqueue(() -> {
             OrderBook book = engine.book();
-            return new BookSnapshot(engine.lastCommandSequence(), top(book.depth(Side.BUY), depth),
-                    top(book.depth(Side.SELL), depth));
+            return new BookSnapshot(engine.lastCommandSequence(), top(book.displayedDepth(Side.BUY), depth),
+                    top(book.displayedDepth(Side.SELL), depth));
         });
+    }
+
+    /** The engine's complete state and the last command it reflects, copied on the instrument's thread. */
+    CompletableFuture<InstrumentState> state() {
+        return enqueue(() -> new InstrumentState(engine.lastCommandSequence(), engine.state()));
     }
 
     /** Remaining quantity of a resting order, 0 if it is not resting. */
