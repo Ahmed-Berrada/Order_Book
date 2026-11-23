@@ -11,14 +11,19 @@ a REST API on Spring Boot, and published JMH benchmarks.
 The goal is engineering rigour rather than feature count. The engine is **deterministic**,
 backed by **invariant tests**, and **measured before it is optimised**.
 
-> **Status: Phase 3, Connectivity (in progress).** Price-time matching
+> **Status: Phase 3, Connectivity, complete.** Price-time matching
 > ([rulebook](docs/rulebook/continuous-trading.md)) is durable, with a write-ahead journal, crash
 > recovery and a replay tool ([resilience rules](docs/rulebook/resilience.md)). Every listed instrument
 > runs on its own writer thread with a bounded queue ([order-entry rules](docs/rulebook/order-entry.md)).
-> Members trade over **FIX 4.4** ([Rules of Engagement](docs/interfaces/fix-rules-of-engagement.md)) or a
-> [REST API](docs/interfaces/rest-api.md) with OpenAPI, on the same venue, and the books are published as a
-> level-2 [market data feed](docs/interfaces/market-data-websocket.md) over WebSocket
-> ([market data rules](docs/rulebook/market-data.md)). See [Roadmap](#roadmap).
+> Members trade over **FIX 4.4** ([Rules of Engagement](docs/interfaces/fix-rules-of-engagement.md)),
+> with a drop copy for risk systems, or a [REST API](docs/interfaces/rest-api.md) with OpenAPI. The books
+> are published as a level-2 feed over [WebSocket](docs/interfaces/market-data-websocket.md) and as a
+> sequenced [binary feed](docs/interfaces/market-data-binary.md) with retransmission
+> ([feed rules](docs/rulebook/market-data.md), [binary feed and drop copy rules](docs/rulebook/feeds.md)).
+> **Phase 4, Venue functionality, in progress:** IOC, FOK, post-only and cancel/replace with priority
+> rules ([order types](docs/rulebook/order-types.md)), [iceberg orders](docs/rulebook/iceberg-orders.md)
+> and [stop orders](docs/rulebook/stop-orders.md) are in force; self-trade prevention, auctions, trading
+> phases and circuit breakers come next (see [Roadmap](#roadmap)).
 
 ---
 
@@ -79,6 +84,7 @@ flowchart LR
     svc -.->|events| gw
     svc -.->|events| pub
     pub -->|WebSocket JSON| viewer
+    pub -->|UDP binary + TCP recovery| viewer
     svc -->|Command| w1
     svc -->|Command| w2
     w1 -->|1. append| j1
@@ -95,7 +101,7 @@ flowchart LR
 | `engine-journal` | Write-ahead journal, event journal, snapshots, recovery, replay tool | `engine-core`, JDK only |
 | `engine-service` | One writer thread and bounded queue per instrument, routing, price conversion, refusals | `engine-journal`, JDK only |
 | `fix-gateway` | FIX 4.4 acceptor: orders, cancels, status, execution reports to both sides of a trade | `engine-service`, QuickFIX/J |
-| `market-data` | Level-2 book images built from events; snapshots, incremental updates, slow-consumer protection | `engine-service`, JDK only |
+| `market-data` | Level-2 book images built from events; snapshots, incremental updates, slow-consumer protection; binary ITCH-style feed with retransmission and a reference consumer | `engine-service`, JDK only |
 | `api` | REST adapter, OpenAPI, WebSocket market data, venue configuration; hosts the FIX gateway | `engine-service`, `fix-gateway`, `market-data`, Spring Boot |
 | `engine-bench` *(phase 6)* | JMH micro-benchmarks | `engine-core`, JMH |
 
@@ -295,7 +301,9 @@ mutated by a single thread and never needs a lock.
 
 The full rationale is in [ADR-0001](docs/adr/0001-foundations.md), [ADR-0002](docs/adr/0002-core-engine-model.md)
 [ADR-0003](docs/adr/0003-journal-and-recovery.md) [ADR-0004](docs/adr/0004-service-layer.md), [ADR-0005](docs/adr/0005-rest-api.md),
-[ADR-0006](docs/adr/0006-fix-gateway.md) and [ADR-0007](docs/adr/0007-market-data.md).
+[ADR-0006](docs/adr/0006-fix-gateway.md), [ADR-0007](docs/adr/0007-market-data.md),
+[ADR-0008](docs/adr/0008-binary-feed-and-drop-copy.md), [ADR-0009](docs/adr/0009-order-types-and-replace.md),
+[ADR-0010](docs/adr/0010-iceberg-orders.md) and [ADR-0011](docs/adr/0011-stop-orders.md).
 The matching behaviour itself is specified in the [rulebook](docs/rulebook/continuous-trading.md).
 
 | Decision | Choice | Reason |
@@ -379,6 +387,18 @@ buy of 4, give:
 Subscribers check that `feedSequence` grows by 1 and reconnect for a fresh snapshot if it does not.
 A connection that stops reading is closed with 1008 "slow consumer"; it never slows the venue.
 
+### Binary feed and drop copy
+
+Low-latency consumers read the [binary feed](docs/interfaces/market-data-binary.md): ITCH-style
+messages on sequenced UDP packets (`127.0.0.1:9900` by default, or a multicast group), with a TCP
+service on port 9901 that retransmits lost messages and serves snapshots.
+`io.github.ahmedberrada.lob.marketdata.binary.BinaryFeedClient` is a reference consumer that follows
+the recovery procedure of the specification.
+
+Risk and back-office systems log on as a drop copy session (`RISK` by default) and receive a copy of
+every ExecutionReport sent to any member, marked `CopyMsgIndicator=Y` and naming the member in
+`OnBehalfOfCompID`.
+
 ### Replaying a journal
 
 `lob-replay` rebuilds an instrument's book from its journal, at any command, and can check that the
@@ -428,6 +448,8 @@ Verification    OK: 5 event batches identical to the event journal
 | Market data | jqwik | After every command, the event-built book and a subscriber's rebuilt book equal the engine's depth |
 | Feed under load | 20 subscribers, 4 concurrent traders | Every subscriber rebuilds the final book with no feed gap |
 | Slow consumers | Stuck sink, mocked WebSocket session | A client that stops reading is disconnected without slowing order entry |
+| Binary feed | Real UDP and TCP sockets | A consumer losing one packet in five rebuilds every book by retransmission alone; a refused retransmission falls back to a snapshot; updates are never split; every sequence number exists at the source |
+| Drop copy | FIX sessions over sockets | Every ExecutionReport of every member is copied and marked; drop copy sessions cannot trade |
 | Performance *(phase 6)* | JMH | Throughput and p50 / p99 / p99.9 latency, with published methodology |
 
 ---|---|---|
@@ -448,27 +470,14 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 0 | **Foundations**: multi-module build, CI, enforced module boundary, ADR | ✅ |
 | 1 | **Core engine**: rulebook, LIMIT / MARKET / cancel, property tests, reference model, quality gates | ✅ |
 | 2 | **Durability & audit**: write-ahead journal, snapshots, crash recovery, replay | ✅ |
-| 3 | **Connectivity**: ✅ service layer, ✅ REST API, ✅ FIX order entry, ✅ WebSocket market data; binary feed and drop copy next | ⏳ |
-| 4 | **Venue functionality**: advanced orders, auctions, trading phases, circuit breakers | |
+| 3 | **Connectivity**: service layer, REST API, FIX order entry and drop copy, WebSocket and binary market data | ✅ |
+| 4 | **Venue functionality**: IOC / FOK / post-only / cancel-replace ✅, iceberg orders ✅, stop orders ✅; self-trade prevention, auctions, trading phases, circuit breakers | ⏳ |
 | 5 | **Pre-trade risk & members** | |
 | 6 | **Performance**: JMH, zero-allocation hot path, published latency | |
 | 7 | **Regulatory evidence**: MiFID II compliance matrix, RTS 22 / 24 reporting, surveillance | |
 | 8 | **Security & supply chain**: mTLS, OIDC, SBOM, signed releases | |
 | 9 | **Operations & resilience**: observability, failover, runbooks, chaos tests | |
 | 10 | **Post-trade & analytics** *(optional)* | |
-
----|---|---|---|
-| 0 | **Foundations** | Maven multi-module, wrapper, CI, enforced module boundary, ADR | ✅ |
-| 1 | **Core engine** | `OrderBook`: LIMIT / MARKET / cancel, JUnit scenarios, jqwik invariants | ⏳ |
-| 2 | **Service** | One thread per symbol, Spring Boot REST API, web tests | |
-| 3 | **JMH baseline** | `engine-bench` module, published throughput and latency | |
-| 4 | **Measured optimisation** | O(1) cancel (intrusive list), fewer allocations, before/after benchmarks | |
-| 5 | **Journal & replay** | Append-only command journal; exact state recovery after a crash | |
-| 6 | **Market data** | WebSocket feed: top of book and L2 diffs | |
-| 7 | **Advanced orders** | IOC, FOK, post-only, cancel/replace, self-trade prevention | |
-| 8 | **Pre-trade risk** | Fat-finger checks, price bands, max quantity, circuit breaker | |
-| 9 | **Low latency** | LMAX Disruptor, zero-allocation hot path, ZGC, SBE binary encoding | |
-| 10 | **Options** | Call/put chains per strike and expiry, one book per contract | |
 
 ---
 

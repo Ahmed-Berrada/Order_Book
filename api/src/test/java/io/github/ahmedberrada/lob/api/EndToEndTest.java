@@ -33,7 +33,7 @@ class EndToEndTest {
         // Command-line arguments, not builder properties: those are defaults that application.yml overrides.
         return new SpringApplicationBuilder(LobEngineApplication.class)
                 .run("--server.port=0", "--lob.data-directory=" + dataDirectory, "--lob.fsync=OS",
-                        "--lob.fix.enabled=false");
+                        "--lob.fix.enabled=false", "--lob.binary-feed.enabled=false");
     }
 
     private static URI uri(ConfigurableApplicationContext venue, String path) {

@@ -2,6 +2,8 @@ package io.github.ahmedberrada.lob.marketdata;
 
 import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
+import io.github.ahmedberrada.lob.core.OrderReplaced;
+import io.github.ahmedberrada.lob.core.OrderReplenished;
 import io.github.ahmedberrada.lob.core.OrderRested;
 import io.github.ahmedberrada.lob.core.RestingOrder;
 import io.github.ahmedberrada.lob.core.Side;
@@ -27,16 +29,19 @@ import java.util.TreeSet;
  */
 final class BookImage {
 
-    /** A resting order as far as the feed is concerned: where it rests and how much is left. */
+    /**
+     * A resting order as far as the feed is concerned: where it rests and how much of it is visible.
+     * For an iceberg that is the peak; the feed never learns the hidden quantity (ADR-0010 §2).
+     */
     private static final class Order {
         final Side side;
         final long priceTicks;
-        long quantity;
+        long visible;
 
-        Order(Side side, long priceTicks, long quantity) {
+        Order(Side side, long priceTicks, long visible) {
             this.side = side;
             this.priceTicks = priceTicks;
-            this.quantity = quantity;
+            this.visible = visible;
         }
     }
 
@@ -57,7 +62,7 @@ final class BookImage {
         this.symbol = symbol;
         this.commandSequence = state.lastCommandSequence();
         for (RestingOrder order : state.engine().restingOrders()) {
-            add(order.orderId(), order.side(), order.priceTicks(), order.remainingQuantity());
+            add(order.orderId(), order.side(), order.priceTicks(), order.displayedQuantity());
         }
     }
 
@@ -76,20 +81,35 @@ final class BookImage {
         for (Event event : batch.events()) {
             switch (event) {
                 case OrderRested e -> {
-                    add(e.orderId(), e.side(), e.priceTicks(), e.quantity());
+                    add(e.orderId(), e.side(), e.priceTicks(), e.displayedQuantity());
                     changed(e.side(), changedBids, changedAsks).add(e.priceTicks());
                 }
                 case TradeExecuted e -> {
                     trades.add(new Trade(e.priceTicks(), e.quantity(), e.aggressorSide()));
                     Order maker = orders.get(e.makerOrderId());
-                    reduce(e.makerOrderId(), maker, e.quantity());
+                    // an emptied iceberg peak stays until the OrderReplenished that follows (IC-006)
+                    show(e.makerOrderId(), maker, maker.visible - e.quantity(), e.makerRemainingQuantity() == 0);
                     changed(maker.side, changedBids, changedAsks).add(maker.priceTicks);
+                }
+                case OrderReplenished e -> {
+                    show(e.orderId(), orders.get(e.orderId()), e.displayedQuantity(), false);
+                    changed(e.side(), changedBids, changedAsks).add(e.priceTicks());
                 }
                 case OrderCancelled e -> {
                     Order cancelled = orders.get(e.orderId());
                     if (cancelled != null) {                 // a market order's remainder never rested
-                        reduce(e.orderId(), cancelled, cancelled.quantity);
+                        show(e.orderId(), cancelled, 0, true);
                         changed(cancelled.side, changedBids, changedAsks).add(cancelled.priceTicks);
+                    }
+                }
+                case OrderReplaced e -> {
+                    Order replaced = orders.get(e.orderId());
+                    // priority kept: the order shrinks in place, hidden quantity first (IC-005); otherwise
+                    // it leaves the book and an OrderRested re-enters what remains after its trades (OT-008)
+                    long visible = e.priorityKept() ? Math.min(replaced.visible, e.quantity()) : 0;
+                    if (visible != replaced.visible) {
+                        show(e.orderId(), replaced, visible, !e.priorityKept());
+                        changed(replaced.side, changedBids, changedAsks).add(replaced.priceTicks);
                     }
                 }
                 default -> {
@@ -119,19 +139,20 @@ final class BookImage {
         return commandSequence;
     }
 
-    private void add(long orderId, Side side, long priceTicks, long quantity) {
-        orders.put(orderId, new Order(side, priceTicks, quantity));
+    private void add(long orderId, Side side, long priceTicks, long visible) {
+        orders.put(orderId, new Order(side, priceTicks, visible));
         Level level = book(side).computeIfAbsent(priceTicks, p -> new Level());
-        level.quantity += quantity;
+        level.quantity += visible;
         level.orders++;
     }
 
-    private void reduce(long orderId, Order order, long quantity) {
+    /** Sets an order's visible quantity, and removes it from the book if it has left. */
+    private void show(long orderId, Order order, long visible, boolean leaves) {
         NavigableMap<Long, Level> side = book(order.side);
         Level level = side.get(order.priceTicks);
-        order.quantity -= quantity;
-        level.quantity -= quantity;
-        if (order.quantity == 0) {
+        level.quantity += visible - order.visible;
+        order.visible = visible;
+        if (leaves) {
             orders.remove(orderId);
             level.orders--;
         }

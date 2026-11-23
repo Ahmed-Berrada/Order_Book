@@ -46,6 +46,15 @@ public final class OrderBook {
         return Collections.unmodifiableList(levels);
     }
 
+    /** Levels of one side as the market may see them: peaks only, hidden quantity excluded (IC-002). */
+    public List<Level> displayedDepth(Side side) {
+        List<Level> levels = new ArrayList<>();
+        for (PriceLevel level : levels(side).values()) {
+            levels.add(new Level(level.priceTicks(), level.displayedQuantity(), level.orderCount()));
+        }
+        return Collections.unmodifiableList(levels);
+    }
+
     /** Number of resting orders on both sides. */
     public int orderCount() {
         return ordersById.size();
@@ -63,7 +72,8 @@ public final class OrderBook {
         for (Side side : Side.values()) {
             for (PriceLevel level : levels(side).values()) {
                 for (Order order : level.orders()) {
-                    orders.add(new RestingOrder(order.orderId, order.side, order.priceTicks, order.remainingQuantity));
+                    orders.add(new RestingOrder(order.orderId, order.side, order.priceTicks,
+                            order.remainingQuantity, order.postOnly, order.displayQuantity, order.displayed));
                 }
             }
         }
@@ -81,16 +91,49 @@ public final class OrderBook {
         ordersById.put(order.orderId, order);
     }
 
-    /** Fills the first order of a best level, dropping the order and the level once exhausted. */
-    void fillFirst(PriceLevel level, long quantity) {
+    /**
+     * Fills the first order of a best level, dropping the order and the level once exhausted.
+     *
+     * @return whether the order was an iceberg that refilled its peak (IC-004)
+     */
+    boolean fillFirst(PriceLevel level, long quantity) {
         Order maker = level.first();
-        level.fillFirst(quantity);
+        boolean replenished = level.fillFirst(quantity);
         if (maker.remainingQuantity == 0) {
             ordersById.remove(maker.orderId);
         }
         if (level.isEmpty()) {
             levels(maker.side).remove(level.priceTicks());
         }
+        return replenished;
+    }
+
+    /** A resting order, or {@code null} if it is not resting. */
+    Order find(long orderId) {
+        return ordersById.get(orderId);
+    }
+
+    /** Reduces a resting order's quantity in place, keeping its place in the queue (OT-006). */
+    void reduce(Order order, long newQuantity) {
+        levels(order.side).get(order.priceTicks).reduce(order, newQuantity);
+    }
+
+    /**
+     * Opposite quantity available to a taker within its limit, counted from the best level and capped
+     * at {@code needed} (OT-003).
+     */
+    long availableQuantity(Side takerSide, long limitPriceTicks, long needed) {
+        long available = 0;
+        for (PriceLevel level : levels(takerSide.opposite()).values()) {
+            boolean withinLimit = takerSide == Side.BUY
+                    ? level.priceTicks() <= limitPriceTicks
+                    : level.priceTicks() >= limitPriceTicks;
+            if (!withinLimit || available >= needed) {
+                break;
+            }
+            available += level.totalQuantity();
+        }
+        return Math.min(available, needed);
     }
 
     /** Removes a resting order, or returns {@code null} if it is not resting. */
