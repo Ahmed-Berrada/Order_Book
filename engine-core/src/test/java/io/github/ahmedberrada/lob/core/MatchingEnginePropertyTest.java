@@ -50,15 +50,20 @@ class MatchingEnginePropertyTest {
         Arbitrary<Command> replace = Combinators.combine(orderId, price, quantity)
                 .as((id, p, q) -> new ReplaceOrder(id, p, q));
 
-        return Arbitraries.frequencyOf(
-                        Tuple.of(6, limit), Tuple.of(1, market), Tuple.of(2, cancel), Tuple.of(2, replace))
+        Arbitrary<Long> stopLimit = Arbitraries.frequency(Tuple.of(1, 0L), Tuple.of(2, 95L), Tuple.of(2, 105L),
+                Tuple.of(1, -1L));
+        Arbitrary<Command> stop = Combinators.combine(side, price, stopLimit, quantity)
+                .as((s, p, l, q) -> new StopOrder(s, p, l, q));
+        return Arbitraries.frequencyOf(Tuple.of(6, limit), Tuple.of(1, market), Tuple.of(2, cancel),
+                        Tuple.of(2, replace), Tuple.of(2, stop))
                 .list().ofMaxSize(150);
     }
 
     @Property
     @Rulebook({"CT-001", "CT-002", "CT-003", "CT-004", "CT-005", "CT-006", "CT-007", "CT-008", "CT-009",
             "CT-010", "CT-011", "CT-012", "OT-001", "OT-002", "OT-003", "OT-004", "OT-005", "OT-006", "OT-007",
-            "OT-008", "IC-001", "IC-002", "IC-003", "IC-004", "IC-005", "IC-006"})
+            "OT-008", "IC-001", "IC-002", "IC-003", "IC-004", "IC-005", "IC-006", "ST-001", "ST-002", "ST-003", "ST-004",
+            "ST-005", "ST-006", "ST-007"})
     void producesExactlyTheSameEventsAsTheReferenceModel(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
         ReferenceEngine reference = new ReferenceEngine(INSTRUMENT);
@@ -100,7 +105,7 @@ class MatchingEnginePropertyTest {
     }
 
     @Property
-    @Rulebook({"CT-014", "OT-009"})
+    @Rulebook({"CT-014", "OT-009", "ST-008"})
     void quantityIsConserved(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
         Map<Long, Long> accepted = new HashMap<>();
@@ -123,13 +128,16 @@ class MatchingEnginePropertyTest {
                             + cancelled.getOrDefault(e.orderId(), 0L) + e.quantity());
                     case ReplaceRejected e -> { }
                     case OrderReplenished e -> { }
+                    case OrderParked e -> { }
+                    case StopTriggered e -> { }
                 }
             }
 
             long restingTotal = 0;
             for (var order : accepted.entrySet()) {
                 long id = order.getKey();
-                long resting = engine.book().restingQuantity(id);
+                long resting = engine.book().restingQuantity(id) + engine.snapshot().parkedStops().stream()
+                        .filter(stop -> stop.orderId() == id).mapToLong(ParkedStop::quantity).sum();
                 restingTotal += resting;
                 assertThat(filled.getOrDefault(id, 0L) + cancelled.getOrDefault(id, 0L) + resting)
                         .as("order %d", id).isEqualTo(order.getValue());
@@ -138,7 +146,8 @@ class MatchingEnginePropertyTest {
             for (Side side : Side.values()) {
                 depthTotal += engine.book().depth(side).stream().mapToLong(OrderBook.Level::quantity).sum();
             }
-            assertThat(depthTotal).isEqualTo(restingTotal);
+            long parkedTotal = engine.snapshot().parkedStops().stream().mapToLong(ParkedStop::quantity).sum();
+            assertThat(depthTotal + parkedTotal).isEqualTo(restingTotal);
         }
     }
 
@@ -154,7 +163,7 @@ class MatchingEnginePropertyTest {
             for (Event event : events) {
                 assertThat(event.sequence()).isEqualTo(expectedSequence++);
             }
-            if (command instanceof LimitOrder || command instanceof MarketOrder) {
+            if (command instanceof LimitOrder || command instanceof MarketOrder || command instanceof StopOrder) {
                 long orderId = switch (events.getFirst()) {
                     case OrderAccepted e -> e.orderId();
                     case OrderRejected e -> e.orderId();
@@ -202,6 +211,7 @@ class MatchingEnginePropertyTest {
             case MarketOrder order -> order.quantity();
             case CancelOrder cancel -> throw new AssertionError("a cancel is never accepted");
             case ReplaceOrder replace -> throw new AssertionError("a replace is never accepted");
+            case StopOrder stop -> stop.quantity();
         };
     }
 }

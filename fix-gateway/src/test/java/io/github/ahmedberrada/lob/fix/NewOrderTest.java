@@ -135,7 +135,7 @@ class NewOrderTest {
         Message marketWithPrice = Orders.market("B-6", Side.BUY, "1");
         marketWithPrice.setString(Price.FIELD, "185.25");
         Message sellShort = Orders.market("B-7", Side.SELL_SHORT, "1");
-        Message stopOrder = Orders.order("B-8", "AAPL", Side.BUY, OrdType.STOP, "1");
+        Message stopOrder = Orders.order("B-8", "AAPL", Side.BUY, OrdType.PEGGED, "1");
         Message allOrNone = Orders.limit("B-10", Side.BUY, "185.25", "1");          // ExecInst G: all or none
         allOrNone.setString(ExecInst.FIELD, "G");
         Message postOnlyMarket = Orders.market("B-11", Side.BUY, "1");

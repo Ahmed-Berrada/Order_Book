@@ -11,15 +11,19 @@ import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.OrderAccepted;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
+import io.github.ahmedberrada.lob.core.OrderParked;
 import io.github.ahmedberrada.lob.core.OrderRejected;
 import io.github.ahmedberrada.lob.core.OrderReplaced;
 import io.github.ahmedberrada.lob.core.OrderReplenished;
 import io.github.ahmedberrada.lob.core.OrderRested;
+import io.github.ahmedberrada.lob.core.ParkedStop;
 import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.ReplaceRejected;
 import io.github.ahmedberrada.lob.core.RestingOrder;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.StopOrder;
+import io.github.ahmedberrada.lob.core.StopTriggered;
 import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
 import java.io.ByteArrayInputStream;
@@ -41,7 +45,7 @@ import java.util.List;
 final class Codec {
 
     static final int MAGIC = 0x4C4F424A;            // "LOBJ"
-    static final short FORMAT_VERSION = 3;
+    static final short FORMAT_VERSION = 4;
 
     enum Kind {
         COMMANDS(1), EVENTS(2), SNAPSHOT(3);
@@ -137,6 +141,13 @@ final class Codec {
                     out.writeLong(replace.priceTicks());
                     out.writeLong(replace.quantity());
                 }
+                case StopOrder stop -> {
+                    out.writeByte(5);
+                    out.writeByte(sideCode(stop.side()));
+                    out.writeLong(stop.stopPriceTicks());
+                    out.writeLong(stop.limitPriceTicks());
+                    out.writeLong(stop.quantity());
+                }
             }
         });
     }
@@ -152,6 +163,7 @@ final class Codec {
                 case 2 -> new MarketOrder(readSide(in), in.readLong(), readTif(in));
                 case 3 -> new CancelOrder(in.readLong());
                 case 4 -> new ReplaceOrder(in.readLong(), in.readLong(), in.readLong());
+                case 5 -> new StopOrder(readSide(in), in.readLong(), in.readLong(), in.readLong());
                 default -> throw new JournalCorruptedException("unknown command type " + type);
             };
             return new JournalEntry(sequence, timestamp, command);
@@ -248,6 +260,19 @@ final class Codec {
                 out.writeLong(e.orderId());
                 out.writeByte(rejectCode(e.reason()));
             }
+            case OrderParked e -> {
+                out.writeByte(10);
+                out.writeLong(e.sequence());
+                out.writeLong(e.orderId());
+                out.writeByte(sideCode(e.side()));
+                out.writeLong(e.stopPriceTicks());
+                out.writeLong(e.quantity());
+            }
+            case StopTriggered e -> {
+                out.writeByte(11);
+                out.writeLong(e.sequence());
+                out.writeLong(e.orderId());
+            }
             case OrderReplenished e -> {
                 out.writeByte(9);
                 out.writeLong(e.sequence());
@@ -274,6 +299,8 @@ final class Codec {
                     readBoolean(in));
             case 8 -> new ReplaceRejected(in.readLong(), in.readLong(), readRejectReason(in));
             case 9 -> new OrderReplenished(in.readLong(), in.readLong(), readSide(in), in.readLong(), in.readLong());
+            case 10 -> new OrderParked(in.readLong(), in.readLong(), readSide(in), in.readLong(), in.readLong());
+            case 11 -> new StopTriggered(in.readLong(), in.readLong());
             default -> throw new JournalCorruptedException("unknown event type " + type);
         };
     }
@@ -297,6 +324,15 @@ final class Codec {
                 out.writeLong(order.displayQuantity());
                 out.writeLong(order.displayedQuantity());
             }
+            out.writeLong(state.lastTradePriceTicks());
+            out.writeInt(state.parkedStops().size());
+            for (ParkedStop stop : state.parkedStops()) {
+                out.writeLong(stop.orderId());
+                out.writeByte(sideCode(stop.side()));
+                out.writeLong(stop.stopPriceTicks());
+                out.writeLong(stop.limitPriceTicks());
+                out.writeLong(stop.quantity());
+            }
         });
     }
 
@@ -318,8 +354,17 @@ final class Codec {
                 orders.add(new RestingOrder(in.readLong(), readSide(in), in.readLong(), in.readLong(), readBoolean(in),
                         in.readLong(), in.readLong()));
             }
-            return new StoredSnapshot(lastCommandSequence,
-                    new EngineSnapshot(header.instrument(), nextOrderId, nextSequence, orders));
+            long lastTradePrice = in.readLong();
+            int stopCount = in.readInt();
+            if (stopCount < 0) {
+                throw new JournalCorruptedException("negative stop count " + stopCount);
+            }
+            List<ParkedStop> stops = new ArrayList<>(Math.min(stopCount, 1 << 16));
+            for (int i = 0; i < stopCount; i++) {
+                stops.add(new ParkedStop(in.readLong(), readSide(in), in.readLong(), in.readLong(), in.readLong()));
+            }
+            return new StoredSnapshot(lastCommandSequence, new EngineSnapshot(header.instrument(), nextOrderId,
+                    nextSequence, orders, lastTradePrice, stops));
         });
     }
 
@@ -352,6 +397,7 @@ final class Codec {
             case INVALID_TIME_IN_FORCE -> 7;
             case POST_ONLY_WOULD_TRADE -> 8;
             case INVALID_DISPLAY_QUANTITY -> 9;
+            case STOP_PRICE_ALREADY_REACHED -> 10;
         };
     }
 
@@ -367,6 +413,7 @@ final class Codec {
             case 7 -> RejectReason.INVALID_TIME_IN_FORCE;
             case 8 -> RejectReason.POST_ONLY_WOULD_TRADE;
             case 9 -> RejectReason.INVALID_DISPLAY_QUANTITY;
+            case 10 -> RejectReason.STOP_PRICE_ALREADY_REACHED;
             default -> throw new JournalCorruptedException("unknown reject reason " + code);
         };
     }

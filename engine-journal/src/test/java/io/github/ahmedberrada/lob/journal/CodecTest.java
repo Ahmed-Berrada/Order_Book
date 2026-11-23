@@ -12,6 +12,7 @@ import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
+import io.github.ahmedberrada.lob.core.OrderParked;
 import io.github.ahmedberrada.lob.core.OrderRejected;
 import io.github.ahmedberrada.lob.core.OrderReplaced;
 import io.github.ahmedberrada.lob.core.OrderReplenished;
@@ -20,6 +21,8 @@ import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.ReplaceRejected;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.StopOrder;
+import io.github.ahmedberrada.lob.core.StopTriggered;
 import io.github.ahmedberrada.lob.core.TimeInForce;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
@@ -65,6 +68,8 @@ class CodecTest {
         events.add(new OrderReplaced(1, 1, Side.BUY, 5, 6, false));
         events.add(new OrderReplenished(1, 2, Side.SELL, 7, 3));
         events.add(new OrderRested(1, 2, Side.SELL, 7, 9, 3));
+        events.add(new OrderParked(1, 3, Side.BUY, 8, 4));
+        events.add(new StopTriggered(1, 3));
         EventBatch batch = new EventBatch(1, 0, events);
 
         assertThat(Codec.decodeBatch(Codec.encodeBatch(batch))).isEqualTo(batch);
@@ -82,6 +87,10 @@ class CodecTest {
         }
         JournalEntry replace = new JournalEntry(1, 1, new ReplaceOrder(7, 8, 9));
         assertThat(Codec.decodeEntry(Codec.encodeEntry(replace))).isEqualTo(replace);
+        for (Command stop : List.<Command>of(new StopOrder(Side.SELL, 5, 4, 3), new StopOrder(Side.BUY, 5, 3))) {
+            JournalEntry entry = new JournalEntry(1, 1, stop);
+            assertThat(Codec.decodeEntry(Codec.encodeEntry(entry))).isEqualTo(entry);
+        }
     }
 
     @Test
@@ -102,7 +111,8 @@ class CodecTest {
     @Test
     void earlierFormatVersionsAreRefused() {
         byte[] valid = Codec.encodeHeader(new Codec.Header(Codec.Kind.COMMANDS, CommandStream.INSTRUMENT));
-        assertThat(Codec.FORMAT_VERSION).isEqualTo((short) 3);
+        assertThat(Codec.FORMAT_VERSION).isEqualTo((short) 4);
+        assertCorrupt(withByte(valid, 5, 3), "version 3");
         assertCorrupt(withByte(valid, 5, 1), "version 1");
         assertCorrupt(withByte(valid, 5, 2), "version 2");
     }
@@ -173,7 +183,11 @@ class CodecTest {
 
         assertThatThrownBy(() -> Codec.decodeSnapshot(notSnapshot))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("not a snapshot");
-        byte[] negativeCount = withByte(snapshot, snapshot.length - 4, 0xFF);
+        byte[] negativeStops = withByte(snapshot, snapshot.length - 4, 0xFF);
+        assertThatThrownBy(() -> Codec.decodeSnapshot(negativeStops))
+                .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("negative stop count");
+        // the order count sits before the last trade price (8) and the stop count (4)
+        byte[] negativeCount = withByte(snapshot, snapshot.length - 16, 0xFF);
         assertThatThrownBy(() -> Codec.decodeSnapshot(negativeCount))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("negative");
     }
