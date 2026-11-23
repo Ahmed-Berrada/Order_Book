@@ -99,7 +99,7 @@ public final class MatchingService implements AutoCloseable {
         listeners.add(Objects.requireNonNull(listener, "listener"));
     }
 
-    /** The best {@code depth} levels of each side of an instrument's book. */
+    /** The best {@code depth} levels of each side of an instrument's book, iceberg peaks only (IC-002). */
     public CompletableFuture<BookSnapshot> book(String symbol, int depth) {
         if (depth < 0) {
             throw new IllegalArgumentException("depth must not be negative: " + depth);

@@ -1,8 +1,11 @@
 package io.github.ahmedberrada.lob.core;
 
 /**
- * A resting order. Mutable and internal to the core: only its remaining quantity changes, and only
- * through {@link OrderBook}.
+ * A resting order. Mutable and internal to the core: only its quantities change, and only through
+ * {@link OrderBook}. A replace that changes the price creates a new instance.
+ *
+ * <p>A fully visible order has {@code displayQuantity == 0} and {@code displayed == remainingQuantity}.
+ * An iceberg shows {@code displayed <= displayQuantity} and hides the rest (IC-002).
  *
  * <p>Equality is identity on purpose, so that removing an order from a queue removes that exact
  * order.
@@ -12,12 +15,23 @@ final class Order {
     final long orderId;
     final Side side;
     final long priceTicks;
+    final boolean postOnly;
+    final long displayQuantity;
     long remainingQuantity;
+    long displayed;
 
-    Order(long orderId, Side side, long priceTicks, long remainingQuantity) {
+    Order(long orderId, Side side, long priceTicks, long remainingQuantity, boolean postOnly, long displayQuantity) {
         this.orderId = orderId;
         this.side = side;
         this.priceTicks = priceTicks;
         this.remainingQuantity = remainingQuantity;
+        this.postOnly = postOnly;
+        this.displayQuantity = displayQuantity;
+        this.displayed = peak(remainingQuantity);
+    }
+
+    /** What this order shows when it holds {@code quantity}: all of it, or a full peak. */
+    long peak(long quantity) {
+        return displayQuantity == 0 ? quantity : Math.min(displayQuantity, quantity);
     }
 }
