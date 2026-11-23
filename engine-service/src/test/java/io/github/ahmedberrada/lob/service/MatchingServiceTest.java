@@ -14,6 +14,7 @@ import io.github.ahmedberrada.lob.core.OrderBook;
 import io.github.ahmedberrada.lob.core.RestingOrder;
 import io.github.ahmedberrada.lob.core.Rulebook;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.journal.EventBatch;
 import io.github.ahmedberrada.lob.journal.FsyncPolicy;
 import io.github.ahmedberrada.lob.journal.JournalCorruptedException;
@@ -132,6 +133,18 @@ class MatchingServiceTest {
             assertThat(book.asks()).containsExactly(new OrderBook.Level(18_600, 4, 1));
             assertThat(service.restingQuantity("MSFT", 1).join()).isEqualTo(7);
             assertThat(service.submit("AAPL", new CancelOrder(1)).join().commandSequence()).isEqualTo(3);
+        }
+    }
+
+    @Test
+    @Rulebook("IC-002")
+    void theBookShowsIcebergPeaksOnly() throws IOException {
+        try (MatchingService service = start()) {
+            service.submit("AAPL", new LimitOrder(Side.SELL, 18_600, 40, TimeInForce.GTC, false, 5)).join();
+            service.submit("AAPL", new LimitOrder(Side.SELL, 18_600, 3)).join();
+
+            assertThat(service.book("AAPL", 10).join().asks()).containsExactly(new OrderBook.Level(18_600, 8, 2));
+            assertThat(service.restingQuantity("AAPL", 1).join()).isEqualTo(40);
         }
     }
 

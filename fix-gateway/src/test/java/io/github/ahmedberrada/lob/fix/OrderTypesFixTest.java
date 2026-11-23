@@ -26,6 +26,7 @@ import quickfix.field.ExecType;
 import quickfix.field.LastPx;
 import quickfix.field.LastQty;
 import quickfix.field.LeavesQty;
+import quickfix.field.MaxFloor;
 import quickfix.field.MsgType;
 import quickfix.field.OrdRejReason;
 import quickfix.field.OrdStatus;
@@ -35,6 +36,7 @@ import quickfix.field.OrderQty;
 import quickfix.field.OrigClOrdID;
 import quickfix.field.Price;
 import quickfix.field.Side;
+import quickfix.field.StopPx;
 import quickfix.field.Symbol;
 import quickfix.field.Text;
 import quickfix.field.TimeInForce;
@@ -158,6 +160,107 @@ class OrderTypesFixTest {
         member1.send(withTif(postOnly(Orders.limit("B-3", Side.BUY, "185.20", "1")), TimeInForce.IMMEDIATE_OR_CANCEL));
         assertReport(member1.next(), Map.of(OrderID.FIELD, "AAPL-4", ExecType.FIELD, "8",
                 OrdRejReason.FIELD, "11", Text.FIELD, "INVALID_TIME_IN_FORCE"));
+    }
+
+    @Test
+    @Rulebook({"IC-001", "IC-003", "IC-004"})
+    void icebergOrdersWithMaxFloor() throws Exception {
+        Message iceberg = Orders.limit("S-1", Side.SELL, "185.25", "30");
+        iceberg.setDecimal(MaxFloor.FIELD, new BigDecimal("10"));
+        assertReport(member2.next(iceberg), Map.of(OrderID.FIELD, "AAPL-1", ExecType.FIELD, "0", LeavesQty.FIELD, "30"));
+        assertThat(venue.service.book("AAPL", 1).join().asks().getFirst().quantity()).isEqualTo(10);
+
+        // 15 lots: the first peak of 10, a refill, then 5 more
+        member1.send(Orders.market("B-1", Side.BUY, "15"));
+        member1.next();
+        assertReport(member1.next(), Map.of(ExecType.FIELD, "F", LastQty.FIELD, "10", LeavesQty.FIELD, "5"));
+        assertReport(member1.next(), Map.of(ExecType.FIELD, "F", LastQty.FIELD, "5", LeavesQty.FIELD, "0"));
+        assertReport(member2.next(), Map.of(ExecType.FIELD, "F", LastQty.FIELD, "10", LeavesQty.FIELD, "20"));
+        assertReport(member2.next(), Map.of(ExecType.FIELD, "F", LastQty.FIELD, "5", LeavesQty.FIELD, "15"));
+
+        Message tooLarge = Orders.limit("S-2", Side.SELL, "185.25", "5");
+        tooLarge.setDecimal(MaxFloor.FIELD, new BigDecimal("6"));
+        assertReport(member2.next(tooLarge), Map.of(OrderID.FIELD, "AAPL-3", ExecType.FIELD, "8",
+                OrdRejReason.FIELD, "13", Text.FIELD, "INVALID_DISPLAY_QUANTITY"));
+        Message fractional = Orders.limit("S-3", Side.SELL, "185.25", "5");
+        fractional.setDecimal(MaxFloor.FIELD, new BigDecimal("2.5"));
+        assertReport(member2.next(fractional), Map.of(OrderID.FIELD, "NONE", OrdRejReason.FIELD, "13",
+                Text.FIELD, "FRACTIONAL_QUANTITY"));
+        Message market = Orders.market("B-2", Side.BUY, "1");
+        market.setDecimal(MaxFloor.FIELD, new BigDecimal("1"));
+        assertReport(member1.next(market), Map.of(OrderID.FIELD, "NONE", OrdRejReason.FIELD, "11",
+                Text.FIELD, "MAX_FLOOR_NOT_ALLOWED_FOR_MARKET"));
+    }
+
+    private static Message stop(String clOrdId, char side, String stopPrice, String limitPrice, String quantity) {
+        Message order = Orders.order(clOrdId, "AAPL", side, limitPrice == null ? OrdType.STOP : OrdType.STOP_LIMIT,
+                quantity);
+        order.setDecimal(StopPx.FIELD, new BigDecimal(stopPrice));
+        if (limitPrice != null) {
+            order.setDecimal(Price.FIELD, new BigDecimal(limitPrice));
+        }
+        return order;
+    }
+
+    @Test
+    @Rulebook({"ST-001", "ST-003", "ST-005"})
+    void stopOrdersAreAcknowledgedThenTriggeredAndTheirFillsReportedToTheirOwner() throws Exception {
+        member2.send(Orders.limit("S-1", Side.SELL, "185.30", "2"));
+        member2.next();
+        member2.send(Orders.limit("S-2", Side.SELL, "185.40", "5"));
+        member2.next();
+
+        assertReport(member1.next(stop("ST-1", Side.BUY, "185.30", null, "3")), Map.of(OrderID.FIELD, "AAPL-3",
+                ExecType.FIELD, "0", OrdStatus.FIELD, "0", LeavesQty.FIELD, "3"));
+        // a member 2 buy trades at 185.30 and triggers member 1's stop
+        member2.send(Orders.limit("B-1", Side.BUY, "185.30", "1"));
+        assertReport(member2.next(), Map.of(OrderID.FIELD, "AAPL-4", ExecType.FIELD, "0"));
+        assertReport(member2.next(), Map.of(ClOrdID.FIELD, "B-1", ExecType.FIELD, "F", LastQty.FIELD, "1"));
+        assertReport(member2.next(), Map.of(ClOrdID.FIELD, "S-1", ExecType.FIELD, "F", LeavesQty.FIELD, "1"));
+        // the stop's fills go to member 1, never to member 2's order B-1
+        assertReport(member1.next(), Map.of(ClOrdID.FIELD, "ST-1", ExecType.FIELD, "D", OrdStatus.FIELD, "0",
+                Text.FIELD, "STOP_TRIGGERED", 378, "99"));
+        assertReport(member1.next(), Map.of(ClOrdID.FIELD, "ST-1", ExecType.FIELD, "F", LastPx.FIELD, "185.30",
+                LastQty.FIELD, "1", LeavesQty.FIELD, "2"));
+        assertReport(member1.next(), Map.of(ClOrdID.FIELD, "ST-1", ExecType.FIELD, "F", LastPx.FIELD, "185.40",
+                LastQty.FIELD, "2", LeavesQty.FIELD, "0", OrdStatus.FIELD, "2"));
+        assertReport(member2.next(), Map.of(ClOrdID.FIELD, "S-1", ExecType.FIELD, "F", OrdStatus.FIELD, "2"));
+        assertReport(member2.next(), Map.of(ClOrdID.FIELD, "S-2", ExecType.FIELD, "F", LeavesQty.FIELD, "3"));
+    }
+
+    @Test
+    @Rulebook({"ST-002", "ST-007"})
+    void stopLimitRefusalsAndCancel() throws Exception {
+        assertReport(member1.next(stop("ST-1", Side.SELL, "180.00", "179.50", "3")),
+                Map.of(OrderID.FIELD, "AAPL-1", ExecType.FIELD, "0"));
+        Message noStopPx = Orders.order("ST-2", "AAPL", Side.SELL, OrdType.STOP, "1");
+        assertReport(member1.next(noStopPx), Map.of(OrderID.FIELD, "NONE", OrdRejReason.FIELD, "11",
+                Text.FIELD, "STOP_PRICE_REQUIRED"));
+        Message stopPxOnLimit = Orders.limit("ST-3", Side.SELL, "180.00", "1");
+        stopPxOnLimit.setDecimal(StopPx.FIELD, new BigDecimal("180.00"));
+        assertReport(member1.next(stopPxOnLimit), Map.of(OrdRejReason.FIELD, "11", Text.FIELD, "STOP_PRICE_NOT_ALLOWED"));
+        assertReport(member1.next(withTif(stop("ST-4", Side.SELL, "180.00", null, "1"), TimeInForce.IMMEDIATE_OR_CANCEL)),
+                Map.of(OrdRejReason.FIELD, "11", Text.FIELD, "STOP_ORDER_ATTRIBUTES"));
+        assertReport(member1.next(stop("ST-5", Side.SELL, "180.005", null, "1")),
+                Map.of(OrderID.FIELD, "NONE", Text.FIELD, "OFF_TICK_PRICE"));
+
+        OrderCancelRequest cancel = new OrderCancelRequest();
+        cancel.setString(ClOrdID.FIELD, "C-1");
+        cancel.setString(OrigClOrdID.FIELD, "ST-1");
+        cancel.setString(Symbol.FIELD, "AAPL");
+        cancel.setChar(Side.FIELD, Side.SELL);
+        cancel.setUtcTimeStamp(TransactTime.FIELD, LocalDateTime.now(ZoneOffset.UTC));
+        assertReport(member1.next(cancel), Map.of(ExecType.FIELD, "4", OrigClOrdID.FIELD, "ST-1", LeavesQty.FIELD, "0"));
+
+        // a stop whose price the last trade already reached is rejected by the engine
+        member2.send(Orders.limit("S-1", Side.SELL, "185.00", "1"));
+        member2.next();
+        member2.send(Orders.market("B-1", Side.BUY, "1"));
+        member2.next();
+        member2.next();
+        member2.next();
+        assertReport(member1.next(stop("ST-6", Side.SELL, "185.10", null, "1")), Map.of(OrderID.FIELD, "AAPL-4",
+                ExecType.FIELD, "8", OrdRejReason.FIELD, "99", Text.FIELD, "STOP_PRICE_ALREADY_REACHED"));
     }
 
     // ---- Cancel/replace ----------------------------------------------------------------------------

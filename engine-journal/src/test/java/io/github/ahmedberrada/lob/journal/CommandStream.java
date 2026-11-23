@@ -8,6 +8,7 @@ import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.TimeInForce;
 import java.util.ArrayList;
 import java.util.List;
@@ -26,19 +27,25 @@ final class CommandStream {
         List<Command> commands = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             Side side = random.nextBoolean() ? Side.BUY : Side.SELL;
-            int kind = random.nextInt(12);
+            int kind = random.nextInt(13);
             TimeInForce[] tifs = TimeInForce.values();
             if (kind < 5) {
                 commands.add(new LimitOrder(side, random.nextLong(95, 106), random.nextLong(1, 30)));
             } else if (kind < 6) {
                 commands.add(new LimitOrder(side, random.nextLong(95, 106), random.nextLong(1, 30),
-                        tifs[random.nextInt(tifs.length)], random.nextInt(3) == 0));
+                        tifs[random.nextInt(tifs.length)], random.nextInt(3) == 0, 0));
+            } else if (kind < 7 && random.nextBoolean()) {
+                commands.add(new LimitOrder(side, random.nextLong(95, 106), random.nextLong(10, 30),
+                        TimeInForce.GTC, false, random.nextLong(1, 10)));
             } else if (kind < 7) {
                 commands.add(new MarketOrder(side, random.nextLong(1, 30), random.nextBoolean() ? TimeInForce.IOC
                         : TimeInForce.FOK));
             } else if (kind < 9) {
                 commands.add(new ReplaceOrder(random.nextLong(1, i + 2), random.nextLong(95, 106),
                         random.nextLong(1, 30)));
+            } else if (kind == 12) {
+                commands.add(new StopOrder(side, random.nextLong(95, 106),
+                        random.nextBoolean() ? 0 : random.nextLong(95, 106), random.nextLong(1, 30)));
             } else {
                 commands.add(new CancelOrder(random.nextLong(1, i + 2)));
             }
