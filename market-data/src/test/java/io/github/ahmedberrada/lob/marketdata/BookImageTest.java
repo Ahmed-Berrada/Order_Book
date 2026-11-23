@@ -13,6 +13,7 @@ import io.github.ahmedberrada.lob.core.OrderBook;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.Rulebook;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
 import io.github.ahmedberrada.lob.journal.EventBatch;
@@ -46,20 +47,25 @@ class BookImageTest {
         Arbitrary<Command> ioc = Combinators.combine(side, Arbitraries.longs().between(95, 105),
                 Arbitraries.longs().between(1, 20), Arbitraries.of(TimeInForce.class), Arbitraries.of(true, false))
                 .as((s, p, q, t, po) -> new LimitOrder(s, p, q, t, po));
+        Arbitrary<Command> iceberg = Combinators.combine(side, Arbitraries.longs().between(95, 105),
+                Arbitraries.longs().between(5, 40), Arbitraries.longs().between(1, 6))
+                .as((s, p, q, d) -> new LimitOrder(s, p, q, TimeInForce.GTC, false, d));
+        Arbitrary<Command> stop = Combinators.combine(side, Arbitraries.longs().between(95, 105),
+                Arbitraries.of(0L, 95L, 105L), Arbitraries.longs().between(1, 20)).as(StopOrder::new);
         Arbitrary<Command> replace = Combinators.combine(Arbitraries.longs().between(1, 120),
                 Arbitraries.longs().between(95, 105), Arbitraries.longs().between(1, 20)).as(ReplaceOrder::new);
         return Arbitraries.frequencyOf(Tuple.of(6, limit), Tuple.of(2, market), Tuple.of(3, cancel), Tuple.of(1, invalid),
-                        Tuple.of(2, ioc), Tuple.of(3, replace))
+                        Tuple.of(2, ioc), Tuple.of(3, replace), Tuple.of(3, iceberg), Tuple.of(3, stop))
                 .list().ofMaxSize(120);
     }
 
     private static List<BookLevel> depth(MatchingEngine engine, Side side) {
-        return engine.book().depth(side).stream()
+        return engine.book().displayedDepth(side).stream()
                 .map((OrderBook.Level l) -> new BookLevel(l.priceTicks(), l.quantity(), l.orderCount())).toList();
     }
 
     @Property(tries = 300)
-    @Rulebook({"MD-002", "MD-003", "MD-004", "MD-005", "MD-006", "MD-007", "OT-008"})
+    @Rulebook({"MD-002", "MD-003", "MD-004", "MD-005", "MD-006", "MD-007", "OT-008", "IC-002", "IC-006", "ST-003"})
     void imageAndSubscribersMatchTheEngineAfterEveryCommand(@ForAll("commands") List<Command> commands,
             @ForAll @IntRange(max = 120) int history, @ForAll @IntRange(max = 120) int subscribeAt) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);

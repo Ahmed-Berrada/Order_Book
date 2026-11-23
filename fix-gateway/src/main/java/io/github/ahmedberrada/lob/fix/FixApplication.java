@@ -14,6 +14,8 @@ import io.github.ahmedberrada.lob.core.OrderRested;
 import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.ReplaceRejected;
+import io.github.ahmedberrada.lob.core.StopOrder;
+import io.github.ahmedberrada.lob.core.StopTriggered;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
 import io.github.ahmedberrada.lob.fix.OrderRegistry.FixOrder;
 import io.github.ahmedberrada.lob.journal.EventBatch;
@@ -41,6 +43,7 @@ import quickfix.field.CxlRejReason;
 import quickfix.field.CxlRejResponseTo;
 import quickfix.field.ExecInst;
 import quickfix.field.ExecType;
+import quickfix.field.MaxFloor;
 import quickfix.field.MsgSeqNum;
 import quickfix.field.MsgType;
 import quickfix.field.OnBehalfOfCompID;
@@ -53,6 +56,7 @@ import quickfix.field.Price;
 import quickfix.field.RefMsgType;
 import quickfix.field.RefSeqNum;
 import quickfix.field.Side;
+import quickfix.field.StopPx;
 import quickfix.field.Symbol;
 import quickfix.field.Text;
 import quickfix.field.TimeInForce;
@@ -146,6 +150,9 @@ final class FixApplication implements Application, EventListener {
         long lots;
         try {
             lots = quantity.longValueExact();
+            if (order.isSetField(MaxFloor.FIELD)) {
+                order.getDecimal(MaxFloor.FIELD).longValueExact();
+            }
         } catch (ArithmeticException e) {
             refuse(session, clOrdId, symbol, side, quantity, OrdRejReason.INCORRECT_QUANTITY, "FRACTIONAL_QUANTITY", true);
             return;
@@ -319,17 +326,29 @@ final class FixApplication implements Application, EventListener {
             return Optional.of("UNSUPPORTED_EXEC_INST");
         }
         char type = order.getChar(OrdType.FIELD);
-        if (type != OrdType.LIMIT && type != OrdType.MARKET) {
+        if (type != OrdType.LIMIT && type != OrdType.MARKET && type != OrdType.STOP && type != OrdType.STOP_LIMIT) {
             return Optional.of("UNSUPPORTED_ORD_TYPE");
         }
-        if (type == OrdType.LIMIT && !order.isSetField(Price.FIELD)) {
+        boolean limited = type == OrdType.LIMIT || type == OrdType.STOP_LIMIT;
+        boolean stop = type == OrdType.STOP || type == OrdType.STOP_LIMIT;
+        if (limited && !order.isSetField(Price.FIELD)) {
             return Optional.of("PRICE_REQUIRED_FOR_LIMIT");
         }
-        if (type == OrdType.MARKET && order.isSetField(Price.FIELD)) {
+        if (!limited && order.isSetField(Price.FIELD)) {
             return Optional.of("PRICE_NOT_ALLOWED_FOR_MARKET");
+        }
+        if (stop != order.isSetField(StopPx.FIELD)) {
+            return Optional.of(stop ? "STOP_PRICE_REQUIRED" : "STOP_PRICE_NOT_ALLOWED");
+        }
+        if (stop && (order.isSetField(TimeInForce.FIELD) || order.isSetField(ExecInst.FIELD)
+                || order.isSetField(MaxFloor.FIELD))) {
+            return Optional.of("STOP_ORDER_ATTRIBUTES");
         }
         if (type == OrdType.MARKET && order.isSetField(ExecInst.FIELD)) {
             return Optional.of("POST_ONLY_NOT_ALLOWED_FOR_MARKET");
+        }
+        if (type == OrdType.MARKET && order.isSetField(MaxFloor.FIELD)) {
+            return Optional.of("MAX_FLOOR_NOT_ALLOWED_FOR_MARKET");
         }
         return Optional.empty();
     }
@@ -351,15 +370,21 @@ final class FixApplication implements Application, EventListener {
             throws FieldNotFound {
         io.github.ahmedberrada.lob.core.Side side =
                 fixSide == Side.BUY ? io.github.ahmedberrada.lob.core.Side.BUY : io.github.ahmedberrada.lob.core.Side.SELL;
+        char type = order.getChar(OrdType.FIELD);
+        if (type == OrdType.STOP || type == OrdType.STOP_LIMIT) {
+            long limit = type == OrdType.STOP_LIMIT ? instrument.toTicks(order.getDecimal(Price.FIELD)) : 0;
+            return new StopOrder(side, instrument.toTicks(order.getDecimal(StopPx.FIELD)), limit, lots);
+        }
         boolean tifSet = order.isSetField(TimeInForce.FIELD);
         char tif = tifSet ? order.getChar(TimeInForce.FIELD) : TimeInForce.DAY;
-        if (order.getChar(OrdType.FIELD) == OrdType.MARKET) {
+        if (type == OrdType.MARKET) {
             // a market order never rests: Day, the default, means immediate or cancel; GTC is rejected (OT-001)
             return new MarketOrder(side, lots, tif == TimeInForce.DAY
                     ? io.github.ahmedberrada.lob.core.TimeInForce.IOC : timeInForce(tif));
         }
+        long display = order.isSetField(MaxFloor.FIELD) ? order.getDecimal(MaxFloor.FIELD).longValueExact() : 0;
         return new LimitOrder(side, instrument.toTicks(order.getDecimal(Price.FIELD)), lots, timeInForce(tif),
-                order.isSetField(ExecInst.FIELD));
+                order.isSetField(ExecInst.FIELD), display);
     }
 
     /**
@@ -387,6 +412,10 @@ final class FixApplication implements Application, EventListener {
                     report(ExecutionReports.of(taker, ExecType.NEW, e.sequence(), time), taker.session);
                 }
                 case TradeExecuted e -> {
+                    // the taker is the order this command sent, or a stop it released (ST-005)
+                    if (taker == null || taker.orderId != e.takerOrderId()) {
+                        taker = registry.byOrderId(symbol, e.takerOrderId());
+                    }
                     if (taker != null) {
                         taker.fill(e.priceTicks(), e.quantity(), e.takerRemainingQuantity());
                         report(ExecutionReports.trade(taker, e.sequence(), time, e.priceTicks(), e.quantity(),
@@ -430,6 +459,12 @@ final class FixApplication implements Application, EventListener {
                                 e.sequence(), time, e.priceTicks()), taker.session);
                     }
                 }
+                case StopTriggered e -> {
+                    FixOrder triggered = registry.byOrderId(symbol, e.orderId());
+                    if (triggered != null) {
+                        report(ExecutionReports.triggered(triggered, e.sequence(), time), triggered.session);
+                    }
+                }
                 case ReplaceRejected e when context instanceof ReplaceContext c -> {
                     registry.refused(c.order().session, c.clOrdId());
                     boolean resting = e.reason() == RejectReason.UNKNOWN_ORDER;
@@ -438,7 +473,8 @@ final class FixApplication implements Application, EventListener {
                             resting ? "NOT_RESTING" : e.reason().name());
                 }
                 default -> {
-                    // OrderRested is already reported as New or a fill; other commands' events concern no FIX order
+                    // OrderRested is already reported as New or a fill; an iceberg's refill (OrderReplenished)
+                    // changes nothing a member is told; other commands' events concern no FIX order
                 }
             }
         }
@@ -475,7 +511,9 @@ final class FixApplication implements Application, EventListener {
             case INVALID_QUANTITY -> OrdRejReason.INCORRECT_QUANTITY;
             case QUANTITY_ABOVE_MAXIMUM, PRICE_ABOVE_MAXIMUM -> OrdRejReason.ORDER_EXCEEDS_LIMIT;
             case INVALID_TIME_IN_FORCE -> OrdRejReason.UNSUPPORTED_ORDER_CHARACTERISTIC;
-            case INVALID_PRICE, NO_LIQUIDITY, UNKNOWN_ORDER, POST_ONLY_WOULD_TRADE -> OrdRejReason.OTHER;
+            case INVALID_DISPLAY_QUANTITY -> OrdRejReason.INCORRECT_QUANTITY;
+            case INVALID_PRICE, NO_LIQUIDITY, UNKNOWN_ORDER, POST_ONLY_WOULD_TRADE, STOP_PRICE_ALREADY_REACHED ->
+                    OrdRejReason.OTHER;
         };
     }
 

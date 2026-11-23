@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.TreeMap;
 
 /**
  * Price-time priority matching engine for one instrument, as specified in
@@ -18,6 +19,13 @@ public final class MatchingEngine {
     private final OrderBook book = new OrderBook();
     private long nextOrderId = 1;
     private long nextSequence = 1;
+    /** Price of the most recent trade, 0 before the first one. */
+    private long lastTradePrice;
+    /** Stop orders waiting for their trigger, by order ID, hence in arrival order (ST-005). */
+    private final TreeMap<Long, ParkedStop> parkedStops = new TreeMap<>();
+    /** Lowest and highest trade prices of the command being processed, cascades included (ST-004). */
+    private long commandLowTrade;
+    private long commandHighTrade;
 
     public MatchingEngine(Instrument instrument) {
         this.instrument = Objects.requireNonNull(instrument, "instrument");
@@ -45,23 +53,53 @@ public final class MatchingEngine {
                 throw new IllegalArgumentException("duplicate order ID: " + order);
             }
             if (order.remainingQuantity() <= 0 || order.remainingQuantity() > snapshot.instrument().maxOrderQuantity()
-                    || order.priceTicks() <= 0 || order.priceTicks() > snapshot.instrument().maxPriceTicks()) {
+                    || order.priceTicks() <= 0 || order.priceTicks() > snapshot.instrument().maxPriceTicks()
+                    || !hasValidPeak(order)) {
                 throw new IllegalArgumentException("invalid resting order: " + order);
             }
-            engine.book.rest(new Order(order.orderId(), order.side(), order.priceTicks(), order.remainingQuantity(),
-                    order.postOnly()));
+            Order restored = new Order(order.orderId(), order.side(), order.priceTicks(), order.remainingQuantity(),
+                    order.postOnly(), order.displayQuantity());
+            restored.displayed = order.displayedQuantity();
+            engine.book.rest(restored);
         }
         OrderBook book = engine.book;
         if (book.bestBid().isPresent() && book.bestAsk().isPresent()
                 && book.bestBid().getAsLong() >= book.bestAsk().getAsLong()) {
             throw new IllegalArgumentException("snapshot book is crossed");
         }
+        Instrument instrument = snapshot.instrument();
+        if (snapshot.lastTradePriceTicks() < 0 || snapshot.lastTradePriceTicks() > instrument.maxPriceTicks()) {
+            throw new IllegalArgumentException("invalid last trade price: " + snapshot.lastTradePriceTicks());
+        }
+        engine.lastTradePrice = snapshot.lastTradePriceTicks();
+        for (ParkedStop stop : snapshot.parkedStops()) {
+            boolean valid = stop.orderId() >= 1 && stop.orderId() < snapshot.nextOrderId()
+                    && book.restingQuantity(stop.orderId()) == 0 && !engine.parkedStops.containsKey(stop.orderId())
+                    && stop.quantity() > 0 && stop.quantity() <= instrument.maxOrderQuantity()
+                    && stop.stopPriceTicks() > 0 && stop.stopPriceTicks() <= instrument.maxPriceTicks()
+                    && stop.limitPriceTicks() >= 0 && stop.limitPriceTicks() <= instrument.maxPriceTicks();
+            if (!valid) {
+                throw new IllegalArgumentException("invalid parked stop: " + stop);
+            }
+            engine.parkedStops.put(stop.orderId(), stop);
+        }
         return engine;
+    }
+
+    /** A fully visible order shows everything; an iceberg a peak between 1 and its display size. */
+    private static boolean hasValidPeak(RestingOrder order) {
+        if (order.displayQuantity() == 0) {
+            return order.displayedQuantity() == order.remainingQuantity();
+        }
+        // a negative display size fails here too: no positive peak is below it
+        return order.displayedQuantity() > 0
+                && order.displayedQuantity() <= Math.min(order.displayQuantity(), order.remainingQuantity());
     }
 
     /** Captures the complete engine state (ADR-0003). */
     public EngineSnapshot snapshot() {
-        return new EngineSnapshot(instrument, nextOrderId, nextSequence, book.restingOrders());
+        return new EngineSnapshot(instrument, nextOrderId, nextSequence, book.restingOrders(), lastTradePrice,
+                List.copyOf(parkedStops.values()));
     }
 
     public Instrument instrument() {
@@ -77,12 +115,16 @@ public final class MatchingEngine {
     public List<Event> process(Command command) {
         Objects.requireNonNull(command, "command");
         List<Event> events = new ArrayList<>();
+        commandLowTrade = Long.MAX_VALUE;
+        commandHighTrade = Long.MIN_VALUE;
         switch (command) {
             case LimitOrder order -> onLimitOrder(order, events);
             case MarketOrder order -> onMarketOrder(order, events);
             case CancelOrder cancel -> onCancel(cancel, events);
             case ReplaceOrder replace -> onReplace(replace, events);
+            case StopOrder stop -> onStop(stop, events);
         }
+        releaseTriggeredStops(events);
         return Collections.unmodifiableList(events);
     }
 
@@ -97,6 +139,10 @@ public final class MatchingEngine {
         }
         if (reason == null && order.postOnly() && wouldTrade(order.side(), order.priceTicks())) {
             reason = RejectReason.POST_ONLY_WOULD_TRADE;
+        }
+        if (reason == null && (order.displayQuantity() < 0 || order.displayQuantity() > order.quantity()
+                || (order.displayQuantity() != 0 && order.timeInForce() != TimeInForce.GTC))) {
+            reason = RejectReason.INVALID_DISPLAY_QUANTITY;
         }
         if (reason != null) {
             events.add(new OrderRejected(nextSequence++, orderId, reason));
@@ -114,8 +160,9 @@ public final class MatchingEngine {
             return;
         }
         if (order.timeInForce() == TimeInForce.GTC) {
-            book.rest(new Order(orderId, order.side(), order.priceTicks(), remaining, order.postOnly()));
-            events.add(new OrderRested(nextSequence++, orderId, order.side(), order.priceTicks(), remaining));
+            // a display quantity equal to the quantity means fully visible (IC-001)
+            long display = order.displayQuantity() == order.quantity() ? 0 : order.displayQuantity();
+            rest(new Order(orderId, order.side(), order.priceTicks(), remaining, order.postOnly(), display), events);
         } else {
             // A FOK order passed its check, so only an IOC order can have a remainder here.
             events.add(new OrderCancelled(nextSequence++, orderId, remaining, CancelReason.IMMEDIATE_OR_CANCEL));
@@ -152,7 +199,10 @@ public final class MatchingEngine {
 
     private void onCancel(CancelOrder cancel, List<Event> events) {
         Order order = book.remove(cancel.orderId());
-        if (order == null) {
+        ParkedStop stop = order == null ? parkedStops.remove(cancel.orderId()) : null;
+        if (stop != null) {
+            events.add(new OrderCancelled(nextSequence++, stop.orderId(), stop.quantity(), CancelReason.CLIENT_REQUEST));
+        } else if (order == null) {
             events.add(new CancelRejected(nextSequence++, cancel.orderId(), RejectReason.UNKNOWN_ORDER));
         } else {
             events.add(new OrderCancelled(
@@ -185,9 +235,71 @@ public final class MatchingEngine {
         book.remove(order.orderId);
         long remaining = match(order.orderId, order.side, replace.priceTicks(), replace.quantity(), events);
         if (remaining > 0) {
-            book.rest(new Order(order.orderId, order.side, replace.priceTicks(), remaining, order.postOnly));
-            events.add(new OrderRested(nextSequence++, order.orderId, order.side, replace.priceTicks(), remaining));
+            rest(new Order(order.orderId, order.side, replace.priceTicks(), remaining, order.postOnly,
+                    order.displayQuantity), events);
         }
+    }
+
+    private void rest(Order order, List<Event> events) {
+        book.rest(order);
+        events.add(new OrderRested(nextSequence++, order.orderId, order.side, order.priceTicks,
+                order.remainingQuantity, order.displayed));
+    }
+
+    private void onStop(StopOrder stop, List<Event> events) {
+        long orderId = nextOrderId++;
+        RejectReason reason = validateQuantity(stop.quantity());
+        if (reason == null) {
+            reason = validatePrice(stop.stopPriceTicks());
+        }
+        if (reason == null && stop.limitPriceTicks() != 0) {
+            reason = validatePrice(stop.limitPriceTicks());
+        }
+        ParkedStop parked = new ParkedStop(
+                orderId, stop.side(), stop.stopPriceTicks(), stop.limitPriceTicks(), stop.quantity());
+        if (reason == null && lastTradePrice != 0 && parked.isTriggeredBy(lastTradePrice)) {
+            reason = RejectReason.STOP_PRICE_ALREADY_REACHED;
+        }
+        if (reason != null) {
+            events.add(new OrderRejected(nextSequence++, orderId, reason));
+            return;
+        }
+        events.add(new OrderAccepted(nextSequence++, orderId));
+        parkedStops.put(orderId, parked);
+        events.add(new OrderParked(nextSequence++, orderId, stop.side(), stop.stopPriceTicks(), stop.quantity()));
+    }
+
+    /**
+     * Releases every stop the command's trades triggered, lowest order ID first, each processed in full
+     * before the next; their own trades may trigger more (ST-005, ST-006).
+     */
+    private void releaseTriggeredStops(List<Event> events) {
+        ParkedStop next;
+        while ((next = nextTriggered()) != null) {
+            parkedStops.remove(next.orderId());
+            events.add(new StopTriggered(nextSequence++, next.orderId()));
+            boolean isLimit = next.limitPriceTicks() != 0;
+            long limit = isLimit ? next.limitPriceTicks() : marketLimit(next.side());
+            long remaining = match(next.orderId(), next.side(), limit, next.quantity(), events);
+            if (remaining > 0 && isLimit) {
+                rest(new Order(next.orderId(), next.side(), limit, remaining, false, 0), events);
+            } else if (remaining > 0) {
+                events.add(new OrderCancelled(
+                        nextSequence++, next.orderId(), remaining, CancelReason.UNFILLED_MARKET_REMAINDER));
+            }
+        }
+    }
+
+    private ParkedStop nextTriggered() {
+        if (commandHighTrade == Long.MIN_VALUE) {
+            return null;                                         // no trade in this command
+        }
+        for (ParkedStop stop : parkedStops.values()) {
+            if (stop.isTriggeredBy(stop.side() == Side.BUY ? commandHighTrade : commandLowTrade)) {
+                return stop;
+            }
+        }
+        return null;
     }
 
     /** Whether an order at this price would trade with the opposite side right now (OT-004). */
@@ -211,12 +323,19 @@ public final class MatchingEngine {
                 break;
             }
             Order maker = level.first();
-            long fill = Math.min(remaining, maker.remainingQuantity);
+            long fill = Math.min(remaining, maker.displayed);           // never into hidden quantity (IC-003)
             remaining -= fill;
-            book.fillFirst(level, fill);
+            boolean replenished = book.fillFirst(level, fill);
+            lastTradePrice = level.priceTicks();
+            commandLowTrade = Math.min(commandLowTrade, lastTradePrice);
+            commandHighTrade = Math.max(commandHighTrade, lastTradePrice);
             events.add(new TradeExecuted(
                     nextSequence++, takerOrderId, maker.orderId, takerSide,
                     level.priceTicks(), fill, remaining, maker.remainingQuantity));
+            if (replenished) {
+                events.add(new OrderReplenished(
+                        nextSequence++, maker.orderId, maker.side, maker.priceTicks, maker.displayed));
+            }
         }
         return remaining;
     }

@@ -17,5 +17,9 @@ public enum RejectReason {
     /** Time in force not allowed for this order (OT-001, OT-004). */
     INVALID_TIME_IN_FORCE,
     /** A post-only order, or the replace of one, would have traded on arrival (OT-004, OT-005). */
-    POST_ONLY_WOULD_TRADE
+    POST_ONLY_WOULD_TRADE,
+    /** Display quantity negative, above the quantity, or on an order that cannot rest (IC-001). */
+    INVALID_DISPLAY_QUANTITY,
+    /** A stop order's stop price has already been reached by the last trade (ST-002). */
+    STOP_PRICE_ALREADY_REACHED
 }
