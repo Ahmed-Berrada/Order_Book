@@ -25,8 +25,8 @@ final class FixVenue implements AutoCloseable {
         this.port = port;
         this.service = MatchingService.start(directory.resolve("journals"), List.of(AAPL),
                 new JournalOptions(FsyncPolicy.OS, 0), TimeSource.system(), 1_000);
-        this.gateway = FixGateway.start(service,
-                new FixGatewayConfig(port, "LOB", List.of("MEMBER1", "MEMBER2"), directory.resolve("fix-store")));
+        this.gateway = FixGateway.start(service, new FixGatewayConfig("127.0.0.1", port, "LOB",
+                List.of("MEMBER1", "MEMBER2"), List.of("RISK"), directory.resolve("fix-store")));
     }
 
     static int freePort() throws IOException {

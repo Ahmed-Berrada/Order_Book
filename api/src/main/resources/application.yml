@@ -29,6 +29,14 @@ lob:
     port: 9878
     sender-comp-id: LOB
     members: [MEMBER1, MEMBER2]
+    drop-copy-sessions: [RISK]
+  # Binary market data (docs/interfaces/market-data-binary.md): UDP stream + TCP recovery service.
+  binary-feed:
+    enabled: true
+    stream-host: 127.0.0.1
+    stream-port: 9900
+    service-address: ${LOB_BIND_ADDRESS:127.0.0.1}
+    service-port: 9901
   instruments:
     - symbol: AAPL
       tick-size: "0.01"

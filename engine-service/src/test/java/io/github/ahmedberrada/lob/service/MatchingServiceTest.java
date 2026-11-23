@@ -11,8 +11,10 @@ import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
 import io.github.ahmedberrada.lob.core.OrderBook;
+import io.github.ahmedberrada.lob.core.RestingOrder;
 import io.github.ahmedberrada.lob.core.Rulebook;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.journal.EventBatch;
 import io.github.ahmedberrada.lob.journal.FsyncPolicy;
 import io.github.ahmedberrada.lob.journal.JournalCorruptedException;
@@ -131,6 +133,35 @@ class MatchingServiceTest {
             assertThat(book.asks()).containsExactly(new OrderBook.Level(18_600, 4, 1));
             assertThat(service.restingQuantity("MSFT", 1).join()).isEqualTo(7);
             assertThat(service.submit("AAPL", new CancelOrder(1)).join().commandSequence()).isEqualTo(3);
+        }
+    }
+
+    @Test
+    @Rulebook("IC-002")
+    void theBookShowsIcebergPeaksOnly() throws IOException {
+        try (MatchingService service = start()) {
+            service.submit("AAPL", new LimitOrder(Side.SELL, 18_600, 40, TimeInForce.GTC, false, 5)).join();
+            service.submit("AAPL", new LimitOrder(Side.SELL, 18_600, 3)).join();
+
+            assertThat(service.book("AAPL", 10).join().asks()).containsExactly(new OrderBook.Level(18_600, 8, 2));
+            assertThat(service.restingQuantity("AAPL", 1).join()).isEqualTo(40);
+        }
+    }
+
+    @Test
+    void stateIsTheEnginesSnapshotAsOfTheLastCommand() throws IOException {
+        try (MatchingService service = start()) {
+            service.submit("AAPL", new LimitOrder(Side.BUY, 18_500, 10)).join();
+            service.submit("AAPL", new LimitOrder(Side.SELL, 18_600, 4)).join();
+
+            InstrumentState state = service.state("AAPL").join();
+
+            assertThat(state.lastCommandSequence()).isEqualTo(2);
+            assertThat(state.engine().restingOrders()).containsExactly(
+                    new RestingOrder(1, Side.BUY, 18_500, 10), new RestingOrder(2, Side.SELL, 18_600, 4));
+            assertThat(state.engine().nextSequence()).isEqualTo(5);
+            assertRefused(service.state("TSLA"), Reason.UNKNOWN_INSTRUMENT);
+            assertThatNullPointerException().isThrownBy(() -> new InstrumentState(0, null));
         }
     }
 

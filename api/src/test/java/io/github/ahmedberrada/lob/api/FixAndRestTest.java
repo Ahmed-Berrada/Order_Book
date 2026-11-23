@@ -41,7 +41,7 @@ class FixAndRestTest {
         }
         try (ConfigurableApplicationContext venue = new SpringApplicationBuilder(LobEngineApplication.class)
                 .run("--server.port=0", "--lob.data-directory=" + directory.resolve("venue"), "--lob.fsync=OS",
-                        "--lob.fix.enabled=true", "--lob.fix.port=" + fixPort);
+                        "--lob.fix.enabled=true", "--lob.fix.port=" + fixPort, "--lob.binary-feed.enabled=false");
                 FixTestClient member = new FixTestClient("MEMBER1", fixPort, directory.resolve("client")).logon()) {
 
             member.send(Orders.limit("S-1", Side.SELL, "185.30", "10"));
