@@ -1,4 +1,4 @@
-# Journal file formats (version 4)
+# Journal file formats (version 5)
 
 Binary formats of the files written by `engine-journal`. Rules and rationale are in the rulebook
 chapter [`resilience.md`](../rulebook/resilience.md) and [ADR-0003](../adr/0003-journal-and-recovery.md).
@@ -32,7 +32,7 @@ Every file is a sequence of frames:
 | Size | Field | Value |
 |---|---|---|
 | 4 | magic | `0x4C4F424A` (`"LOBJ"`) |
-| 2 | format version | `4` |
+| 2 | format version | `5` |
 | 1 | file kind | `1` commands, `2` events, `3` snapshot |
 | 2+n | symbol | modified UTF-8 |
 | 8 | max order quantity | lots |
@@ -52,11 +52,13 @@ Then, by type:
 
 | Type | Fields |
 |---|---|
-| 1 LIMIT | side (1), price ticks (8), quantity (8), time in force (1), post-only (1), display quantity (8) |
-| 2 MARKET | side (1), quantity (8), time in force (1) |
+| 1 LIMIT | side (1), price ticks (8), quantity (8), time in force (1), post-only (1), display quantity (8), self-trade instruction (9) |
+| 2 MARKET | side (1), quantity (8), time in force (1), self-trade instruction (9) |
 | 3 CANCEL | order ID (8) |
 | 4 REPLACE | order ID (8), new price ticks (8), new quantity (8) |
-| 5 STOP | side (1), stop price ticks (8), limit price ticks (8; `0` for stop-market), quantity (8) |
+| 5 STOP | side (1), stop price ticks (8), limit price ticks (8; `0` for stop-market), quantity (8), self-trade instruction (9) |
+
+A **self-trade instruction** is a group (8; `0` for none) followed by a mode (1, see below).
 
 A boolean is one byte, `0` or `1`; any other value is corruption.
 
@@ -96,11 +98,11 @@ Each event starts with its type (1 byte) and its event sequence number (8 bytes)
 
 Then each resting order, in priority order (bids best first, then asks best first, oldest first within
 a price): order ID (8), side (1), price (8), remaining quantity (8), post-only (1), display quantity (8;
-`0` for a fully visible order), displayed quantity (8).
+`0` for a fully visible order), displayed quantity (8), self-trade instruction (9).
 
 After the resting orders: the last trade price (8; `0` before the first trade), the number of parked
 stops (4), then each stop in order of order ID: order ID (8), side (1), stop price (8), limit price (8),
-quantity (8).
+quantity (8), self-trade instruction (9).
 
 ## Enumeration codes
 
@@ -123,6 +125,7 @@ Codes are fixed here and never derived from Java enum order, so old journals kee
 | POST_ONLY_WOULD_TRADE | 8 |
 | INVALID_DISPLAY_QUANTITY | 9 |
 | STOP_PRICE_ALREADY_REACHED | 10 |
+| INVALID_SELF_TRADE_GROUP | 11 |
 
 | Cancel reason | Code |
 |---|---|
@@ -130,6 +133,13 @@ Codes are fixed here and never derived from Java enum order, so old journals kee
 | UNFILLED_MARKET_REMAINDER | 2 |
 | IMMEDIATE_OR_CANCEL | 3 |
 | FILL_OR_KILL | 4 |
+| SELF_TRADE_PREVENTION | 5 |
+
+| Self-trade mode | Code |
+|---|---|
+| CANCEL_NEWEST | 1 |
+| CANCEL_OLDEST | 2 |
+| CANCEL_BOTH | 3 |
 
 | Time in force | Code |
 |---|---|
@@ -148,3 +158,4 @@ does not know.
 | 2 | Time in force and post-only on orders, replace command, `OrderReplaced` and `ReplaceRejected` events, post-only in snapshots (ADR-0009). Version 1 files are refused: no production journal exists yet |
 | 3 | Iceberg orders: display quantity on limit orders and in snapshots, displayed quantity on `OrderRested`, `OrderReplenished` event (ADR-0010). Earlier versions are refused |
 | 4 | Stop orders: stop command, `OrderParked` and `StopTriggered` events, last trade price and parked stops in snapshots (ADR-0011). Earlier versions are refused |
+| 5 | Self-trade prevention: group and mode on limit, market and stop commands, on resting orders and on parked stops in snapshots; `INVALID_SELF_TRADE_GROUP` and `SELF_TRADE_PREVENTION` codes (ADR-0012). Earlier versions are refused |

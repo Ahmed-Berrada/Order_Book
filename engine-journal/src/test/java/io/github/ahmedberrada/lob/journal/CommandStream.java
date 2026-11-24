@@ -7,6 +7,8 @@ import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
+import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
+import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.TimeInForce;
@@ -29,8 +31,12 @@ final class CommandStream {
             Side side = random.nextBoolean() ? Side.BUY : Side.SELL;
             int kind = random.nextInt(13);
             TimeInForce[] tifs = TimeInForce.values();
+            SelfTradeInstruction selfTrade = random.nextInt(3) == 0
+                    ? new SelfTradeInstruction(random.nextLong(1, 3), SelfTradeMode.values()[random.nextInt(3)])
+                    : SelfTradeInstruction.NONE;
             if (kind < 5) {
-                commands.add(new LimitOrder(side, random.nextLong(95, 106), random.nextLong(1, 30)));
+                commands.add(new LimitOrder(side, random.nextLong(95, 106), random.nextLong(1, 30), TimeInForce.GTC,
+                        false, 0, selfTrade));
             } else if (kind < 6) {
                 commands.add(new LimitOrder(side, random.nextLong(95, 106), random.nextLong(1, 30),
                         tifs[random.nextInt(tifs.length)], random.nextInt(3) == 0, 0));
@@ -39,13 +45,13 @@ final class CommandStream {
                         TimeInForce.GTC, false, random.nextLong(1, 10)));
             } else if (kind < 7) {
                 commands.add(new MarketOrder(side, random.nextLong(1, 30), random.nextBoolean() ? TimeInForce.IOC
-                        : TimeInForce.FOK));
+                        : TimeInForce.FOK, selfTrade));
             } else if (kind < 9) {
                 commands.add(new ReplaceOrder(random.nextLong(1, i + 2), random.nextLong(95, 106),
                         random.nextLong(1, 30)));
             } else if (kind == 12) {
                 commands.add(new StopOrder(side, random.nextLong(95, 106),
-                        random.nextBoolean() ? 0 : random.nextLong(95, 106), random.nextLong(1, 30)));
+                        random.nextBoolean() ? 0 : random.nextLong(95, 106), random.nextLong(1, 30), selfTrade));
             } else {
                 commands.add(new CancelOrder(random.nextLong(1, i + 2)));
             }
