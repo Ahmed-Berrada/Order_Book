@@ -9,5 +9,7 @@ public enum CancelReason {
     /** The remainder of a LIMIT IOC order (OT-002). */
     IMMEDIATE_OR_CANCEL,
     /** A FOK order that could not be filled in full on arrival (OT-003). */
-    FILL_OR_KILL
+    FILL_OR_KILL,
+    /** An order of the same self-trade prevention group was met (SP-002 to SP-004). */
+    SELF_TRADE_PREVENTION
 }

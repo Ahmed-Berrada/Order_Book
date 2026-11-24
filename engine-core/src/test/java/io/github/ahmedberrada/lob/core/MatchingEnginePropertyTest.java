@@ -42,18 +42,23 @@ class MatchingEnginePropertyTest {
 
         Arbitrary<Long> display = Arbitraries.frequency(
                 Tuple.of(5, 0L), Tuple.of(3, 1L), Tuple.of(3, 3L), Tuple.of(1, 25L), Tuple.of(1, -1L));
-        Arbitrary<Command> limit = Combinators.combine(side, price, quantity, limitTif, postOnly, display)
-                .as((s, p, q, t, po, d) -> new LimitOrder(s, p, q, t, po, d));
-        Arbitrary<Command> market = Combinators.combine(side, quantity, marketTif)
-                .as((s, q, t) -> new MarketOrder(s, q, t));
+        // two groups, so that orders collide often; no group at all, and a few invalid groups
+        Arbitrary<Long> group = Arbitraries.frequency(
+                Tuple.of(6, 0L), Tuple.of(3, 1L), Tuple.of(3, 2L), Tuple.of(1, -1L));
+        Arbitrary<SelfTradeInstruction> stp = Combinators.combine(group, Arbitraries.of(SelfTradeMode.class))
+                .as(SelfTradeInstruction::new);
+        Arbitrary<Command> limit = Combinators.combine(side, price, quantity, limitTif, postOnly, display, stp)
+                .as((s, p, q, t, po, d, st) -> new LimitOrder(s, p, q, t, po, d, st));
+        Arbitrary<Command> market = Combinators.combine(side, quantity, marketTif, stp)
+                .as((s, q, t, st) -> new MarketOrder(s, q, t, st));
         Arbitrary<Command> cancel = orderId.map(id -> new CancelOrder(id));
         Arbitrary<Command> replace = Combinators.combine(orderId, price, quantity)
                 .as((id, p, q) -> new ReplaceOrder(id, p, q));
 
         Arbitrary<Long> stopLimit = Arbitraries.frequency(Tuple.of(1, 0L), Tuple.of(2, 95L), Tuple.of(2, 105L),
                 Tuple.of(1, -1L));
-        Arbitrary<Command> stop = Combinators.combine(side, price, stopLimit, quantity)
-                .as((s, p, l, q) -> new StopOrder(s, p, l, q));
+        Arbitrary<Command> stop = Combinators.combine(side, price, stopLimit, quantity, stp)
+                .as((s, p, l, q, st) -> new StopOrder(s, p, l, q, st));
         return Arbitraries.frequencyOf(Tuple.of(6, limit), Tuple.of(1, market), Tuple.of(2, cancel),
                         Tuple.of(2, replace), Tuple.of(2, stop))
                 .list().ofMaxSize(150);
@@ -63,7 +68,8 @@ class MatchingEnginePropertyTest {
     @Rulebook({"CT-001", "CT-002", "CT-003", "CT-004", "CT-005", "CT-006", "CT-007", "CT-008", "CT-009",
             "CT-010", "CT-011", "CT-012", "OT-001", "OT-002", "OT-003", "OT-004", "OT-005", "OT-006", "OT-007",
             "OT-008", "IC-001", "IC-002", "IC-003", "IC-004", "IC-005", "IC-006", "ST-001", "ST-002", "ST-003", "ST-004",
-            "ST-005", "ST-006", "ST-007"})
+            "ST-005", "ST-006", "ST-007", "SP-001", "SP-002", "SP-003", "SP-004", "SP-005", "SP-006", "SP-007",
+            "SP-008"})
     void producesExactlyTheSameEventsAsTheReferenceModel(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
         ReferenceEngine reference = new ReferenceEngine(INSTRUMENT);
@@ -187,7 +193,7 @@ class MatchingEnginePropertyTest {
     }
 
     @Property
-    @Rulebook({"RS-010", "RS-005"})
+    @Rulebook({"RS-010", "RS-005", "SP-009"})
     void restoringASnapshotAtAnyPointChangesNothing(
             @ForAll("commands") List<Command> commands, @ForAll @IntRange(max = 150) int split) {
         int at = Math.min(split, commands.size());

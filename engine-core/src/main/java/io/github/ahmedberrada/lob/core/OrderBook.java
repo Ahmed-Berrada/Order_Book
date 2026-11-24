@@ -73,7 +73,8 @@ public final class OrderBook {
             for (PriceLevel level : levels(side).values()) {
                 for (Order order : level.orders()) {
                     orders.add(new RestingOrder(order.orderId, order.side, order.priceTicks,
-                            order.remainingQuantity, order.postOnly, order.displayQuantity, order.displayed));
+                            order.remainingQuantity, order.postOnly, order.displayQuantity, order.displayed,
+                            order.selfTrade));
                 }
             }
         }
@@ -120,15 +121,16 @@ public final class OrderBook {
 
     /**
      * Opposite quantity available to a taker within its limit, counted from the best level and capped
-     * at {@code needed} (OT-003).
+     * at {@code needed} (OT-003). With a self-trade prevention group, counting stops before the first
+     * level that holds an order of that group (SP-006).
      */
-    long availableQuantity(Side takerSide, long limitPriceTicks, long needed) {
+    long availableQuantity(Side takerSide, long limitPriceTicks, long needed, long group) {
         long available = 0;
         for (PriceLevel level : levels(takerSide.opposite()).values()) {
             boolean withinLimit = takerSide == Side.BUY
                     ? level.priceTicks() <= limitPriceTicks
                     : level.priceTicks() >= limitPriceTicks;
-            if (!withinLimit || available >= needed) {
+            if (!withinLimit || available >= needed || (group > 0 && level.holdsGroup(group))) {
                 break;
             }
             available += level.totalQuantity();

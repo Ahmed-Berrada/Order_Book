@@ -43,6 +43,16 @@ final class PriceLevel {
         return Collections.unmodifiableCollection(orders);
     }
 
+    /** Whether any resting order here belongs to a self-trade prevention group (SP-006). */
+    boolean holdsGroup(long group) {
+        for (Order order : orders) {
+            if (order.selfTrade.group() == group) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** The order with time priority at this price. */
     Order first() {
         return orders.peekFirst();

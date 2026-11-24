@@ -21,5 +21,7 @@ public enum RejectReason {
     /** Display quantity negative, above the quantity, or on an order that cannot rest (IC-001). */
     INVALID_DISPLAY_QUANTITY,
     /** A stop order's stop price has already been reached by the last trade (ST-002). */
-    STOP_PRICE_ALREADY_REACHED
+    STOP_PRICE_ALREADY_REACHED,
+    /** An order's self-trade prevention group is negative (SP-001). */
+    INVALID_SELF_TRADE_GROUP
 }

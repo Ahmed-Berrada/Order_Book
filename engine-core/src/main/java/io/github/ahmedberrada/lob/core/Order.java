@@ -17,16 +17,19 @@ final class Order {
     final long priceTicks;
     final boolean postOnly;
     final long displayQuantity;
+    final SelfTradeInstruction selfTrade;
     long remainingQuantity;
     long displayed;
 
-    Order(long orderId, Side side, long priceTicks, long remainingQuantity, boolean postOnly, long displayQuantity) {
+    Order(long orderId, Side side, long priceTicks, long remainingQuantity, boolean postOnly, long displayQuantity,
+            SelfTradeInstruction selfTrade) {
         this.orderId = orderId;
         this.side = side;
         this.priceTicks = priceTicks;
         this.remainingQuantity = remainingQuantity;
         this.postOnly = postOnly;
         this.displayQuantity = displayQuantity;
+        this.selfTrade = selfTrade;
         this.displayed = peak(remainingQuantity);
     }
 
