@@ -1,7 +1,5 @@
 # Rulebook: self-trade prevention
 
-- **Status:** Draft
-
 A member must not trade with itself: such a trade moves no risk, still counts as volume, and is the
 mark of wash trading (MAR art. 12; MiFID II RTS 6 art. 15 requires members to have controls against it).
 The venue gives members the control: orders carry a **group**, and orders of one group never trade
