@@ -1,5 +1,6 @@
 package io.github.ahmedberrada.lob.fix;
 
+import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.journal.FsyncPolicy;
 import io.github.ahmedberrada.lob.journal.JournalOptions;
 import io.github.ahmedberrada.lob.journal.TimeSource;
@@ -22,11 +23,15 @@ final class FixVenue implements AutoCloseable {
     final int port;
 
     FixVenue(Path directory, int port) throws Exception {
+        this(directory, port, SelfTradeMode.CANCEL_NEWEST);
+    }
+
+    FixVenue(Path directory, int port, SelfTradeMode selfTradeMode) throws Exception {
         this.port = port;
         this.service = MatchingService.start(directory.resolve("journals"), List.of(AAPL),
                 new JournalOptions(FsyncPolicy.OS, 0), TimeSource.system(), 1_000);
         this.gateway = FixGateway.start(service, new FixGatewayConfig("127.0.0.1", port, "LOB",
-                List.of("MEMBER1", "MEMBER2"), List.of("RISK"), directory.resolve("fix-store")));
+                List.of("MEMBER1", "MEMBER2"), List.of("RISK"), directory.resolve("fix-store"), selfTradeMode));
     }
 
     static int freePort() throws IOException {

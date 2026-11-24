@@ -1,8 +1,11 @@
 package io.github.ahmedberrada.lob.fix;
 
+import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
 import io.github.ahmedberrada.lob.service.MatchingService;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import quickfix.Acceptor;
 import quickfix.ConfigError;
@@ -33,7 +36,12 @@ public final class FixGateway implements AutoCloseable {
         SessionSettings settings = settings(config);
         List<SessionID> dropCopies = config.dropCopyCompIds().stream()
                 .map(target -> new SessionID(BEGIN_STRING, config.senderCompId(), target)).toList();
-        FixApplication application = new FixApplication(service, dropCopies);
+        Map<SessionID, SelfTradeInstruction> selfTrade = new HashMap<>();
+        for (String member : config.memberCompIds()) {
+            selfTrade.put(new SessionID(BEGIN_STRING, config.senderCompId(), member), new SelfTradeInstruction(
+                    FixGatewayConfig.selfTradeGroup(member), config.selfTradeMode()));
+        }
+        FixApplication application = new FixApplication(service, dropCopies, selfTrade);
         service.addListener(application);
         Acceptor acceptor = new ThreadedSocketAcceptor(application, new FileStoreFactory(settings), settings,
                 new SLF4JLogFactory(settings), new DefaultMessageFactory());

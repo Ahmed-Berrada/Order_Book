@@ -2,6 +2,7 @@ package io.github.ahmedberrada.lob.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.journal.FsyncPolicy;
 import io.github.ahmedberrada.lob.service.MatchingService;
 import org.junit.jupiter.api.Test;
@@ -36,8 +37,17 @@ class LobPropertiesTest {
             assertThat(properties.fix().port()).isEqualTo(9878);
             assertThat(properties.fix().bindAddress()).isEqualTo("127.0.0.1");
             assertThat(properties.fix().senderCompId()).isEqualTo("LOB");
+            assertThat(properties.fix().selfTradeMode()).isEqualTo(SelfTradeMode.CANCEL_NEWEST);
             assertThat(context.getBean(MatchingService.class).instruments()).hasSize(1);
         });
+    }
+
+    @Test
+    void readsTheSelfTradeMode() {
+        runner.withPropertyValues(VALID).withPropertyValues("lob.fix.self-trade-mode=CANCEL_BOTH").run(context ->
+                assertThat(context.getBean(LobProperties.class).fix().selfTradeMode()).isEqualTo(SelfTradeMode.CANCEL_BOTH));
+        runner.withPropertyValues(VALID).withPropertyValues("lob.fix.self-trade-mode=CANCEL_EVERYONE")
+                .run(context -> assertThat(context).hasFailed());
     }
 
     @Test

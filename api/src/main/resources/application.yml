@@ -30,6 +30,8 @@ lob:
     sender-comp-id: LOB
     members: [MEMBER1, MEMBER2]
     drop-copy-sessions: [RISK]
+    # What happens when a member's order meets its own resting order (docs/rulebook/self-trade-prevention.md)
+    self-trade-mode: CANCEL_NEWEST
   # Binary market data (docs/interfaces/market-data-binary.md): UDP stream + TCP recovery service.
   binary-feed:
     enabled: true

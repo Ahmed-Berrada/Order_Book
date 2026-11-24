@@ -14,6 +14,7 @@ import io.github.ahmedberrada.lob.core.OrderRested;
 import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.ReplaceRejected;
+import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.StopTriggered;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
@@ -25,6 +26,7 @@ import io.github.ahmedberrada.lob.service.MatchingService;
 import io.github.ahmedberrada.lob.service.RequestRefusedException;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import org.slf4j.Logger;
@@ -86,6 +88,8 @@ final class FixApplication implements Application, EventListener {
     private final MatchingService service;
     private final Sender sender;
     private final List<SessionID> dropCopies;
+    /** The self-trade instruction of each member session; a session not listed has none (SP-001). */
+    private final Map<SessionID, SelfTradeInstruction> selfTrade;
     private final OrderRegistry registry = new OrderRegistry();
 
     /** Attached to a NewOrderSingle's command, so its events can be reported to its sender. */
@@ -101,18 +105,20 @@ final class FixApplication implements Application, EventListener {
     private record ReplaceContext(String clOrdId, String origClOrdId, FixOrder order) {
     }
 
-    FixApplication(MatchingService service, List<SessionID> dropCopies) {
-        this(service, FixApplication::sendToTarget, dropCopies);
+    FixApplication(MatchingService service, List<SessionID> dropCopies, Map<SessionID, SelfTradeInstruction> selfTrade) {
+        this(service, FixApplication::sendToTarget, dropCopies, selfTrade);
     }
 
     FixApplication(MatchingService service, Sender sender) {
-        this(service, sender, List.of());
+        this(service, sender, List.of(), Map.of());
     }
 
-    FixApplication(MatchingService service, Sender sender, List<SessionID> dropCopies) {
+    FixApplication(MatchingService service, Sender sender, List<SessionID> dropCopies,
+            Map<SessionID, SelfTradeInstruction> selfTrade) {
         this.service = service;
         this.sender = sender;
         this.dropCopies = List.copyOf(dropCopies);
+        this.selfTrade = Map.copyOf(selfTrade);
     }
 
     @Override
@@ -164,7 +170,8 @@ final class FixApplication implements Application, EventListener {
         }
         Command command;
         try {
-            command = toCommand(order, instrument.get(), side, lots);
+            command = toCommand(order, instrument.get(), side, lots,
+                    selfTrade.getOrDefault(session, SelfTradeInstruction.NONE));
         } catch (RequestRefusedException e) {
             refuse(session, clOrdId, symbol, side, quantity, OrdRejReason.OTHER, e.reason().name(), true);
             return;
@@ -366,25 +373,26 @@ final class FixApplication implements Application, EventListener {
         };
     }
 
-    private static Command toCommand(Message order, InstrumentConfig instrument, char fixSide, long lots)
+    private static Command toCommand(Message order, InstrumentConfig instrument, char fixSide, long lots,
+            SelfTradeInstruction selfTrade)
             throws FieldNotFound {
         io.github.ahmedberrada.lob.core.Side side =
                 fixSide == Side.BUY ? io.github.ahmedberrada.lob.core.Side.BUY : io.github.ahmedberrada.lob.core.Side.SELL;
         char type = order.getChar(OrdType.FIELD);
         if (type == OrdType.STOP || type == OrdType.STOP_LIMIT) {
             long limit = type == OrdType.STOP_LIMIT ? instrument.toTicks(order.getDecimal(Price.FIELD)) : 0;
-            return new StopOrder(side, instrument.toTicks(order.getDecimal(StopPx.FIELD)), limit, lots);
+            return new StopOrder(side, instrument.toTicks(order.getDecimal(StopPx.FIELD)), limit, lots, selfTrade);
         }
         boolean tifSet = order.isSetField(TimeInForce.FIELD);
         char tif = tifSet ? order.getChar(TimeInForce.FIELD) : TimeInForce.DAY;
         if (type == OrdType.MARKET) {
             // a market order never rests: Day, the default, means immediate or cancel; GTC is rejected (OT-001)
             return new MarketOrder(side, lots, tif == TimeInForce.DAY
-                    ? io.github.ahmedberrada.lob.core.TimeInForce.IOC : timeInForce(tif));
+                    ? io.github.ahmedberrada.lob.core.TimeInForce.IOC : timeInForce(tif), selfTrade);
         }
         long display = order.isSetField(MaxFloor.FIELD) ? order.getDecimal(MaxFloor.FIELD).longValueExact() : 0;
         return new LimitOrder(side, instrument.toTicks(order.getDecimal(Price.FIELD)), lots, timeInForce(tif),
-                order.isSetField(ExecInst.FIELD), display);
+                order.isSetField(ExecInst.FIELD), display, selfTrade);
     }
 
     /**
@@ -512,6 +520,7 @@ final class FixApplication implements Application, EventListener {
             case QUANTITY_ABOVE_MAXIMUM, PRICE_ABOVE_MAXIMUM -> OrdRejReason.ORDER_EXCEEDS_LIMIT;
             case INVALID_TIME_IN_FORCE -> OrdRejReason.UNSUPPORTED_ORDER_CHARACTERISTIC;
             case INVALID_DISPLAY_QUANTITY -> OrdRejReason.INCORRECT_QUANTITY;
+            case INVALID_SELF_TRADE_GROUP -> OrdRejReason.OTHER;
             case INVALID_PRICE, NO_LIQUIDITY, UNKNOWN_ORDER, POST_ONLY_WOULD_TRADE, STOP_PRICE_ALREADY_REACHED ->
                     OrdRejReason.OTHER;
         };

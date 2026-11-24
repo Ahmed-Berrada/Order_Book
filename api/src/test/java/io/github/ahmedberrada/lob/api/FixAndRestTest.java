@@ -3,6 +3,7 @@ package io.github.ahmedberrada.lob.api;
 import static io.github.ahmedberrada.lob.fix.Orders.field;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.ahmedberrada.lob.core.Rulebook;
 import io.github.ahmedberrada.lob.fix.FixTestClient;
 import io.github.ahmedberrada.lob.fix.Orders;
 import java.net.ServerSocket;
@@ -23,6 +24,7 @@ import quickfix.field.LastPx;
 import quickfix.field.LastQty;
 import quickfix.field.LeavesQty;
 import quickfix.field.Side;
+import quickfix.field.Text;
 
 /**
  * One venue, two protocols: a FIX member's resting order is filled and cancelled over REST, and the
@@ -62,6 +64,37 @@ class FixAndRestTest {
             Message cancelled = member.next();
             assertThat(field(cancelled, ExecType.FIELD)).isEqualTo("4");
             assertThat(field(cancelled, LeavesQty.FIELD)).isEqualTo("0");
+        }
+    }
+
+    @Test
+    @Rulebook({"SP-001", "SP-003"})
+    void theConfiguredSelfTradeModeAppliesToFixMembersButNotToRest() throws Exception {
+        int fixPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            fixPort = socket.getLocalPort();
+        }
+        try (ConfigurableApplicationContext venue = new SpringApplicationBuilder(LobEngineApplication.class)
+                .run("--server.port=0", "--lob.data-directory=" + directory.resolve("venue"), "--lob.fsync=OS",
+                        "--lob.fix.enabled=true", "--lob.fix.port=" + fixPort, "--lob.binary-feed.enabled=false",
+                        "--lob.fix.self-trade-mode=CANCEL_OLDEST");
+                FixTestClient member = new FixTestClient("MEMBER1", fixPort, directory.resolve("client")).logon()) {
+
+            member.send(Orders.limit("S-1", Side.SELL, "185.30", "10"));
+            member.next();
+            // the member buys from itself: its older order is cancelled, the new one rests
+            member.send(Orders.limit("B-1", Side.BUY, "185.30", "4"));
+            assertThat(field(member.next(), ClOrdID.FIELD)).isEqualTo("B-1");
+            Message cancelled = member.next();
+            assertThat(field(cancelled, ClOrdID.FIELD)).isEqualTo("S-1");
+            assertThat(field(cancelled, ExecType.FIELD)).isEqualTo("4");
+            assertThat(field(cancelled, Text.FIELD)).isEqualTo("SELF_TRADE_PREVENTION");
+
+            // REST orders have no group: a REST seller trades with the member's resting buy
+            HttpResponse<String> sell = rest(venue, "POST", "/api/v1/instruments/AAPL/orders",
+                    "{\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":4}");
+            assertThat(sell.body()).contains("\"status\":\"FILLED\"");
+            assertThat(field(member.next(), ExecType.FIELD)).isEqualTo("F");
         }
     }
 
