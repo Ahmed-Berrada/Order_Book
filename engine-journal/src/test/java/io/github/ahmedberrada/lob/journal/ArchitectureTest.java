@@ -25,8 +25,9 @@ class ArchitectureTest {
     }
 
     @Test
-    void onlyTheCommandLineToolExits() {
+    void onlyTheCommandLineToolsExit() {
         noClasses().that().doNotHaveFullyQualifiedName(ReplayTool.class.getName())
+                .and().doNotHaveFullyQualifiedName(RecordsExport.class.getName())
                 .should().callMethod(System.class, "exit", int.class)
                 .check(CLASSES);
     }
