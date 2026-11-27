@@ -153,6 +153,26 @@ An order that is not resting (filled, cancelled or unknown) returns `resting: fa
 `restingQuantity` is the full remainder, hidden quantity included: it is meant for the order's owner.
 Until members and authentication exist (phases 5 and 8) the API is bound to `127.0.0.1`.
 
+### Members
+
+[Members and risk](../rulebook/members-and-risk.md): an order, a replace or a cancel is entered for the member
+named by the header `X-Member-Id` (a positive number); without it the operator (member `0`) acts, with no
+limits. A member can cancel and replace only its own orders (MB-003): another's order is a `404`. Until
+authentication exists (phase 8) the header is not checked against anything: any caller can name any member,
+and every endpoint below is an operator action.
+
+| Endpoint | Does |
+|---|---|
+| `GET /api/v1/members/{memberId}` | The member's state in every instrument: `suspended`, `netPosition` and each limit (`0` means none) |
+| `PUT /api/v1/members/{memberId}/limits` | Sets the limits in every instrument. Body: `maxOrderQuantity`, `maxOrderNotional` (a price times a quantity, e.g. `1000.00`), `priceCollarBps`, `maxOpenOrders`, `maxNetPosition`, all `0` or more. Returns the member's state |
+| `PUT /api/v1/members/{memberId}/suspension` | The kill switch: suspends the member and cancels its open orders in every instrument. Returns `{"memberId":2,"suspended":true,"cancelledOrders":2}`. `409 INVALID_MEMBER` if already suspended |
+| `DELETE /api/v1/members/{memberId}/suspension` | Lifts the suspension. `409 INVALID_MEMBER` if the member is not suspended |
+
+Limits can also be configured (`lob.members`, see `application.yml`); the venue applies them when it starts
+and journals a change only if the configured limits differ from the instrument's. An order that breaks a
+limit is a `422` with `RISK_ORDER_QUANTITY`, `RISK_ORDER_NOTIONAL`, `RISK_PRICE_COLLAR`, `RISK_OPEN_ORDERS`,
+`RISK_POSITION` or `MEMBER_SUSPENDED`.
+
 ### Self-trade prevention
 
 REST orders have no [self-trade prevention](../rulebook/self-trade-prevention.md) group: the API has no
@@ -182,10 +202,10 @@ peak only (IC-002).
 |---|---|---|
 | `400` | Malformed JSON, missing or unknown field, fractional quantity, price, `postOnly` or `displayQuantity` on a market order, depth out of range | — |
 | `404` | Unknown symbol (OE-001) | `UNKNOWN_INSTRUMENT` |
-| `409` | Phase change to the current phase (TP-002) | `INVALID_PHASE_TRANSITION` |
+| `409` | Phase change to the current phase (TP-002); suspending a suspended member or resuming one that is not (RK-004, RK-005) | `INVALID_PHASE_TRANSITION`, `INVALID_MEMBER` |
 | `404` | Cancel or replace of an order that is not resting (CT-008, OT-005) | `UNKNOWN_ORDER` |
 | `422` | Off-tick price (OE-002) | `OFF_TICK_PRICE` |
-| `422` | Rejected by the engine (CT-007, CT-009, OT-001, OT-004); the body carries the `orderId` it consumed | `INVALID_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `NO_LIQUIDITY`, `INVALID_TIME_IN_FORCE`, `POST_ONLY_WOULD_TRADE`, `INVALID_DISPLAY_QUANTITY`, `STOP_PRICE_ALREADY_REACHED`, `NOT_ALLOWED_IN_PHASE`, `INVALID_TICK_SIZE` |
+| `422` | Rejected by the engine (CT-007, CT-009, OT-001, OT-004); the body carries the `orderId` it consumed | `INVALID_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `NO_LIQUIDITY`, `INVALID_TIME_IN_FORCE`, `POST_ONLY_WOULD_TRADE`, `INVALID_DISPLAY_QUANTITY`, `STOP_PRICE_ALREADY_REACHED`, `NOT_ALLOWED_IN_PHASE`, `INVALID_TICK_SIZE`, `MEMBER_SUSPENDED`, `RISK_ORDER_QUANTITY`, `RISK_ORDER_NOTIONAL`, `RISK_PRICE_COLLAR`, `RISK_OPEN_ORDERS`, `RISK_POSITION` |
 | `422` | Replace refused by the engine (OT-005); the order is unchanged | the same reasons |
 | `503` | Queue full (OE-005), with `Retry-After: 1` | `OVERLOADED` |
 | `503` | Instrument halted (OE-006) or venue shutting down (OE-007) | `HALTED`, `STOPPED` |

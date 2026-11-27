@@ -1,7 +1,5 @@
 # Rulebook: members and pre-trade risk
 
-- **Status:** Draft
-
 Every order is entered on behalf of a **member** (a trading firm), and a venue must stop a member's
 orders before they can do harm: MiFID II RTS 6 requires pre-trade limits and a kill switch, and the US
 market access rule (SEC 15c3-5) requires the same of brokers. This chapter adds members and their limits

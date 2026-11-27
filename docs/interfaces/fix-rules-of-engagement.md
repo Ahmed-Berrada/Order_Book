@@ -166,10 +166,9 @@ answered with a `BusinessMessageReject`, reason `6` (Not authorized) (DC-002).
 
 ## Current limitations
 
-- Order ownership (which session owns which order) is held in memory. After a venue restart, orders
-  entered before it still rest and trade, but their fills cannot be reported over FIX, and their
-  ClOrdIDs are forgotten. Phase 5 records the member with each command in the journal, which removes
-  this limitation.
+- Order ownership (which session owns which order) and ClOrdIDs are held in memory. After a venue restart,
+  orders entered before it still rest and trade, and the journal knows their member, but their fills cannot
+  be reported over FIX and their ClOrdIDs are forgotten.
 - A Day order that expires is reported as `ExecType=C` (Expired), `OrdStatus=C`, `Text=DAY_EXPIRED`, when the
   venue sets the instrument to closed. There is no trading calendar: an operator closes the instrument (REST).
 - A volatility interruption (a fill that would execute outside the band) is not announced over FIX; the
@@ -180,4 +179,13 @@ answered with a `BusinessMessageReject`, reason `6` (Not authorized) (DC-002).
   limit GTC orders and stops, and rejects the rest with `OrdRejReason=2` (Exchange closed) and text
   `NOT_ALLOWED_IN_PHASE`; the same reason is given for every new order while the instrument is closed.
   Auction fills are reported as ordinary `ExecType=Trade` reports at the auction price.
-- No mass cancel yet (phase 4, kill switch).
+- There is no mass cancel by the member itself; the operator's kill switch (REST) cancels all of a member's orders, and each is reported as `ExecType=4` with `Text=KILL_SWITCH`.
+
+## Members and limits
+
+A member session acts for a **member**: the ID configured in `lob.members` for its CompID, or else a number
+derived from the CompID. The ID is also the session's self-trade prevention group. The member's pre-trade
+limits ([members and risk](../rulebook/members-and-risk.md)) apply to its orders: an order that breaks one is
+rejected with `OrdRejReason=3` (Order exceeds limit) and `Text` naming the limit (`RISK_ORDER_QUANTITY`,
+`RISK_ORDER_NOTIONAL`, `RISK_PRICE_COLLAR`, `RISK_OPEN_ORDERS`, `RISK_POSITION`); a suspended member's orders
+are rejected with `OrdRejReason=99` and `Text=MEMBER_SUSPENDED`.
