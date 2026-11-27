@@ -1,4 +1,5 @@
-# No authentication until phase 8: listen on the loopback interface unless deliberately opened.
+# Authentication is on by default (lob.security): the venue will not start without users. Listen on the loopback
+# interface unless deliberately opened, and put TLS in front of anything else.
 server:
   address: ${LOB_BIND_ADDRESS:127.0.0.1}
 

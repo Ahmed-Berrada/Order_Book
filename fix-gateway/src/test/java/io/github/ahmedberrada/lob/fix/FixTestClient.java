@@ -53,6 +53,21 @@ public final class FixTestClient implements Application, AutoCloseable {
                 new ScreenLogFactory(settings), new DefaultMessageFactory());
     }
 
+    private volatile String password;
+
+    /** The Password (tag 554) sent in the Logon message. */
+    public FixTestClient withPassword(String password) {
+        this.password = password;
+        return this;
+    }
+
+    /** Connects; whether the venue accepted the logon within the time given. */
+    public boolean tryLogon(long millis) throws Exception {
+        loggedOn = new CountDownLatch(1);
+        initiator.start();
+        return loggedOn.await(millis, TimeUnit.MILLISECONDS);
+    }
+
     /** Connects and waits until the venue has accepted the logon. */
     public FixTestClient logon() throws Exception {
         loggedOn = new CountDownLatch(1);
@@ -138,6 +153,13 @@ public final class FixTestClient implements Application, AutoCloseable {
 
     @Override
     public void toAdmin(Message message, SessionID sessionId) {
+        try {
+            if (password != null && quickfix.field.MsgType.LOGON.equals(message.getHeader().getString(quickfix.field.MsgType.FIELD))) {
+                message.setString(quickfix.field.Password.FIELD, password);
+            }
+        } catch (quickfix.FieldNotFound e) {
+            throw new AssertionError(e);
+        }
     }
 
     @Override

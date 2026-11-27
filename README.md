@@ -308,7 +308,7 @@ The full rationale is in [ADR-0001](docs/adr/0001-foundations.md), [ADR-0002](do
 [ADR-0008](docs/adr/0008-binary-feed-and-drop-copy.md), [ADR-0009](docs/adr/0009-order-types-and-replace.md),
 [ADR-0010](docs/adr/0010-iceberg-orders.md), [ADR-0011](docs/adr/0011-stop-orders.md) and
 [ADR-0012](docs/adr/0012-self-trade-prevention.md) [ADR-0013](docs/adr/0013-trading-phases-and-auctions.md), [ADR-0014](docs/adr/0014-venue-controls.md) and
-[ADR-0015](docs/adr/0015-members-and-risk.md) and [ADR-0016](docs/adr/0016-performance-and-the-queue.md).
+[ADR-0015](docs/adr/0015-members-and-risk.md) and [ADR-0016](docs/adr/0016-performance-and-the-queue.md) and [ADR-0017](docs/adr/0017-access-control.md).
 The matching behaviour itself is specified in the [rulebook](docs/rulebook/continuous-trading.md).
 
 | Decision | Choice | Reason |
@@ -334,8 +334,11 @@ Requirements: **JDK 21+**. Maven is not required because the wrapper is included
 ./mvnw verify                                   # build, tests and quality gates
 ./mvnw -pl engine-core,engine-journal,engine-service,market-data -am -Pmutation verify   # mutation testing (PIT), slower
 ./mvnw -pl api -am install -DskipTests && \
-  ./mvnw -pl api spring-boot:run                # REST on :8080, FIX on :9878 (journals in ./data)
+  ./mvnw -pl api spring-boot:run -Dspring-boot.run.profiles=dev   # REST on :8080, FIX on :9878 (journals in ./data)
 ```
+
+The `dev` profile switches authentication off. Without it the venue is secure by default and **refuses to
+start** until users are configured (see [Security](#security)).
 
 On Windows, use `mvnw.cmd` in place of `./mvnw`.
 
@@ -372,8 +375,33 @@ The venue accepts FIX 4.4 on port 9878 for the sessions provisioned in `applicat
 codes. Both sides of a trade receive an ExecutionReport, and reports sent while a member is
 disconnected are delivered by FIX resend when it logs on again.
 
-Both HTTP and FIX listen on `127.0.0.1` only: there is no authentication until phase 8. Set
-`LOB_BIND_ADDRESS` to expose them deliberately, on a trusted network.
+Both HTTP and FIX listen on `127.0.0.1` by default. Set `LOB_BIND_ADDRESS` to expose them, and only with
+authentication on and TLS in front (see [Security](#security)).
+
+### Security
+
+[Access control](docs/rulebook/access-control.md) is on by default (ADR-0017): REST uses HTTP Basic with
+the roles `READ`, `MEMBER` and `ADMIN`, and a member user acts only for its own member; FIX sessions log on
+with a password. Secrets are configured as salted hashes:
+
+```bash
+java -cp api/target/api-0.1.0-SNAPSHOT.jar -Dloader.main=io.github.ahmedberrada.lob.api.HashPassword \
+  org.springframework.boot.loader.launch.PropertiesLauncher 'the password'     # prints {bcrypt}$2a$...
+```
+
+```yaml
+lob:
+  security:
+    users:
+      - {name: ops,   password: "{bcrypt}$2a$10$...", roles: [ADMIN]}
+      - {name: alpha, password: "{bcrypt}$2a$10$...", roles: [MEMBER], member-id: 1}
+  fix:
+    passwords: {MEMBER1: "{bcrypt}$2a$10$..."}
+```
+
+A venue with security on and no users, a plain-text secret, or a FIX session without a password does not
+start. The threat model and the checklist against OWASP ASVS are in [`docs/security`](docs/security/).
+Report a vulnerability as described in [`SECURITY.md`](SECURITY.md).
 
 ### Watching the books
 
@@ -480,7 +508,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 5 | **Pre-trade risk & members** | |
 | 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅; group commit, load test, GC study | ⏳ |
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; RTS 22 reports, surveillance | ⏳ |
-| 8 | **Security & supply chain**: mTLS, OIDC, SBOM, signed releases | |
+| 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅; TLS and mTLS (phase 9), OIDC | ⏳ |
 | 9 | **Operations & resilience**: observability, failover, runbooks, chaos tests | |
 | 10 | **Post-trade & analytics** *(optional)* | |
 

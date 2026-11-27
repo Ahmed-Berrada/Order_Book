@@ -13,7 +13,7 @@ specified in the [rulebook](../rulebook/); this document only covers the protoco
 | Heartbeat interval | Set by the member in Logon (`108`), 30 s recommended |
 | Sequence numbers | Persisted by the venue across restarts and reconnections |
 | Resend | Standard `ResendRequest` / `SequenceReset`. Messages sent while a member is disconnected (for example fills of its resting orders) are delivered by resend after it logs on again |
-| Authentication | Not yet (phase 8: mutual TLS and Logon credentials). The acceptor listens on `127.0.0.1` unless `lob.fix.bind-address` opens it; use on a trusted network only |
+| Authentication | The Logon must carry a `Password` (tag 554) matching the hash configured for the session's CompID (`lob.fix.passwords`, AC-007); otherwise the Logon is rejected and the connection closed. Mutual TLS is not built in: terminate TLS in front of the acceptor (phase 9). The acceptor listens on `127.0.0.1` unless `lob.fix.bind-address` opens it |
 | Validation | Messages are checked against the FIX 4.4 data dictionary; a malformed message gets a session `Reject` (`35=3`). A field the venue requires but FIX 4.4 makes optional, such as `OrderQty`, gets a `BusinessMessageReject` with reason `5`, naming the field in `Text` |
 
 Unsupported application messages get a `BusinessMessageReject` (`35=j`).

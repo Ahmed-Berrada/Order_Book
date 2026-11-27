@@ -23,8 +23,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Members' limits and the kill switch, across every instrument (docs/interfaces/rest-api.md). Until
- * authentication exists (phase 8) these are operator actions that anyone who reaches the port can take.
+ * Members' limits and the kill switch, across every instrument (docs/interfaces/rest-api.md). They need the
+ * ADMIN role (AC-004).
  */
 @RestController
 @RequestMapping("/api/v1/members/{memberId}")
