@@ -69,12 +69,16 @@ class OrderToTradeTest(unittest.TestCase):
 
     def test_counts_the_members_own_messages_and_each_trade_once(self):
         ratios = metrics.order_to_trade(read_records(io.StringIO(RECORDS)))
-        by_member = {o.member_id: o for o in ratios}
-        self.assertEqual(sorted(by_member), [1, 2, 3])                  # the kill switch and limits are not messages
+        by_member = {o.member_id: o for o in ratios if o.trade_date == "2026-11-26"}
+        # the kill switch, limits and a refused operator command about member 3 are not the members' messages
+        self.assertEqual(sorted(by_member), [1, 2, 3])
         self.assertEqual((by_member[1].messages, by_member[1].trades, by_member[1].ratio), (2, 2, 1.0))
         self.assertEqual((by_member[2].messages, by_member[2].trades), (4, 3))   # a trade with itself counts once
         self.assertAlmostEqual(by_member[2].ratio, 4 / 3)
         self.assertEqual((by_member[3].messages, by_member[3].trades, by_member[3].ratio), (1, 0, None))
+        next_day = [o for o in ratios if o.trade_date == "2026-11-27"]     # each day on its own (RTS 9)
+        self.assertEqual([(o.member_id, o.messages, o.trades) for o in next_day], [(1, 1, 0)])
+        self.assertEqual([o.trade_date for o in ratios], sorted(o.trade_date for o in ratios))
 
 
 if __name__ == "__main__":

@@ -36,7 +36,8 @@ class CliTest(unittest.TestCase):
         self.assertEqual(first["price_impact"]["observations"], 3)
         self.assertIsNone(data["days"][1]["realized_volatility"])
         self.assertIsNone(data["days"][1]["price_impact"])
-        self.assertEqual([o["member_id"] for o in data["order_to_trade"]], [1, 2, 3])
+        self.assertEqual([(o["trade_date"], o["member_id"]) for o in data["order_to_trade"]],
+                         [("2026-11-26", 1), ("2026-11-26", 2), ("2026-11-26", 3), ("2026-11-27", 1)])
 
     def test_markdown_report(self):
         code, out, _ = self.run_cli("--trades", str(self.trades), "--records", str(self.records), "--bucket", "30")
@@ -45,8 +46,8 @@ class CliTest(unittest.TestCase):
         self.assertIn("| 5 | 400 | 4011.00 | 10.0275 | 10.00 | 10.10 | 9.80 | 9.80 | 7.5% | 0.06 |", out)
         self.assertIn("over 30 s buckets", out)
         self.assertIn("not enough traded buckets", out)
-        self.assertIn("| PTX | 3 | 1 | 0 | no trades |", out)
-        self.assertIn("| PTX | 2 | 4 | 3 | 1.33 |", out)
+        self.assertIn("| 2026-11-26 | PTX | 3 | 1 | 0 | no trades |", out)
+        self.assertIn("| 2026-11-26 | PTX | 2 | 4 | 3 | 1.33 |", out)
         code, out, _ = self.run_cli("--trades", str(self.trades))
         self.assertNotIn("Order-to-trade", out)
 
@@ -60,6 +61,11 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("error:", err)
         code, _, err = self.run_cli("--trades", str(self.records))
+        self.assertEqual(code, 1)
+        self.assertIn("not a trade file", err)
+        latin = Path(self.dir.name, "latin.csv")
+        latin.write_bytes(b"\xff\xfetrade_id\n")                  # UTF-16 from a PowerShell redirect
+        code, _, err = self.run_cli("--trades", str(latin))
         self.assertEqual(code, 1)
         self.assertIn("not a trade file", err)
         code, out, _ = self.run_cli("--help")

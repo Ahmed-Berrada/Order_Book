@@ -1,6 +1,7 @@
 """The metrics of docs/analytics.md. Money is exact (Decimal); statistics are floats."""
 
 import math
+from datetime import timezone
 from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
@@ -66,12 +67,13 @@ def daily_summary(lines: Sequence[TradeLine], vwap_places: int = 4) -> List[Dail
 # ---- Order-to-trade ratio --------------------------------------------------------------------------------
 
 #: Records that are a message from the member: an order, a change or a cancel it sent, accepted or not.
-MESSAGES = {"NEW_ORDER", "NEW_ORDER_REJECTED", "ORDER_REPLACED", "REPLACE_REJECTED", "CANCEL_REJECTED",
-            "MEMBER_COMMAND_REJECTED"}
+#: MEMBER_COMMAND_REJECTED is not one: it refuses an operator's command about the member (limits, suspension).
+MESSAGES = {"NEW_ORDER", "NEW_ORDER_REJECTED", "ORDER_REPLACED", "REPLACE_REJECTED", "CANCEL_REJECTED"}
 
 
 @dataclass(frozen=True)
 class OrderToTrade:
+    trade_date: str
     instrument: str
     member_id: int
     messages: int
@@ -84,18 +86,18 @@ class OrderToTrade:
 
 
 def order_to_trade(records: Sequence[OrderRecord]) -> List[OrderToTrade]:
-    """Per instrument and member: messages sent and trades taken part in (RTS 9, measured after the fact)."""
-    messages: Dict[Tuple[str, int], int] = defaultdict(int)
-    trades: Dict[Tuple[str, int], int] = defaultdict(int)
+    """Per UTC date, instrument and member: messages sent and trades taken part in (RTS 9, after the fact)."""
+    messages: Dict[Tuple[str, str, int], int] = defaultdict(int)
+    trades: Dict[Tuple[str, str, int], int] = defaultdict(int)
     for r in records:
+        date = r.timestamp.astimezone(timezone.utc).date().isoformat()
         if r.record in MESSAGES or (r.record == "ORDER_CANCELLED" and r.detail == "CLIENT_REQUEST"):
-            messages[(r.instrument, r.member_id)] += 1
+            messages[(date, r.instrument, r.member_id)] += 1
         elif r.record == "TRADE":
-            members = {r.member_id, int(r.counterparty_member_id)}      # a trade with itself counts once
-            for member in members:
-                trades[(r.instrument, member)] += 1
+            for member in {r.member_id, r.counterparty}:                   # a trade with itself counts once
+                trades[(date, r.instrument, member)] += 1
     keys = sorted(set(messages) | set(trades))
-    return [OrderToTrade(i, m, messages[(i, m)], trades[(i, m)]) for i, m in keys]
+    return [OrderToTrade(d, i, m, messages[(d, i, m)], trades[(d, i, m)]) for d, i, m in keys]
 
 
 # ---- Buckets: volatility and price impact ----------------------------------------------------------------

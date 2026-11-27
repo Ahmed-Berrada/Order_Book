@@ -50,20 +50,28 @@ class OrderRecord:
     counterparty_member_id: str
     detail: str
 
+    @property
+    def counterparty(self) -> int:
+        """The maker's member of a TRADE record (checked when read)."""
+        return int(self.counterparty_member_id)
+
 
 def _timestamp(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
 def _rows(source: TextIO, columns: List[str], what: str) -> Iterable[dict]:
-    reader = csv.DictReader(source)
-    if reader.fieldnames != columns:
-        raise FormatError(f"not a {what}: expected the columns {','.join(columns)}, got "
-                          f"{','.join(reader.fieldnames or [])}")
-    for number, row in enumerate(reader, start=2):
-        if None in row or None in row.values():
-            raise FormatError(f"{what} line {number} does not have {len(columns)} fields")
-        yield number, row
+    try:
+        reader = csv.DictReader(source)
+        if reader.fieldnames != columns:
+            raise FormatError(f"not a {what}: expected the columns {','.join(columns)}, got "
+                              f"{','.join(reader.fieldnames or [])}")
+        for number, row in enumerate(reader, start=2):
+            if None in row or None in row.values():
+                raise FormatError(f"{what} line {number} does not have {len(columns)} fields")
+            yield number, row
+    except (UnicodeDecodeError, csv.Error) as e:          # not UTF-8 text, or not CSV
+        raise FormatError(f"not a {what}: {e}") from e
 
 
 def read_trades(source: TextIO) -> List[TradeLine]:
@@ -90,6 +98,8 @@ def read_records(source: TextIO) -> List[OrderRecord]:
             records.append(OrderRecord(_timestamp(row["timestamp_utc"]), row["instrument"], int(row["member_id"]),
                                        row["order_id"], row["record"], row["side"], row["quantity"],
                                        row["counterparty_member_id"], row["detail"]))
+            if row["record"] == "TRADE":
+                _ = records[-1].counterparty, int(row["quantity"])    # a trade names its maker's member
         except ValueError as e:
             raise FormatError(f"records export line {number}: {e}") from e
     return records

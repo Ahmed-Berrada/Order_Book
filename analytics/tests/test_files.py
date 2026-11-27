@@ -57,5 +57,9 @@ class ReadingTest(unittest.TestCase):
             with self.subTest(line=line), self.assertRaisesRegex(FormatError, message):
                 read_trades(io.StringIO(header + "\n" + line + "\n"))
         record_header = RECORDS.splitlines()[0]
+        with self.assertRaisesRegex(FormatError, "records export line 2"):         # a trade names its maker
+            read_records(io.StringIO(record_header + "\n2026-11-26T09:00:00Z,PTX,2,4,2,2,TRADE,BUY,,,1000,100,1,,\n"))
+        with self.assertRaisesRegex(FormatError, "not a trade file"):              # not CSV a reader accepts
+            read_trades(io.StringIO(TRADES.splitlines()[0] + "\n\"" + "x" * 200_000 + "\"\n"))
         with self.assertRaisesRegex(FormatError, "records export line 2"):
             read_records(io.StringIO(record_header + "\nnow,PTX,1,1,1,1,NEW_ORDER,,,,,,,,\n"))

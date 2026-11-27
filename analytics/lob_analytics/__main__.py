@@ -33,7 +33,7 @@ def report(trades_file: TextIO, records_file: Optional[TextIO], bucket_seconds: 
         })
     result = {"days": days}
     if records_file is not None:
-        result["order_to_trade"] = [{"instrument": o.instrument, "member_id": o.member_id, "messages": o.messages,
+        result["order_to_trade"] = [{"trade_date": o.trade_date, "instrument": o.instrument, "member_id": o.member_id, "messages": o.messages,
                                      "trades": o.trades, "ratio": o.ratio}
                                     for o in metrics.order_to_trade(read_records(records_file))]
     return result
@@ -59,11 +59,11 @@ def markdown(data: dict) -> str:
                                               f"R² {impact['r_squared']:.3f} ({impact['observations']} buckets)"))
         out.append("")
     if "order_to_trade" in data:
-        out += ["## Order-to-trade ratio", "", "| Instrument | Member | Messages | Trades | Ratio |",
-                "|---|---:|---:|---:|---:|"]
+        out += ["## Order-to-trade ratio", "", "| Date | Instrument | Member | Messages | Trades | Ratio |",
+                "|---|---|---:|---:|---:|---:|"]
         for o in data["order_to_trade"]:
             ratio = "no trades" if o["ratio"] is None else f"{o['ratio']:.2f}"
-            out.append(f"| {o['instrument']} | {o['member_id']} | {o['messages']} | {o['trades']} | {ratio} |")
+            out.append(f"| {o['trade_date']} | {o['instrument']} | {o['member_id']} | {o['messages']} | {o['trades']} | {ratio} |")
         out.append("")
     return "\n".join(out)
 
