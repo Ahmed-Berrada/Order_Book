@@ -2,8 +2,11 @@ package io.github.ahmedberrada.lob.api;
 
 import io.github.ahmedberrada.lob.journal.JournalOptions;
 import io.github.ahmedberrada.lob.journal.TimeSource;
+import io.github.ahmedberrada.lob.service.CommandObserver;
 import io.github.ahmedberrada.lob.service.MatchingService;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,9 +20,12 @@ import org.springframework.context.annotation.Configuration;
 class VenueConfiguration {
 
     @Bean(destroyMethod = "close")
-    MatchingService matchingService(LobProperties properties) throws IOException {
+    MatchingService matchingService(LobProperties properties, ObjectProvider<MeterRegistry> registry)
+            throws IOException {
+        MeterRegistry meters = registry.getIfAvailable();
         return MatchingService.start(properties.dataDirectory(), properties.instrumentConfigs(),
                 new JournalOptions(properties.fsync(), properties.snapshotInterval()),
-                TimeSource.system(), properties.queueCapacity());
+                TimeSource.system(), properties.queueCapacity(),
+                meters == null ? CommandObserver.NONE : new MicrometerCommandObserver(meters));
     }
 }
