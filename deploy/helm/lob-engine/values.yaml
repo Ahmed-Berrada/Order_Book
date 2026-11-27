@@ -1,0 +1,28 @@
+image:
+  repository: lob-engine
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# The journal has exactly one writer (RS-011): never more than one replica, and the volume is mounted by one pod.
+persistence:
+  size: 10Gi
+  storageClass: ""
+
+resources:
+  requests: {cpu: "1", memory: 1Gi}
+  limits: {memory: 1Gi}
+
+# The venue's configuration as environment variables (Spring relaxed binding). Secrets belong in the
+# secret named by `existingSecret`, not here: it is read as environment variables of the same form, e.g.
+# LOB_SECURITY_USERS_0_NAME, LOB_SECURITY_USERS_0_PASSWORD (a {bcrypt} hash), LOB_SECURITY_USERS_0_ROLES_0.
+env:
+  LOB_BIND_ADDRESS: "0.0.0.0"
+existingSecret: ""
+
+service:
+  restPort: 8080
+  fixPort: 9878
+
+# Create a ServiceMonitor for the Prometheus operator (needs its CRD).
+serviceMonitor:
+  enabled: false
