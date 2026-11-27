@@ -96,6 +96,11 @@ class SecurityApiTest {
         assertThat(mvc.post().uri(AAPL + "/orders").contentType(MediaType.APPLICATION_JSON).content(body)
                 .header(HttpHeaders.AUTHORIZATION, basic("alice")).header("Origin", "https://evil.example"))
                 .hasStatus(HttpStatus.FORBIDDEN);                              // an old browser: Origin only
+        MvcTestResult form = mvc.post().uri(AAPL + "/orders").contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .content("side=BUY").header(HttpHeaders.AUTHORIZATION, basic("alice")).exchange();
+        assertThat(form).hasStatus(HttpStatus.FORBIDDEN);                  // a form from a browser sending neither
+        assertThat(form.getRequest().getSession(false)).isNull();          // refusing creates no session
+        assertThat(form.getResponse().getHeader(HttpHeaders.SET_COOKIE)).isNull();
         assertThat(mvc.put().uri("/api/v1/members/2/suspension").header(HttpHeaders.AUTHORIZATION, basic("admin"))
                 .header("Sec-Fetch-Site", "cross-site")).hasStatus(HttpStatus.FORBIDDEN);
         assertThat(mvc.delete().uri(AAPL + "/orders/1").header(HttpHeaders.AUTHORIZATION, basic("alice"))

@@ -103,9 +103,11 @@ class SecurityConfiguration {
     SecurityFilterChain securityFilterChain(HttpSecurity http, LobProperties properties) throws Exception {
         // A browser that has answered a Basic challenge resends the credentials on its own, so a page on
         // another site could make it act for the user. The CSRF filter therefore applies to every write a
-        // browser marks as cross-site; such a request cannot carry a token (no session hands one out) and is
-        // refused. Machine clients send no Fetch Metadata and are not affected (AC-008, ADR-0017 §2).
-        http.csrf(c -> c.requireCsrfProtectionMatcher(CrossSiteWrites.MATCHER))
+        // browser marks as cross-site, and to form bodies; such a request cannot carry a token (none is ever
+        // stored or handed out, so no session is created either) and is refused. Machine clients send no
+        // Fetch Metadata and a JSON body, and are not affected (AC-008, ADR-0017 §2).
+        http.csrf(c -> c.requireCsrfProtectionMatcher(CrossSiteWrites.MATCHER)
+                        .csrfTokenRepository(CrossSiteWrites.NO_TOKENS))
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
         if (!properties.security().enabled()) {
             LOG.warn("lob.security.enabled is false: every caller who reaches this port is trusted as the operator");

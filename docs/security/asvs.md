@@ -8,7 +8,7 @@ does; **Not met** that it does not; **n/a** that it does not apply to this kind 
 |---|---|---|
 | V1 Architecture, design and threat modelling | Partial | [Threat model](threat-model.md) and ADRs exist; no formal security architecture review |
 | V2 Authentication | Partial | Hashed secrets, no plain text, failures logged (AC-001 to AC-003, AC-006). Not met: multi-factor, credential rotation, lock-out of repeated failures |
-| V3 Session management | Partial | Stateless: no sessions or cookies. Cached Basic credentials are covered by refusing cross-site writes (AC-008) |
+| V3 Session management | Partial | Stateless: no sessions or cookies, refusals included. Cached Basic credentials are covered by refusing cross-site writes and form bodies (AC-008) |
 | V4 Access control | Meets | Deny by default; roles; member binding; ownership of cancels (AC-004, AC-005, MB-003) |
 | V5 Validation, sanitisation and encoding | Meets | Strict JSON binding refuses unknown fields; bean validation; exact decimal handling; engine validation of every value (CT-009) |
 | V6 Stored cryptography | Partial | Bcrypt for secrets. Journals are not encrypted; there is no key management |
