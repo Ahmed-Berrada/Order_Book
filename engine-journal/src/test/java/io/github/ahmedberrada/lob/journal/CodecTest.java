@@ -14,6 +14,12 @@ import io.github.ahmedberrada.lob.core.Instrument;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
+import io.github.ahmedberrada.lob.core.MemberCommandRejected;
+import io.github.ahmedberrada.lob.core.MemberLimits;
+import io.github.ahmedberrada.lob.core.MemberLimitsChanged;
+import io.github.ahmedberrada.lob.core.MemberResumed;
+import io.github.ahmedberrada.lob.core.MemberState;
+import io.github.ahmedberrada.lob.core.MemberSuspended;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
 import io.github.ahmedberrada.lob.core.OrderParked;
 import io.github.ahmedberrada.lob.core.OrderRejected;
@@ -27,14 +33,18 @@ import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.ReplaceRejected;
 import io.github.ahmedberrada.lob.core.RestingOrder;
+import io.github.ahmedberrada.lob.core.ResumeMember;
 import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
 import io.github.ahmedberrada.lob.core.SelfTradeMode;
+import io.github.ahmedberrada.lob.core.SetMemberLimits;
 import io.github.ahmedberrada.lob.core.SetPhase;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.StopTriggered;
+import io.github.ahmedberrada.lob.core.SuspendMember;
 import io.github.ahmedberrada.lob.core.TickBand;
 import io.github.ahmedberrada.lob.core.TimeInForce;
+import io.github.ahmedberrada.lob.core.TradeExecuted;
 import io.github.ahmedberrada.lob.core.TradingPhase;
 import io.github.ahmedberrada.lob.core.VolatilityInterruption;
 import java.io.ByteArrayOutputStream;
@@ -115,6 +125,42 @@ class CodecTest {
     }
 
     @Test
+    void membersAndLimitsRoundTripThroughEntriesBatchesAndSnapshots() throws IOException {
+        MemberLimits limits = new MemberLimits(10, 20, 30, 40, 50);
+        for (Command command : List.<Command>of(new SetMemberLimits(7, limits), new SuspendMember(7),
+                new ResumeMember(7))) {
+            JournalEntry entry = new JournalEntry(1, 2, command, 9);
+            assertThat(Codec.decodeEntry(Codec.encodeEntry(entry))).isEqualTo(entry);
+        }
+        List<Event> events = new ArrayList<>(List.of(new MemberLimitsChanged(1, 7, limits),
+                new MemberSuspended(2, 7, 3), new MemberResumed(3, 7),
+                new TradeExecuted(4, 2, 1, Side.BUY, 100, 5, 0, 0, 7, 8)));
+        for (RejectReason reason : RejectReason.values()) {
+            events.add(new MemberCommandRejected(5, 7, reason));
+        }
+        EventBatch batch = new EventBatch(1, 2, events, 9);
+        assertThat(Codec.decodeBatch(Codec.encodeBatch(batch))).isEqualTo(batch);
+
+        EngineSnapshot state = new EngineSnapshot(CommandStream.INSTRUMENT, 5, 9,
+                List.of(new RestingOrder(1, Side.BUY, 100, 5, false, 0, 5, SelfTradeInstruction.NONE, false, 4)), 100,
+                List.of(new ParkedStop(2, Side.SELL, 90, 89, 4, SelfTradeInstruction.NONE, 6)),
+                TradingPhase.CONTINUOUS, 100,
+                List.of(new MemberState(4, limits, true, -12), new MemberState(6, MemberLimits.NONE, false, 12)));
+        Codec.StoredSnapshot snapshot = new Codec.StoredSnapshot(4, state);
+        assertThat(Codec.decodeSnapshot(Codec.encodeSnapshot(snapshot))).isEqualTo(snapshot);
+        assertThat(Codec.decodeSnapshot(Codec.encodeSnapshot(snapshot)).state().members()).hasSize(2);
+        assertThatThrownBy(() -> new JournalEntry(1, 2, new SuspendMember(1), -1))
+                .isInstanceOf(IllegalArgumentException.class);
+        byte[] entry = Codec.encodeEntry(new JournalEntry(1, 2, new SuspendMember(1), 1));
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(entry, 16, 0xFF)))
+                .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("negative member");
+        byte[] snapshotBytes = Codec.encodeSnapshot(new Codec.StoredSnapshot(0, new MatchingEngine(
+                CommandStream.INSTRUMENT).snapshot()));
+        assertThatThrownBy(() -> Codec.decodeSnapshot(withByte(snapshotBytes, snapshotBytes.length - 4, 0xFF)))
+                .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("negative member count");
+    }
+
+    @Test
     void everyTradingPhaseHasACode() throws IOException {
         for (TradingPhase phase : TradingPhase.values()) {
             JournalEntry entry = new JournalEntry(1, 1, new SetPhase(phase));
@@ -130,7 +176,7 @@ class CodecTest {
             assertThatThrownBy(() -> Codec.decodeEntry(withByte(entry, entry.length - 1, invalid)))
                     .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("trading phase");
         }
-        byte[] unknownCommand = withByte(entry, 16, 7);
+        byte[] unknownCommand = withByte(entry, 24, 99);
         assertThatThrownBy(() -> Codec.decodeEntry(unknownCommand))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("command type");
     }
@@ -158,33 +204,34 @@ class CodecTest {
 
     @Test
     void invalidSelfTradeModesAreCorruption() throws IOException {
-        // limit: 17 bytes of header, side 1, price 8, quantity 8, tif 1, post-only 1, display 8, group 8, mode 1
+        // limit: 25 bytes of header (sequence, timestamp, member, type), side 1, price 8, quantity 8, tif 1, post-only 1, display 8, group 8, mode 1
         byte[] limit = Codec.encodeEntry(new JournalEntry(1, 1, new LimitOrder(Side.BUY, 1, 1)));
-        assertThat(limit).hasSize(53);
+        assertThat(limit).hasSize(61);
         for (int invalid : new int[] {0, 4, 99}) {
-            assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 52, invalid)))
+            assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 60, invalid)))
                     .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("self-trade mode");
         }
     }
 
     @Test
     void invalidAttributesAreCorruption() throws IOException {
-        // limit: header 17 bytes (sequence, timestamp, type), side 1, price 8, quantity 8, tif 1, post-only 1
+        // limit: header 25 bytes (sequence, timestamp, member, type), side 1, price 8, quantity 8, tif 1, post-only 1
         byte[] limit = Codec.encodeEntry(new JournalEntry(1, 1, new LimitOrder(Side.BUY, 1, 1)));
-        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 34, 0)))
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 42, 0)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("time in force");
-        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 34, 5)))
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 42, 5)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("time in force");
-        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 35, 2)))
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 43, 2)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("boolean");
-        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 35, 0xFF)))
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 43, 0xFF)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("boolean");
     }
 
     @Test
     void earlierFormatVersionsAreRefused() {
         byte[] valid = Codec.encodeHeader(new Codec.Header(Codec.Kind.COMMANDS, CommandStream.INSTRUMENT));
-        assertThat(Codec.FORMAT_VERSION).isEqualTo((short) 7);
+        assertThat(Codec.FORMAT_VERSION).isEqualTo((short) 8);
+        assertCorrupt(withByte(valid, 5, 7), "version 7");
         assertCorrupt(withByte(valid, 5, 6), "version 6");
         assertCorrupt(withByte(valid, 5, 4), "version 4");
         assertCorrupt(withByte(valid, 5, 3), "version 3");
@@ -244,7 +291,7 @@ class CodecTest {
     @Test
     void invalidRecordsAreCorruption() throws IOException {
         byte[] entry = Codec.encodeEntry(new JournalEntry(1, 1, new CancelOrder(1)));
-        assertThatThrownBy(() -> Codec.decodeEntry(withByte(entry, 16, 9)))
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(entry, 24, 99)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("command type");
         assertThatThrownBy(() -> Codec.decodeEntry(Arrays.copyOf(entry, entry.length - 1)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("shorter");
@@ -253,17 +300,17 @@ class CodecTest {
 
         byte[] limit = Codec.encodeEntry(new JournalEntry(1, 1,
                 new LimitOrder(Side.BUY, 1, 1)));
-        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 17, 7)))
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 25, 7)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("side");
 
         byte[] batch = Codec.encodeBatch(new EventBatch(1, 1, List.of(
                 new OrderRejected(1, 1, RejectReason.NO_LIQUIDITY))));
-        int eventStart = 8 + 8 + 4;
+        int eventStart = 8 + 8 + 8 + 4;
         assertThatThrownBy(() -> Codec.decodeBatch(withByte(batch, eventStart, 99)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("event type");
         assertThatThrownBy(() -> Codec.decodeBatch(withByte(batch, eventStart + 17, 99)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("reject reason");
-        assertThatThrownBy(() -> Codec.decodeBatch(withByte(batch, 16, 0xFF)))
+        assertThatThrownBy(() -> Codec.decodeBatch(withByte(batch, 24, 0xFF)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("negative");
 
         byte[] cancelled = Codec.encodeBatch(new EventBatch(1, 1, List.of(
@@ -280,11 +327,11 @@ class CodecTest {
 
         assertThatThrownBy(() -> Codec.decodeSnapshot(notSnapshot))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("not a snapshot");
-        byte[] negativeStops = withByte(snapshot, snapshot.length - 13, 0xFF);
+        byte[] negativeStops = withByte(snapshot, snapshot.length - 17, 0xFF);
         assertThatThrownBy(() -> Codec.decodeSnapshot(negativeStops))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("negative stop count");
-        // the order count sits before the last trade price (8), the stop count (4), the phase (1) and the reference price (8)
-        byte[] negativeCount = withByte(snapshot, snapshot.length - 25, 0xFF);
+        // the order count sits before the last trade price (8), the stop count (4), the phase (1) and the reference price (8) and the member count (4)
+        byte[] negativeCount = withByte(snapshot, snapshot.length - 29, 0xFF);
         assertThatThrownBy(() -> Codec.decodeSnapshot(negativeCount))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("negative");
     }

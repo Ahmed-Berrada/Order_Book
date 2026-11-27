@@ -94,10 +94,10 @@ public final class ReplayTool {
             long verified = 0;
             JournalEntry last = null;
             for (JournalEntry entry = commands.next(); entry != null && entry.sequence() <= to; entry = commands.next()) {
-                List<Event> produced = engine.process(entry.command());
+                List<Event> produced = engine.process(entry.command(), entry.memberId());
                 last = entry;
                 if (verify) {
-                    EventBatch expected = new EventBatch(entry.sequence(), entry.timestampMicros(), produced);
+                    EventBatch expected = new EventBatch(entry.sequence(), entry.timestampMicros(), produced, entry.memberId());
                     EventBatch recorded = events.next();
                     if (!expected.equals(recorded)) {
                         err.println("MISMATCH at command " + entry.sequence());

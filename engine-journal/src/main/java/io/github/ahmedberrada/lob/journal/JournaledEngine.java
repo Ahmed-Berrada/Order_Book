@@ -113,10 +113,11 @@ public final class JournaledEngine implements AutoCloseable {
                 if (entry.sequence() <= snapshotSequence) {
                     continue;
                 }
-                List<Event> produced = engine.process(entry.command());
+                List<Event> produced = engine.process(entry.command(), entry.memberId());
                 replayed++;
                 if (entry.sequence() > lastEventSequence) {
-                    missingBatches.add(new EventBatch(entry.sequence(), entry.timestampMicros(), produced));
+                    missingBatches.add(new EventBatch(entry.sequence(), entry.timestampMicros(), produced,
+                            entry.memberId()));
                 }
             }
             if (lastEventSequence > reader.lastSequence()) {
@@ -157,12 +158,23 @@ public final class JournaledEngine implements AutoCloseable {
      * @throws IllegalStateException if the instance has stopped or is closed
      */
     public EventBatch process(Command command) {
+        return process(command, 0);
+    }
+
+    /**
+     * Like {@link #process(Command)}, on behalf of a member, whom the journal records with the command
+     * (MB-001).
+     */
+    public EventBatch process(Command command, long memberId) {
         Objects.requireNonNull(command, "command");
+        if (memberId < 0) {
+            throw new IllegalArgumentException("member ID must not be negative: " + memberId);
+        }
         requireUsable();
         long sequence = lastCommandSequence + 1;
         long timestamp = Math.max(timeSource.nowMicros(), lastTimestampMicros);
         try {
-            commands.append(Codec.encodeEntry(new JournalEntry(sequence, timestamp, command)));
+            commands.append(Codec.encodeEntry(new JournalEntry(sequence, timestamp, command, memberId)));
             if (options.fsync() == FsyncPolicy.EVERY_COMMAND) {
                 commands.force();
             }
@@ -172,7 +184,7 @@ public final class JournaledEngine implements AutoCloseable {
         lastCommandSequence = sequence;
         lastTimestampMicros = timestamp;
 
-        EventBatch batch = new EventBatch(sequence, timestamp, engine.process(command));
+        EventBatch batch = new EventBatch(sequence, timestamp, engine.process(command, memberId), memberId);
         try {
             events.append(Codec.encodeBatch(batch));
             if (options.snapshotInterval() > 0 && ++commandsSinceSnapshot >= options.snapshotInterval()) {

@@ -12,10 +12,13 @@ import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.Instrument;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
+import io.github.ahmedberrada.lob.core.MemberLimits;
 import io.github.ahmedberrada.lob.core.OrderAccepted;
 import io.github.ahmedberrada.lob.core.OrderRested;
 import io.github.ahmedberrada.lob.core.Rulebook;
+import io.github.ahmedberrada.lob.core.SetMemberLimits;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.SuspendMember;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -513,5 +516,43 @@ class JournaledEngineTest {
     /** Same resting orders and queues, same next order ID, same next event sequence. */
     static void assertSameState(JournaledEngine recovered, MatchingEngine expected) {
         assertThat(recovered.state()).isEqualTo(expected.snapshot());
+    }
+
+    @Test
+    @Rulebook({"MB-001", "MB-004", "RK-002", "RK-004"})
+    void membersLimitsAndPositionsSurviveARestartAndBatchesNameTheirMember() throws IOException {
+        MatchingEngine expected = new MatchingEngine(INSTRUMENT);
+        List<EventBatch> recorded = new ArrayList<>();
+        Object[][] script = {
+            {new SetMemberLimits(1, new MemberLimits(0, 0, 0, 2, 0)), 0L},
+            {new LimitOrder(Side.BUY, 99, 4), 1L},
+            {new LimitOrder(Side.SELL, 99, 1), 2L},
+            {new LimitOrder(Side.BUY, 98, 1), 1L},
+            {new SuspendMember(1), 0L},
+            {new LimitOrder(Side.BUY, 97, 1), 1L},
+        };
+        try (JournaledEngine engine = open(EVERY_20)) {
+            for (Object[] step : script) {
+                Command command = (Command) step[0];
+                long member = (Long) step[1];
+                expected.process(command, member);
+                EventBatch batch = engine.process(command, member);
+                assertThat(batch.memberId()).isEqualTo(member);
+                recorded.add(batch);
+            }
+        }
+        try (JournaledEngine reopened = open(EVERY_20)) {
+            assertThat(reopened.state()).isEqualTo(expected.snapshot());
+            assertThat(reopened.state().members()).extracting(m -> m.memberId()).containsExactly(1L, 2L);
+            assertThat(reopened.phase()).isEqualTo(io.github.ahmedberrada.lob.core.TradingPhase.CONTINUOUS);
+            assertThat(reopened.process(new LimitOrder(Side.BUY, 97, 1), 1).events().getFirst())
+                    .isEqualTo(expected.process(new LimitOrder(Side.BUY, 97, 1), 1).getFirst());
+        }
+        assertThatIllegalArgumentException().isThrownBy(() -> {
+            try (JournaledEngine engine = open(EVERY_20)) {
+                engine.process(new LimitOrder(Side.BUY, 97, 1), -1);
+            }
+        });
+        assertThat(recorded.getLast().events().getFirst()).isInstanceOf(io.github.ahmedberrada.lob.core.OrderRejected.class);
     }
 }
