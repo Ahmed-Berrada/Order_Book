@@ -1,0 +1,53 @@
+name: Release
+
+# A tag v* builds the release with its software bill of materials and signs what it built: GitHub
+# attestations (Sigstore) record that these exact files were produced by this workflow from this commit
+# (SLSA build provenance). Verify with:  gh attestation verify <file> --repo <owner>/<repo>
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build, test and produce the SBOM
+        run: ./mvnw -B -ntp -Psbom verify
+
+      - name: Collect the artifacts
+        run: |
+          mkdir release
+          cp api/target/*.jar release/ 2>/dev/null || true
+          cp engine-bench/target/benchmarks.jar release/ 2>/dev/null || true
+          cp target/lob-engine-bom.json release/
+          cd release && sha256sum * > SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'release/*'
+
+      - name: Attest the SBOM
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: 'release/*.jar'
+          sbom-path: 'release/lob-engine-bom.json'
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
