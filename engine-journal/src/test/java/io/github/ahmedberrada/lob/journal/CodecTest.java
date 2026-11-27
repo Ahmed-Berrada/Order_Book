@@ -7,6 +7,7 @@ import io.github.ahmedberrada.lob.core.CancelOrder;
 import io.github.ahmedberrada.lob.core.CancelReason;
 import io.github.ahmedberrada.lob.core.CancelRejected;
 import io.github.ahmedberrada.lob.core.Command;
+import io.github.ahmedberrada.lob.core.EngineSnapshot;
 import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
@@ -17,9 +18,13 @@ import io.github.ahmedberrada.lob.core.OrderRejected;
 import io.github.ahmedberrada.lob.core.OrderReplaced;
 import io.github.ahmedberrada.lob.core.OrderReplenished;
 import io.github.ahmedberrada.lob.core.OrderRested;
+import io.github.ahmedberrada.lob.core.ParkedStop;
 import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.ReplaceRejected;
+import io.github.ahmedberrada.lob.core.RestingOrder;
+import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
+import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.StopTriggered;
@@ -94,9 +99,40 @@ class CodecTest {
     }
 
     @Test
+    void everySelfTradeInstructionHasACode() throws IOException {
+        for (SelfTradeMode mode : SelfTradeMode.values()) {
+            SelfTradeInstruction instruction = new SelfTradeInstruction(7, mode);
+            for (Command command : List.<Command>of(
+                    new LimitOrder(Side.BUY, 3, 4, TimeInForce.GTC, false, 2, instruction),
+                    new MarketOrder(Side.SELL, 4, TimeInForce.FOK, instruction),
+                    new StopOrder(Side.BUY, 5, 4, 3, instruction))) {
+                JournalEntry entry = new JournalEntry(1, 1, command);
+                assertThat(Codec.decodeEntry(Codec.encodeEntry(entry))).isEqualTo(entry);
+            }
+        }
+        EngineSnapshot state = new EngineSnapshot(CommandStream.INSTRUMENT, 5, 9,
+                List.of(new RestingOrder(1, Side.BUY, 100, 5, false, 2, 2,
+                        new SelfTradeInstruction(3, SelfTradeMode.CANCEL_BOTH))),
+                100, List.of(new ParkedStop(2, Side.SELL, 90, 89, 4,
+                        new SelfTradeInstruction(1, SelfTradeMode.CANCEL_OLDEST))));
+        Codec.StoredSnapshot snapshot = new Codec.StoredSnapshot(4, state);
+        assertThat(Codec.decodeSnapshot(Codec.encodeSnapshot(snapshot))).isEqualTo(snapshot);
+    }
+
+    @Test
+    void invalidSelfTradeModesAreCorruption() throws IOException {
+        // limit: 17 bytes of header, side 1, price 8, quantity 8, tif 1, post-only 1, display 8, group 8, mode 1
+        byte[] limit = Codec.encodeEntry(new JournalEntry(1, 1, new LimitOrder(Side.BUY, 1, 1)));
+        assertThat(limit).hasSize(53);
+        for (int invalid : new int[] {0, 4, 99}) {
+            assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 52, invalid)))
+                    .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("self-trade mode");
+        }
+    }
+
+    @Test
     void invalidAttributesAreCorruption() throws IOException {
-        // limit: header 17 bytes (sequence, timestamp, type), side 1, price 8, quantity 8, tif 1, post-only 1,
-        // display 8
+        // limit: header 17 bytes (sequence, timestamp, type), side 1, price 8, quantity 8, tif 1, post-only 1
         byte[] limit = Codec.encodeEntry(new JournalEntry(1, 1, new LimitOrder(Side.BUY, 1, 1)));
         assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 34, 0)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("time in force");
@@ -111,7 +147,8 @@ class CodecTest {
     @Test
     void earlierFormatVersionsAreRefused() {
         byte[] valid = Codec.encodeHeader(new Codec.Header(Codec.Kind.COMMANDS, CommandStream.INSTRUMENT));
-        assertThat(Codec.FORMAT_VERSION).isEqualTo((short) 4);
+        assertThat(Codec.FORMAT_VERSION).isEqualTo((short) 5);
+        assertCorrupt(withByte(valid, 5, 4), "version 4");
         assertCorrupt(withByte(valid, 5, 3), "version 3");
         assertCorrupt(withByte(valid, 5, 1), "version 1");
         assertCorrupt(withByte(valid, 5, 2), "version 2");

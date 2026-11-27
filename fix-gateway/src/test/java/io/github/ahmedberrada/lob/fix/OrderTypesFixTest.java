@@ -212,12 +212,11 @@ class OrderTypesFixTest {
 
         assertReport(member1.next(stop("ST-1", Side.BUY, "185.30", null, "3")), Map.of(OrderID.FIELD, "AAPL-3",
                 ExecType.FIELD, "0", OrdStatus.FIELD, "0", LeavesQty.FIELD, "3"));
-        // a member 2 buy trades at 185.30 and triggers member 1's stop
-        member2.send(Orders.limit("B-1", Side.BUY, "185.30", "1"));
-        assertReport(member2.next(), Map.of(OrderID.FIELD, "AAPL-4", ExecType.FIELD, "0"));
-        assertReport(member2.next(), Map.of(ClOrdID.FIELD, "B-1", ExecType.FIELD, "F", LastQty.FIELD, "1"));
+        // an order from outside FIX (no self-trade group, as over REST) trades at 185.30 and triggers the stop
+        venue.service.submit("AAPL", new io.github.ahmedberrada.lob.core.MarketOrder(
+                io.github.ahmedberrada.lob.core.Side.BUY, 1)).join();
         assertReport(member2.next(), Map.of(ClOrdID.FIELD, "S-1", ExecType.FIELD, "F", LeavesQty.FIELD, "1"));
-        // the stop's fills go to member 1, never to member 2's order B-1
+        // the stop's fills go to its owner, member 1, and its makers are told too
         assertReport(member1.next(), Map.of(ClOrdID.FIELD, "ST-1", ExecType.FIELD, "D", OrdStatus.FIELD, "0",
                 Text.FIELD, "STOP_TRIGGERED", 378, "99"));
         assertReport(member1.next(), Map.of(ClOrdID.FIELD, "ST-1", ExecType.FIELD, "F", LastPx.FIELD, "185.30",
@@ -255,9 +254,8 @@ class OrderTypesFixTest {
         // a stop whose price the last trade already reached is rejected by the engine
         member2.send(Orders.limit("S-1", Side.SELL, "185.00", "1"));
         member2.next();
-        member2.send(Orders.market("B-1", Side.BUY, "1"));
-        member2.next();
-        member2.next();
+        venue.service.submit("AAPL", new io.github.ahmedberrada.lob.core.MarketOrder(
+                io.github.ahmedberrada.lob.core.Side.BUY, 1)).join();           // no group: trades with anyone
         member2.next();
         assertReport(member1.next(stop("ST-6", Side.SELL, "185.10", null, "1")), Map.of(OrderID.FIELD, "AAPL-4",
                 ExecType.FIELD, "8", OrdRejReason.FIELD, "99", Text.FIELD, "STOP_PRICE_ALREADY_REACHED"));

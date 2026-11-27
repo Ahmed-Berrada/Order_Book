@@ -18,10 +18,13 @@ final class ReferenceEngine {
         final long price;
         final boolean postOnly;
         final long display;            // 0: fully visible
+        final SelfTradeInstruction stp;
         long remaining;
         long visible;
 
-        Resting(long id, Side side, long price, long remaining, boolean postOnly, long display) {
+        Resting(long id, Side side, long price, long remaining, boolean postOnly, long display,
+                SelfTradeInstruction stp) {
+            this.stp = stp;
             this.id = id;
             this.side = side;
             this.price = price;
@@ -32,7 +35,7 @@ final class ReferenceEngine {
         }
     }
 
-    private record Stop(long id, Side side, long stop, long limit, long quantity) {
+    private record Stop(long id, Side side, long stop, long limit, long quantity, SelfTradeInstruction stp) {
     }
 
     private final Instrument instrument;
@@ -42,6 +45,7 @@ final class ReferenceEngine {
     private final List<Long> commandTrades = new ArrayList<>();
     private long lastOrderId;
     private long lastSequence;
+    private boolean stoppedBySelfTrade;
 
     ReferenceEngine(Instrument instrument) {
         this.instrument = instrument;
@@ -53,9 +57,9 @@ final class ReferenceEngine {
         switch (command) {
             case CancelOrder cancel -> cancel(cancel.orderId(), events);
             case LimitOrder order -> newOrder(order.side(), order.priceTicks(), true, order.quantity(),
-                    order.timeInForce(), order.postOnly(), order.displayQuantity(), events);
+                    order.timeInForce(), order.postOnly(), order.displayQuantity(), order.selfTrade(), events);
             case MarketOrder order -> newOrder(order.side(), 0, false, order.quantity(),
-                    order.timeInForce(), false, 0, events);
+                    order.timeInForce(), false, 0, order.selfTrade(), events);
             case ReplaceOrder replace -> replace(replace, events);
             case StopOrder stop -> stop(stop, events);
         }
@@ -73,7 +77,11 @@ final class ReferenceEngine {
         if (reason == null && order.limitPriceTicks() != 0) {
             reason = validate(order.limitPriceTicks(), true, order.quantity());
         }
-        Stop stop = new Stop(id, order.side(), order.stopPriceTicks(), order.limitPriceTicks(), order.quantity());
+        if (reason == null && order.selfTrade().group() < 0) {
+            reason = RejectReason.INVALID_SELF_TRADE_GROUP;
+        }
+        Stop stop = new Stop(id, order.side(), order.stopPriceTicks(), order.limitPriceTicks(), order.quantity(),
+                order.selfTrade());
         if (reason == null && lastTrade != 0 && triggers(stop, lastTrade)) {
             reason = RejectReason.STOP_PRICE_ALREADY_REACHED;
         }
@@ -102,7 +110,7 @@ final class ReferenceEngine {
             events.add(new StopTriggered(++lastSequence, next.id()));
             boolean isLimit = next.limit() != 0;
             complete(next.id(), next.side(), next.limit(), isLimit, next.quantity(),
-                    isLimit ? TimeInForce.GTC : TimeInForce.IOC, false, 0, events);
+                    isLimit ? TimeInForce.GTC : TimeInForce.IOC, false, 0, next.stp(), events);
         }
     }
 
@@ -153,9 +161,12 @@ final class ReferenceEngine {
             return;
         }
         resting.remove(order);
-        long left = fill(order.id, order.side, replace.priceTicks(), true, replace.quantity(), events);
-        if (left > 0) {
-            rest(new Resting(order.id, order.side, replace.priceTicks(), left, order.postOnly, order.display), events);
+        long left = fill(order.id, order.side, replace.priceTicks(), true, replace.quantity(), order.stp, events);
+        if (stoppedBySelfTrade) {
+            events.add(new OrderCancelled(++lastSequence, order.id, left, CancelReason.SELF_TRADE_PREVENTION));
+        } else if (left > 0) {
+            rest(new Resting(order.id, order.side, replace.priceTicks(), left, order.postOnly, order.display,
+                    order.stp), events);
         }
     }
 
@@ -183,26 +194,29 @@ final class ReferenceEngine {
     }
 
     private void newOrder(Side side, long price, boolean isLimit, long quantity, TimeInForce tif, boolean postOnly,
-            long display, List<Event> events) {
+            long display, SelfTradeInstruction stp, List<Event> events) {
         long id = ++lastOrderId;
         RejectReason reason = validate(price, isLimit, quantity);
         boolean anyCross = resting.stream().anyMatch(o -> crosses(o, side, price, isLimit));
         if (reason == null) {
-            reason = attributeFailure(side, isLimit, tif, postOnly, anyCross);
+            reason = attributeFailure(side, isLimit, tif, postOnly, anyCross, stp);
         }
         if (reason == null && isLimit && (display < 0 || display > quantity || (display != 0 && tif != TimeInForce.GTC))) {
             reason = RejectReason.INVALID_DISPLAY_QUANTITY;
+        }
+        if (reason == null && isLimit && stp.group() < 0) {
+            reason = RejectReason.INVALID_SELF_TRADE_GROUP;
         }
         if (reason != null) {
             events.add(new OrderRejected(++lastSequence, id, reason));
             return;
         }
         events.add(new OrderAccepted(++lastSequence, id));
-        complete(id, side, price, isLimit, quantity, tif, postOnly, display == quantity ? 0 : display, events);
+        complete(id, side, price, isLimit, quantity, tif, postOnly, display == quantity ? 0 : display, stp, events);
     }
 
     private RejectReason attributeFailure(Side side, boolean isLimit, TimeInForce tif, boolean postOnly,
-            boolean anyCross) {
+            boolean anyCross, SelfTradeInstruction stp) {
         RejectReason reason = null;
         if (isLimit && postOnly && tif != TimeInForce.GTC) {
             reason = RejectReason.INVALID_TIME_IN_FORCE;
@@ -210,37 +224,55 @@ final class ReferenceEngine {
             reason = RejectReason.POST_ONLY_WOULD_TRADE;
         } else if (!isLimit && tif == TimeInForce.GTC) {
             reason = RejectReason.INVALID_TIME_IN_FORCE;
+        } else if (!isLimit && stp.group() < 0) {
+            reason = RejectReason.INVALID_SELF_TRADE_GROUP;
         } else if (!isLimit && resting.stream().noneMatch(o -> o.side != side)) {
             reason = RejectReason.NO_LIQUIDITY;
         }
         return reason;
     }
 
-    private void complete(long id, Side side, long price, boolean isLimit, long quantity, TimeInForce tif,
-            boolean postOnly, long display, List<Event> events) {
-        if (tif == TimeInForce.FOK) {
-            long available = resting.stream().filter(o -> crosses(o, side, price, isLimit))
-                    .mapToLong(o -> o.remaining).sum();
-            if (available < quantity) {
-                events.add(new OrderCancelled(++lastSequence, id, quantity, CancelReason.FILL_OR_KILL));
-                return;
-            }
+    /**
+     * What a fill or kill order may count on (SP-006): everything it crosses, or, if it crosses an order
+     * of its own group, only the orders priced strictly better than the best such order.
+     */
+    private long fillableByFok(Side side, long price, boolean isLimit, SelfTradeInstruction stp) {
+        List<Resting> crossing = resting.stream().filter(o -> crosses(o, side, price, isLimit)).toList();
+        List<Resting> own = stp.group() > 0
+                ? crossing.stream().filter(o -> o.stp.group() == stp.group()).toList() : List.of();
+        if (own.isEmpty()) {
+            return crossing.stream().mapToLong(o -> o.remaining).sum();
         }
-        long left = fill(id, side, price, isLimit, quantity, events);
+        long cut = own.stream().mapToLong(o -> o.price).reduce(side == Side.BUY ? Math::min : Math::max).getAsLong();
+        return crossing.stream().filter(o -> side == Side.BUY ? o.price < cut : o.price > cut)
+                .mapToLong(o -> o.remaining).sum();
+    }
+
+    private void complete(long id, Side side, long price, boolean isLimit, long quantity, TimeInForce tif,
+            boolean postOnly, long display, SelfTradeInstruction stp, List<Event> events) {
+        if (tif == TimeInForce.FOK && fillableByFok(side, price, isLimit, stp) < quantity) {
+            events.add(new OrderCancelled(++lastSequence, id, quantity, CancelReason.FILL_OR_KILL));
+            return;
+        }
+        long left = fill(id, side, price, isLimit, quantity, stp, events);
         if (left == 0) {
             return;
         }
-        if (!isLimit) {
+        if (stoppedBySelfTrade) {
+            events.add(new OrderCancelled(++lastSequence, id, left, CancelReason.SELF_TRADE_PREVENTION));
+        } else if (!isLimit) {
             events.add(new OrderCancelled(++lastSequence, id, left, CancelReason.UNFILLED_MARKET_REMAINDER));
         } else if (tif == TimeInForce.GTC) {
-            rest(new Resting(id, side, price, left, postOnly, display), events);
+            rest(new Resting(id, side, price, left, postOnly, display, stp), events);
         } else {
             events.add(new OrderCancelled(++lastSequence, id, left, CancelReason.IMMEDIATE_OR_CANCEL));
         }
     }
 
-    private long fill(long id, Side side, long price, boolean isLimit, long quantity, List<Event> events) {
+    private long fill(long id, Side side, long price, boolean isLimit, long quantity, SelfTradeInstruction stp,
+            List<Event> events) {
         long left = quantity;
+        stoppedBySelfTrade = false;
         while (left > 0) {
             Resting best = null;
             for (Resting candidate : resting) {
@@ -252,6 +284,18 @@ final class ReferenceEngine {
             }
             if (best == null) {
                 break;
+            }
+            if (stp.group() > 0 && best.stp.group() == stp.group()) {
+                if (stp.mode() != SelfTradeMode.CANCEL_NEWEST) {
+                    resting.remove(best);
+                    events.add(new OrderCancelled(++lastSequence, best.id, best.remaining,
+                            CancelReason.SELF_TRADE_PREVENTION));
+                }
+                if (stp.mode() != SelfTradeMode.CANCEL_OLDEST) {
+                    stoppedBySelfTrade = true;
+                    break;
+                }
+                continue;
             }
             long fill = Math.min(left, best.visible);
             left -= fill;

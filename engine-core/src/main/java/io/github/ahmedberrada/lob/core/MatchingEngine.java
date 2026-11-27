@@ -19,6 +19,8 @@ public final class MatchingEngine {
     private final OrderBook book = new OrderBook();
     private long nextOrderId = 1;
     private long nextSequence = 1;
+    /** Whether the last {@link #match} stopped because of self-trade prevention (SP-002, SP-004). */
+    private boolean selfTradeStopped;
     /** Price of the most recent trade, 0 before the first one. */
     private long lastTradePrice;
     /** Stop orders waiting for their trigger, by order ID, hence in arrival order (ST-005). */
@@ -54,11 +56,11 @@ public final class MatchingEngine {
             }
             if (order.remainingQuantity() <= 0 || order.remainingQuantity() > snapshot.instrument().maxOrderQuantity()
                     || order.priceTicks() <= 0 || order.priceTicks() > snapshot.instrument().maxPriceTicks()
-                    || !hasValidPeak(order)) {
+                    || !hasValidPeak(order) || order.selfTrade().group() < 0) {
                 throw new IllegalArgumentException("invalid resting order: " + order);
             }
             Order restored = new Order(order.orderId(), order.side(), order.priceTicks(), order.remainingQuantity(),
-                    order.postOnly(), order.displayQuantity());
+                    order.postOnly(), order.displayQuantity(), order.selfTrade());
             restored.displayed = order.displayedQuantity();
             engine.book.rest(restored);
         }
@@ -77,7 +79,8 @@ public final class MatchingEngine {
                     && book.restingQuantity(stop.orderId()) == 0 && !engine.parkedStops.containsKey(stop.orderId())
                     && stop.quantity() > 0 && stop.quantity() <= instrument.maxOrderQuantity()
                     && stop.stopPriceTicks() > 0 && stop.stopPriceTicks() <= instrument.maxPriceTicks()
-                    && stop.limitPriceTicks() >= 0 && stop.limitPriceTicks() <= instrument.maxPriceTicks();
+                    && stop.limitPriceTicks() >= 0 && stop.limitPriceTicks() <= instrument.maxPriceTicks()
+                    && stop.selfTrade().group() >= 0;
             if (!valid) {
                 throw new IllegalArgumentException("invalid parked stop: " + stop);
             }
@@ -144,6 +147,9 @@ public final class MatchingEngine {
                 || (order.displayQuantity() != 0 && order.timeInForce() != TimeInForce.GTC))) {
             reason = RejectReason.INVALID_DISPLAY_QUANTITY;
         }
+        if (reason == null && order.selfTrade().group() < 0) {
+            reason = RejectReason.INVALID_SELF_TRADE_GROUP;
+        }
         if (reason != null) {
             events.add(new OrderRejected(nextSequence++, orderId, reason));
             return;
@@ -151,18 +157,24 @@ public final class MatchingEngine {
         events.add(new OrderAccepted(nextSequence++, orderId));
 
         if (order.timeInForce() == TimeInForce.FOK
-                && book.availableQuantity(order.side(), order.priceTicks(), order.quantity()) < order.quantity()) {
+                && book.availableQuantity(order.side(), order.priceTicks(), order.quantity(),
+                        order.selfTrade().group()) < order.quantity()) {
             events.add(new OrderCancelled(nextSequence++, orderId, order.quantity(), CancelReason.FILL_OR_KILL));
             return;
         }
-        long remaining = match(orderId, order.side(), order.priceTicks(), order.quantity(), events);
+        long remaining = match(orderId, order.side(), order.priceTicks(), order.quantity(), order.selfTrade(), events);
+        if (selfTradeStopped) {
+            cancelForSelfTrade(orderId, remaining, events);
+            return;
+        }
         if (remaining == 0) {
             return;
         }
         if (order.timeInForce() == TimeInForce.GTC) {
             // a display quantity equal to the quantity means fully visible (IC-001)
             long display = order.displayQuantity() == order.quantity() ? 0 : order.displayQuantity();
-            rest(new Order(orderId, order.side(), order.priceTicks(), remaining, order.postOnly(), display), events);
+            rest(new Order(orderId, order.side(), order.priceTicks(), remaining, order.postOnly(), display,
+                    order.selfTrade()), events);
         } else {
             // A FOK order passed its check, so only an IOC order can have a remainder here.
             events.add(new OrderCancelled(nextSequence++, orderId, remaining, CancelReason.IMMEDIATE_OR_CANCEL));
@@ -175,6 +187,9 @@ public final class MatchingEngine {
         if (reason == null && order.timeInForce() == TimeInForce.GTC) {
             reason = RejectReason.INVALID_TIME_IN_FORCE;
         }
+        if (reason == null && order.selfTrade().group() < 0) {
+            reason = RejectReason.INVALID_SELF_TRADE_GROUP;
+        }
         if (reason == null && book.bestLevel(order.side().opposite()) == null) {
             reason = RejectReason.NO_LIQUIDITY;
         }
@@ -186,12 +201,15 @@ public final class MatchingEngine {
 
         long limit = marketLimit(order.side());
         if (order.timeInForce() == TimeInForce.FOK
-                && book.availableQuantity(order.side(), limit, order.quantity()) < order.quantity()) {
+                && book.availableQuantity(order.side(), limit, order.quantity(), order.selfTrade().group())
+                        < order.quantity()) {
             events.add(new OrderCancelled(nextSequence++, orderId, order.quantity(), CancelReason.FILL_OR_KILL));
             return;
         }
-        long remaining = match(orderId, order.side(), limit, order.quantity(), events);
-        if (remaining > 0) {
+        long remaining = match(orderId, order.side(), limit, order.quantity(), order.selfTrade(), events);
+        if (selfTradeStopped) {
+            cancelForSelfTrade(orderId, remaining, events);
+        } else if (remaining > 0) {
             events.add(new OrderCancelled(
                     nextSequence++, orderId, remaining, CancelReason.UNFILLED_MARKET_REMAINDER));
         }
@@ -233,10 +251,13 @@ public final class MatchingEngine {
             return;
         }
         book.remove(order.orderId);
-        long remaining = match(order.orderId, order.side, replace.priceTicks(), replace.quantity(), events);
-        if (remaining > 0) {
+        long remaining = match(order.orderId, order.side, replace.priceTicks(), replace.quantity(), order.selfTrade,
+                events);
+        if (selfTradeStopped) {
+            cancelForSelfTrade(order.orderId, remaining, events);
+        } else if (remaining > 0) {
             rest(new Order(order.orderId, order.side, replace.priceTicks(), remaining, order.postOnly,
-                    order.displayQuantity), events);
+                    order.displayQuantity, order.selfTrade), events);
         }
     }
 
@@ -255,8 +276,12 @@ public final class MatchingEngine {
         if (reason == null && stop.limitPriceTicks() != 0) {
             reason = validatePrice(stop.limitPriceTicks());
         }
+        if (reason == null && stop.selfTrade().group() < 0) {
+            reason = RejectReason.INVALID_SELF_TRADE_GROUP;
+        }
         ParkedStop parked = new ParkedStop(
-                orderId, stop.side(), stop.stopPriceTicks(), stop.limitPriceTicks(), stop.quantity());
+                orderId, stop.side(), stop.stopPriceTicks(), stop.limitPriceTicks(), stop.quantity(),
+                stop.selfTrade());
         if (reason == null && lastTradePrice != 0 && parked.isTriggeredBy(lastTradePrice)) {
             reason = RejectReason.STOP_PRICE_ALREADY_REACHED;
         }
@@ -280,9 +305,11 @@ public final class MatchingEngine {
             events.add(new StopTriggered(nextSequence++, next.orderId()));
             boolean isLimit = next.limitPriceTicks() != 0;
             long limit = isLimit ? next.limitPriceTicks() : marketLimit(next.side());
-            long remaining = match(next.orderId(), next.side(), limit, next.quantity(), events);
-            if (remaining > 0 && isLimit) {
-                rest(new Order(next.orderId(), next.side(), limit, remaining, false, 0), events);
+            long remaining = match(next.orderId(), next.side(), limit, next.quantity(), next.selfTrade(), events);
+            if (selfTradeStopped) {
+                cancelForSelfTrade(next.orderId(), remaining, events);
+            } else if (remaining > 0 && isLimit) {
+                rest(new Order(next.orderId(), next.side(), limit, remaining, false, 0, next.selfTrade()), events);
             } else if (remaining > 0) {
                 events.add(new OrderCancelled(
                         nextSequence++, next.orderId(), remaining, CancelReason.UNFILLED_MARKET_REMAINDER));
@@ -310,19 +337,35 @@ public final class MatchingEngine {
 
     /**
      * Matches a taker against the opposite side, best price then oldest order first (CT-001, CT-002),
-     * at the makers' prices (CT-003), while prices satisfy the limit (CT-004).
+     * at the makers' prices (CT-003), while prices satisfy the limit (CT-004). A resting order of the
+     * taker's own self-trade group is never traded with (SP-001): it is cancelled, or matching stops,
+     * according to the mode, and {@link #selfTradeStopped} tells which.
      *
      * @return the taker's unfilled quantity
      */
-    private long match(long takerOrderId, Side takerSide, long limitPriceTicks, long quantity, List<Event> events) {
+    private long match(long takerOrderId, Side takerSide, long limitPriceTicks, long quantity,
+            SelfTradeInstruction selfTrade, List<Event> events) {
         Side makerSide = takerSide.opposite();
         long remaining = quantity;
+        selfTradeStopped = false;
         while (remaining > 0) {
             PriceLevel level = book.bestLevel(makerSide);
             if (level == null || !isWithinLimit(takerSide, limitPriceTicks, level.priceTicks())) {
                 break;
             }
             Order maker = level.first();
+            if (selfTrade.conflictsWith(maker.selfTrade)) {
+                if (selfTrade.mode() != SelfTradeMode.CANCEL_NEWEST) {                // SP-003, SP-004
+                    book.remove(maker.orderId);
+                    events.add(new OrderCancelled(nextSequence++, maker.orderId, maker.remainingQuantity,
+                            CancelReason.SELF_TRADE_PREVENTION));
+                }
+                if (selfTrade.mode() != SelfTradeMode.CANCEL_OLDEST) {                // SP-002, SP-004
+                    selfTradeStopped = true;
+                    break;
+                }
+                continue;
+            }
             long fill = Math.min(remaining, maker.displayed);           // never into hidden quantity (IC-003)
             remaining -= fill;
             boolean replenished = book.fillFirst(level, fill);
@@ -338,6 +381,11 @@ public final class MatchingEngine {
             }
         }
         return remaining;
+    }
+
+    /** Cancels an incoming order's remainder because it met an order of its own group (SP-002). */
+    private void cancelForSelfTrade(long orderId, long remaining, List<Event> events) {
+        events.add(new OrderCancelled(nextSequence++, orderId, remaining, CancelReason.SELF_TRADE_PREVENTION));
     }
 
     private static boolean isWithinLimit(Side takerSide, long limitPriceTicks, long makerPriceTicks) {

@@ -131,6 +131,14 @@ An order that is not resting (filled, cancelled or unknown) returns `resting: fa
 `restingQuantity` is the full remainder, hidden quantity included: it is meant for the order's owner.
 Until members and authentication exist (phases 5 and 8) the API is bound to `127.0.0.1`.
 
+### Self-trade prevention
+
+REST orders have no [self-trade prevention](../rulebook/self-trade-prevention.md) group: the API has no
+notion of who is calling until phases 5 and 8, and a group chosen by the caller would be no protection.
+A REST order therefore trades with anyone, including the resting orders of FIX members; an order of a
+FIX member that is cancelled by prevention shows up in the book and in `restingQuantity` like any other
+cancel.
+
 ### `GET /api/v1/instruments/{symbol}/book?depth=10`
 
 `depth` is 1 to 100 (default 10). Quantities are what the market may see: an iceberg counts with its

@@ -60,13 +60,31 @@ price with a smaller or equal quantity keeps the order's place in the queue; any
 
 `11 ClOrdID` (the order's ClOrdID), `55`, `54`. Answered with an ExecutionReport `150=I`.
 
+### Self-trade prevention
+
+Every member session is its own [self-trade prevention](../rulebook/self-trade-prevention.md) group:
+orders sent on one session never trade with each other, whichever instrument they are for. Nothing is
+sent in the order; the venue applies the group of the session it arrives on, so a member cannot choose
+or dodge it. The *mode* is a venue setting (`lob.fix.self-trade-mode`), the same for every member:
+
+| Mode | When an order meets one of its own session's resting orders |
+|---|---|
+| `CANCEL_NEWEST` (default) | The new order's remaining quantity is cancelled |
+| `CANCEL_OLDEST` | The resting order is cancelled, and matching continues |
+| `CANCEL_BOTH` | Both are cancelled |
+
+Each cancel is an ExecutionReport `150=4 / 39=4` with `Text=SELF_TRADE_PREVENTION`, sent to the owner of
+the cancelled order, in event order (SP-005). The group is derived from the session's CompID (see
+`FixGatewayConfig.selfTradeGroup`), so it does not change when members are added or reordered. Orders
+from other channels, such as REST, have no group and trade with anyone, members' orders included.
+
 ## Execution reports (`35=8`)
 
 | Event | ExecType (150) | OrdStatus (39) |
 |---|---|---|
 | Order accepted and resting | `0` New | `0` New |
 | Fill | `F` Trade | `1` Partially filled or `2` Filled |
-| Remainder of a market, IOC or FOK order cancelled (CT-006, OT-002, OT-003); `Text` gives the reason | `4` Canceled | `4` Canceled |
+| Remainder of a market, IOC or FOK order cancelled (CT-006, OT-002, OT-003), or an order cancelled by self-trade prevention (SP-002 to SP-004); `Text` gives the reason | `4` Canceled | `4` Canceled |
 | Replace confirmed | `5` Replaced | `0` New or `1` Partially filled |
 | Stop order accepted (parked, ST-003) | `0` New | `0` New |
 | Stop order triggered (ST-005); `378 ExecRestatementReason=99`, `Text=STOP_TRIGGERED`. FIX 4.4 has no ExecType for a trigger | `D` Restated | `0` New |

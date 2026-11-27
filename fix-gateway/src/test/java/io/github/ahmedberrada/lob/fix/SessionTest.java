@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -75,6 +76,15 @@ class SessionTest {
         assertThatNullPointerException().isThrownBy(() -> new FixGatewayConfig(9_000, null, List.of("M"), store));
         assertThatNullPointerException().isThrownBy(() -> new FixGatewayConfig(null, 9_000, "LOB", List.of("M"), List.of(), store));
         assertThat(new FixGatewayConfig(9_000, "LOB", List.of("M"), store).bindAddress()).isEqualTo("127.0.0.1");
+        // two members must never share a self-trade group: "Aa" and "BB" have the same hash code
+        assertThatIllegalArgumentException().isThrownBy(() -> new FixGatewayConfig(9_000, "LOB", List.of("Aa", "BB"), store))
+                .withMessageContaining("self-trade group collision");
+        assertThatIllegalArgumentException().isThrownBy(() -> new FixGatewayConfig(9_000, "LOB", List.of("\0"), store))
+                .withMessageContaining("self-trade group collision");   // group 0 would mean no prevention
+        assertThatNullPointerException().isThrownBy(() -> new FixGatewayConfig(
+                "127.0.0.1", 9_000, "LOB", List.of("M"), List.of(), store, null));
+        assertThat(new FixGatewayConfig(9_000, "LOB", List.of("M"), store).selfTradeMode())
+                .isEqualTo(SelfTradeMode.CANCEL_NEWEST);
         assertThatNullPointerException().isThrownBy(() -> FixGateway.start(null,
                 new FixGatewayConfig(9_000, "LOB", List.of("M"), store)));
     }

@@ -21,6 +21,8 @@ import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.ReplaceRejected;
 import io.github.ahmedberrada.lob.core.RestingOrder;
+import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
+import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.StopTriggered;
@@ -45,7 +47,7 @@ import java.util.List;
 final class Codec {
 
     static final int MAGIC = 0x4C4F424A;            // "LOBJ"
-    static final short FORMAT_VERSION = 4;
+    static final short FORMAT_VERSION = 5;
 
     enum Kind {
         COMMANDS(1), EVENTS(2), SNAPSHOT(3);
@@ -124,12 +126,14 @@ final class Codec {
                     out.writeByte(tifCode(order.timeInForce()));
                     out.writeBoolean(order.postOnly());
                     out.writeLong(order.displayQuantity());
+                    writeSelfTrade(out, order.selfTrade());
                 }
                 case MarketOrder order -> {
                     out.writeByte(2);
                     out.writeByte(sideCode(order.side()));
                     out.writeLong(order.quantity());
                     out.writeByte(tifCode(order.timeInForce()));
+                    writeSelfTrade(out, order.selfTrade());
                 }
                 case CancelOrder cancel -> {
                     out.writeByte(3);
@@ -147,6 +151,7 @@ final class Codec {
                     out.writeLong(stop.stopPriceTicks());
                     out.writeLong(stop.limitPriceTicks());
                     out.writeLong(stop.quantity());
+                    writeSelfTrade(out, stop.selfTrade());
                 }
             }
         });
@@ -159,11 +164,11 @@ final class Codec {
             byte type = in.readByte();
             Command command = switch (type) {
                 case 1 -> new LimitOrder(readSide(in), in.readLong(), in.readLong(), readTif(in), readBoolean(in),
-                        in.readLong());
-                case 2 -> new MarketOrder(readSide(in), in.readLong(), readTif(in));
+                        in.readLong(), readSelfTrade(in));
+                case 2 -> new MarketOrder(readSide(in), in.readLong(), readTif(in), readSelfTrade(in));
                 case 3 -> new CancelOrder(in.readLong());
                 case 4 -> new ReplaceOrder(in.readLong(), in.readLong(), in.readLong());
-                case 5 -> new StopOrder(readSide(in), in.readLong(), in.readLong(), in.readLong());
+                case 5 -> new StopOrder(readSide(in), in.readLong(), in.readLong(), in.readLong(), readSelfTrade(in));
                 default -> throw new JournalCorruptedException("unknown command type " + type);
             };
             return new JournalEntry(sequence, timestamp, command);
@@ -323,6 +328,7 @@ final class Codec {
                 out.writeBoolean(order.postOnly());
                 out.writeLong(order.displayQuantity());
                 out.writeLong(order.displayedQuantity());
+                writeSelfTrade(out, order.selfTrade());
             }
             out.writeLong(state.lastTradePriceTicks());
             out.writeInt(state.parkedStops().size());
@@ -332,6 +338,7 @@ final class Codec {
                 out.writeLong(stop.stopPriceTicks());
                 out.writeLong(stop.limitPriceTicks());
                 out.writeLong(stop.quantity());
+                writeSelfTrade(out, stop.selfTrade());
             }
         });
     }
@@ -352,7 +359,7 @@ final class Codec {
             List<RestingOrder> orders = new ArrayList<>(Math.min(count, 1 << 16));
             for (int i = 0; i < count; i++) {
                 orders.add(new RestingOrder(in.readLong(), readSide(in), in.readLong(), in.readLong(), readBoolean(in),
-                        in.readLong(), in.readLong()));
+                        in.readLong(), in.readLong(), readSelfTrade(in)));
             }
             long lastTradePrice = in.readLong();
             int stopCount = in.readInt();
@@ -361,7 +368,8 @@ final class Codec {
             }
             List<ParkedStop> stops = new ArrayList<>(Math.min(stopCount, 1 << 16));
             for (int i = 0; i < stopCount; i++) {
-                stops.add(new ParkedStop(in.readLong(), readSide(in), in.readLong(), in.readLong(), in.readLong()));
+                stops.add(new ParkedStop(in.readLong(), readSide(in), in.readLong(), in.readLong(), in.readLong(),
+                        readSelfTrade(in)));
             }
             return new StoredSnapshot(lastCommandSequence, new EngineSnapshot(header.instrument(), nextOrderId,
                     nextSequence, orders, lastTradePrice, stops));
@@ -398,6 +406,7 @@ final class Codec {
             case POST_ONLY_WOULD_TRADE -> 8;
             case INVALID_DISPLAY_QUANTITY -> 9;
             case STOP_PRICE_ALREADY_REACHED -> 10;
+            case INVALID_SELF_TRADE_GROUP -> 11;
         };
     }
 
@@ -414,6 +423,7 @@ final class Codec {
             case 8 -> RejectReason.POST_ONLY_WOULD_TRADE;
             case 9 -> RejectReason.INVALID_DISPLAY_QUANTITY;
             case 10 -> RejectReason.STOP_PRICE_ALREADY_REACHED;
+            case 11 -> RejectReason.INVALID_SELF_TRADE_GROUP;
             default -> throw new JournalCorruptedException("unknown reject reason " + code);
         };
     }
@@ -424,6 +434,7 @@ final class Codec {
             case UNFILLED_MARKET_REMAINDER -> 2;
             case IMMEDIATE_OR_CANCEL -> 3;
             case FILL_OR_KILL -> 4;
+            case SELF_TRADE_PREVENTION -> 5;
         };
     }
 
@@ -434,6 +445,7 @@ final class Codec {
             case 2 -> CancelReason.UNFILLED_MARKET_REMAINDER;
             case 3 -> CancelReason.IMMEDIATE_OR_CANCEL;
             case 4 -> CancelReason.FILL_OR_KILL;
+            case 5 -> CancelReason.SELF_TRADE_PREVENTION;
             default -> throw new JournalCorruptedException("unknown cancel reason " + code);
         };
     }
@@ -453,6 +465,31 @@ final class Codec {
             case 2 -> TimeInForce.IOC;
             case 3 -> TimeInForce.FOK;
             default -> throw new JournalCorruptedException("unknown time in force " + code);
+        };
+    }
+
+    private static void writeSelfTrade(DataOutputStream out, SelfTradeInstruction instruction) throws IOException {
+        out.writeLong(instruction.group());
+        out.writeByte(selfTradeModeCode(instruction.mode()));
+    }
+
+    private static SelfTradeInstruction readSelfTrade(DataInputStream in) throws IOException {
+        long group = in.readLong();
+        byte code = in.readByte();
+        SelfTradeMode mode = switch (code) {
+            case 1 -> SelfTradeMode.CANCEL_NEWEST;
+            case 2 -> SelfTradeMode.CANCEL_OLDEST;
+            case 3 -> SelfTradeMode.CANCEL_BOTH;
+            default -> throw new JournalCorruptedException("unknown self-trade mode " + code);
+        };
+        return new SelfTradeInstruction(group, mode);
+    }
+
+    private static int selfTradeModeCode(SelfTradeMode mode) {
+        return switch (mode) {
+            case CANCEL_NEWEST -> 1;
+            case CANCEL_OLDEST -> 2;
+            case CANCEL_BOTH -> 3;
         };
     }
 

@@ -12,6 +12,8 @@ import io.github.ahmedberrada.lob.core.MatchingEngine;
 import io.github.ahmedberrada.lob.core.OrderBook;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.Rulebook;
+import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
+import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.TimeInForce;
@@ -38,20 +40,25 @@ class BookImageTest {
     @Provide
     Arbitrary<List<Command>> commands() {
         Arbitrary<Side> side = Arbitraries.of(Side.class);
+        // two groups and every mode, so that self-trade prevention cancels resting orders now and then
+        Arbitrary<SelfTradeInstruction> stp = Combinators.combine(Arbitraries.of(0L, 0L, 1L, 2L),
+                Arbitraries.of(SelfTradeMode.class)).as(SelfTradeInstruction::new);
         Arbitrary<Command> limit = Combinators.combine(side, Arbitraries.longs().between(95, 105),
-                Arbitraries.longs().between(1, 20)).as((s, p, q) -> new LimitOrder(s, p, q));
-        Arbitrary<Command> market = Combinators.combine(side, Arbitraries.longs().between(1, 30))
-                .as((s, q) -> new MarketOrder(s, q));
+                Arbitraries.longs().between(1, 20), stp)
+                .as((s, p, q, st) -> new LimitOrder(s, p, q, TimeInForce.GTC, false, 0, st));
+        Arbitrary<Command> market = Combinators.combine(side, Arbitraries.longs().between(1, 30), stp)
+                .as((s, q, st) -> new MarketOrder(s, q, TimeInForce.IOC, st));
         Arbitrary<Command> cancel = Arbitraries.longs().between(1, 120).map(CancelOrder::new);
         Arbitrary<Command> invalid = Arbitraries.of(new LimitOrder(Side.BUY, 100, 0), new LimitOrder(Side.SELL, 999, 1));
         Arbitrary<Command> ioc = Combinators.combine(side, Arbitraries.longs().between(95, 105),
                 Arbitraries.longs().between(1, 20), Arbitraries.of(TimeInForce.class), Arbitraries.of(true, false))
                 .as((s, p, q, t, po) -> new LimitOrder(s, p, q, t, po));
+        // a grouped iceberg: preventing a self-trade cancels its hidden quantity too
         Arbitrary<Command> iceberg = Combinators.combine(side, Arbitraries.longs().between(95, 105),
-                Arbitraries.longs().between(5, 40), Arbitraries.longs().between(1, 6))
-                .as((s, p, q, d) -> new LimitOrder(s, p, q, TimeInForce.GTC, false, d));
+                Arbitraries.longs().between(5, 40), Arbitraries.longs().between(1, 6), stp)
+                .as((s, p, q, d, st) -> new LimitOrder(s, p, q, TimeInForce.GTC, false, d, st));
         Arbitrary<Command> stop = Combinators.combine(side, Arbitraries.longs().between(95, 105),
-                Arbitraries.of(0L, 95L, 105L), Arbitraries.longs().between(1, 20)).as(StopOrder::new);
+                Arbitraries.of(0L, 95L, 105L), Arbitraries.longs().between(1, 20), stp).as(StopOrder::new);
         Arbitrary<Command> replace = Combinators.combine(Arbitraries.longs().between(1, 120),
                 Arbitraries.longs().between(95, 105), Arbitraries.longs().between(1, 20)).as(ReplaceOrder::new);
         return Arbitraries.frequencyOf(Tuple.of(6, limit), Tuple.of(2, market), Tuple.of(3, cancel), Tuple.of(1, invalid),
@@ -65,7 +72,7 @@ class BookImageTest {
     }
 
     @Property(tries = 300)
-    @Rulebook({"MD-002", "MD-003", "MD-004", "MD-005", "MD-006", "MD-007", "OT-008", "IC-002", "IC-006", "ST-003"})
+    @Rulebook({"MD-002", "MD-003", "MD-004", "MD-005", "MD-006", "MD-007", "OT-008", "IC-002", "IC-006", "ST-003", "SP-003"})
     void imageAndSubscribersMatchTheEngineAfterEveryCommand(@ForAll("commands") List<Command> commands,
             @ForAll @IntRange(max = 120) int history, @ForAll @IntRange(max = 120) int subscribeAt) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);

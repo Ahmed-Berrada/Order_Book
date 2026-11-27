@@ -1,5 +1,6 @@
 package io.github.ahmedberrada.lob.api;
 
+import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.journal.FsyncPolicy;
 import io.github.ahmedberrada.lob.service.InstrumentConfig;
 import jakarta.validation.Valid;
@@ -73,6 +74,8 @@ public record LobProperties(
      *
      * @param dropCopySessions read-only sessions receiving a copy of every execution report (DC-001)
      * @param storeDirectory sequence numbers and sent messages; defaults to {@code <data-directory>/fix}
+     * @param selfTradeMode  what happens when a member's order meets its own resting order; every member
+     *                       session is its own self-trade prevention group (SP-001)
      */
     public record FixProperties(
             @DefaultValue("false") boolean enabled,
@@ -81,7 +84,8 @@ public record LobProperties(
             @DefaultValue("LOB") @NotBlank String senderCompId,
             @DefaultValue List<String> members,
             @DefaultValue List<String> dropCopySessions,
-            Path storeDirectory) {
+            Path storeDirectory,
+            @DefaultValue("CANCEL_NEWEST") SelfTradeMode selfTradeMode) {
     }
 
     /** One listed instrument. */

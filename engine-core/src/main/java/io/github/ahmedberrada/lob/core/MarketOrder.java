@@ -6,11 +6,18 @@ import java.util.Objects;
  * New order that trades at any price and never rests (rulebook CT-006, CT-007). It has no price
  * field on purpose (ADR-0002 §2). Its time in force is IOC or FOK (OT-001).
  */
-public record MarketOrder(Side side, long quantity, TimeInForce timeInForce) implements Command {
+public record MarketOrder(Side side, long quantity, TimeInForce timeInForce, SelfTradeInstruction selfTrade)
+        implements Command {
 
     public MarketOrder {
         Objects.requireNonNull(side, "side");
         Objects.requireNonNull(timeInForce, "timeInForce");
+        Objects.requireNonNull(selfTrade, "selfTrade");
+    }
+
+    /** An order with no self-trade prevention. */
+    public MarketOrder(Side side, long quantity, TimeInForce timeInForce) {
+        this(side, quantity, timeInForce, SelfTradeInstruction.NONE);
     }
 
     /** An immediate-or-cancel market order. */
