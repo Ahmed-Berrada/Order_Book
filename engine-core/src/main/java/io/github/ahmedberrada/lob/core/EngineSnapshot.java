@@ -12,19 +12,29 @@ import java.util.Objects;
  * @param nextSequence sequence number the next event will carry
  * @param lastTradePriceTicks price of the most recent trade, or 0 before the first one (ST-002)
  * @param parkedStops  stop orders waiting for their trigger, in order of order ID (ST-008)
+ * @param phase        trading phase (AU-006)
  */
 public record EngineSnapshot(
         Instrument instrument, long nextOrderId, long nextSequence, List<RestingOrder> restingOrders,
-        long lastTradePriceTicks, List<ParkedStop> parkedStops) {
+        long lastTradePriceTicks, List<ParkedStop> parkedStops,
+        TradingPhase phase) {
 
     public EngineSnapshot {
         Objects.requireNonNull(instrument, "instrument");
+        Objects.requireNonNull(phase, "phase");
         restingOrders = List.copyOf(restingOrders);
         parkedStops = List.copyOf(parkedStops);
     }
 
+    /** A continuous-trading state. */
+    public EngineSnapshot(Instrument instrument, long nextOrderId, long nextSequence,
+            List<RestingOrder> restingOrders, long lastTradePriceTicks, List<ParkedStop> parkedStops) {
+        this(instrument, nextOrderId, nextSequence, restingOrders, lastTradePriceTicks, parkedStops,
+                TradingPhase.CONTINUOUS);
+    }
+
     /** A state with no trade yet and no parked stop. */
     public EngineSnapshot(Instrument instrument, long nextOrderId, long nextSequence, List<RestingOrder> restingOrders) {
-        this(instrument, nextOrderId, nextSequence, restingOrders, 0, List.of());
+        this(instrument, nextOrderId, nextSequence, restingOrders, 0, List.of(), TradingPhase.CONTINUOUS);
     }
 }

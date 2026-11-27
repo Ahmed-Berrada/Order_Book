@@ -59,8 +59,11 @@ class MatchingEnginePropertyTest {
                 Tuple.of(1, -1L));
         Arbitrary<Command> stop = Combinators.combine(side, price, stopLimit, quantity, stp)
                 .as((s, p, l, q, st) -> new StopOrder(s, p, l, q, st));
+        Arbitrary<Command> phase = Arbitraries.frequency(
+                Tuple.of(3, TradingPhase.CALL), Tuple.of(3, TradingPhase.CONTINUOUS), Tuple.of(1, TradingPhase.CLOSED))
+                .map(SetPhase::new);
         return Arbitraries.frequencyOf(Tuple.of(6, limit), Tuple.of(1, market), Tuple.of(2, cancel),
-                        Tuple.of(2, replace), Tuple.of(2, stop))
+                        Tuple.of(2, replace), Tuple.of(2, stop), Tuple.of(1, phase))
                 .list().ofMaxSize(150);
     }
 
@@ -69,7 +72,8 @@ class MatchingEnginePropertyTest {
             "CT-010", "CT-011", "CT-012", "OT-001", "OT-002", "OT-003", "OT-004", "OT-005", "OT-006", "OT-007",
             "OT-008", "IC-001", "IC-002", "IC-003", "IC-004", "IC-005", "IC-006", "ST-001", "ST-002", "ST-003", "ST-004",
             "ST-005", "ST-006", "ST-007", "SP-001", "SP-002", "SP-003", "SP-004", "SP-005", "SP-006", "SP-007",
-            "SP-008"})
+            "SP-008", "TP-001", "TP-002", "TP-003", "TP-004", "TP-005", "TP-006", "TP-007", "TP-008",
+            "AU-001", "AU-002", "AU-004", "AU-005"})
     void producesExactlyTheSameEventsAsTheReferenceModel(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
         ReferenceEngine reference = new ReferenceEngine(INSTRUMENT);
@@ -81,14 +85,14 @@ class MatchingEnginePropertyTest {
     }
 
     @Property
-    @Rulebook({"CT-013", "IC-002"})
+    @Rulebook({"CT-013", "IC-002", "AU-003"})
     void bookIsNeverCrossedAndHoldsOnlyPositiveQuantities(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
 
         for (Command command : commands) {
             engine.process(command);
             OrderBook book = engine.book();
-            if (book.bestBid().isPresent() && book.bestAsk().isPresent()) {
+            if (engine.phase() != TradingPhase.CALL && book.bestBid().isPresent() && book.bestAsk().isPresent()) {
                 assertThat(book.bestBid().getAsLong()).isLessThan(book.bestAsk().getAsLong());
             }
             for (Side side : Side.values()) {
@@ -136,6 +140,9 @@ class MatchingEnginePropertyTest {
                     case OrderReplenished e -> { }
                     case OrderParked e -> { }
                     case StopTriggered e -> { }
+                    case PhaseChanged e -> { }
+                    case PhaseChangeRejected e -> { }
+                    case AuctionPriceDetermined e -> { }
                 }
             }
 
@@ -193,7 +200,7 @@ class MatchingEnginePropertyTest {
     }
 
     @Property
-    @Rulebook({"RS-010", "RS-005", "SP-009"})
+    @Rulebook({"RS-010", "RS-005", "SP-009", "AU-006"})
     void restoringASnapshotAtAnyPointChangesNothing(
             @ForAll("commands") List<Command> commands, @ForAll @IntRange(max = 150) int split) {
         int at = Math.min(split, commands.size());
@@ -218,6 +225,7 @@ class MatchingEnginePropertyTest {
             case CancelOrder cancel -> throw new AssertionError("a cancel is never accepted");
             case ReplaceOrder replace -> throw new AssertionError("a replace is never accepted");
             case StopOrder stop -> stop.quantity();
+            case SetPhase setPhase -> throw new AssertionError("a phase change is never accepted");
         };
     }
 }

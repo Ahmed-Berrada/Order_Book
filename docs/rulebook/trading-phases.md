@@ -27,9 +27,10 @@ phase can follow any other. A request for the current phase is refused with
 **TP-003: Events of a phase change.** In this order:
 1. when leaving `CALL`: the uncross, with its events (AU-001 to AU-004);
 2. `PhaseChanged(from, to)`;
-3. when entering `CALL`: an `OrderReplenished` for each iceberg order, which is shown in full for the
-   whole call phase (TP-008); when leaving it: one for each iceberg order, with its new peak, in order
-   of order ID;
+3. when entering `CALL`: an `OrderReplenished` for each iceberg order that was not already shown in
+   full, which is shown in full for the whole call phase (TP-008); when leaving it: one for each iceberg
+   order whose peak is not what it shows, with its peak. Both in order of order ID, and neither changes an
+   order's place in its queue;
 4. when entering `CONTINUOUS`: the stop orders triggered by the uncross, if any (TP-007).
 
 **TP-004: Closed.** In `CLOSED`, a new LIMIT, MARKET or STOP order is rejected with
@@ -74,8 +75,9 @@ If the highest executable volume is zero there is no auction price: nothing trad
 `AuctionPriceDetermined(p, volume)`, then matches the executable buy orders against the executable sell
 orders at *p*, each side by price priority (best price first) and then by arrival, until one side is
 exhausted. The matched quantity equals the volume of AU-001. Each pair produces a `TradeExecuted` at *p*.
-There is no aggressor in an auction: in every pair, the order that arrived **later** is reported as the
-taker and the other as the maker, so that the fields keep their meaning for fees and reports.
+There is no aggressor in an auction: in every pair, the order with the **higher order ID** (the one
+accepted later) is reported as the taker and the other as the maker, so that the fields keep their
+meaning for fees and reports. A replaced order keeps its ID, hence its place in this convention.
 
 **AU-003: Uncrossed.** After an uncross, no buy order is priced at or above a sell order: the book is
 uncrossed (CT-013). The surplus side keeps its unfilled quantity, in its original priority.

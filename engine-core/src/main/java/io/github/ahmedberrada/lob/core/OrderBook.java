@@ -138,6 +138,46 @@ public final class OrderBook {
         return Math.min(available, needed);
     }
 
+    /** Shows an order's quantity as {@code displayed} (TP-003, TP-008). */
+    void show(Order order, long displayed) {
+        levels(order.side).get(order.priceTicks).show(order, displayed);
+    }
+
+    /** Every resting iceberg order, by order ID. */
+    List<Order> icebergs() {
+        List<Order> icebergs = new ArrayList<>();
+        for (Order order : ordersById.values()) {
+            if (order.displayQuantity != 0) {
+                icebergs.add(order);
+            }
+        }
+        icebergs.sort(Comparator.comparingLong(order -> order.orderId));
+        return icebergs;
+    }
+
+    /**
+     * Resting orders of the opposite side that a new order at this price would cross and that belong to
+     * its self-trade group, best price first, oldest first (AU-004).
+     */
+    List<Order> crossingGroup(Side side, long priceTicks, SelfTradeInstruction selfTrade) {
+        List<Order> found = new ArrayList<>();
+        if (selfTrade.group() <= 0) {
+            return found;
+        }
+        for (PriceLevel level : levels(side.opposite()).values()) {
+            boolean crosses = side == Side.BUY ? level.priceTicks() <= priceTicks : level.priceTicks() >= priceTicks;
+            if (!crosses) {
+                break;
+            }
+            for (Order order : level.orders()) {
+                if (selfTrade.conflictsWith(order.selfTrade)) {
+                    found.add(order);
+                }
+            }
+        }
+        return found;
+    }
+
     /** Removes a resting order, or returns {@code null} if it is not resting. */
     Order remove(long orderId) {
         Order order = ordersById.remove(orderId);
