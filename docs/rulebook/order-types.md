@@ -9,7 +9,7 @@ Terms used below:
 - **Replace** (amend): a change to the price or quantity of a resting order, which keeps its order ID.
 
 Iceberg orders are specified in [iceberg-orders.md](iceberg-orders.md); stop orders, self-trade
-prevention, auctions and the DAY time in force in later chapters.
+prevention, auctions and the DAY time in force in later chapters ([day orders](day-orders.md)).
 
 ## Time in force
 

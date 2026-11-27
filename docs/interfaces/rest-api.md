@@ -65,7 +65,7 @@ for `LIMIT` and `MARKET` orders
 
 | Field | Values | Default |
 |---|---|---|
-| `timeInForce` | `GTC`, `IOC`, `FOK` (`GTC` is rejected on a `MARKET` order) | `GTC` for `LIMIT`, `IOC` for `MARKET` |
+| `timeInForce` | `GTC`, `IOC`, `FOK`, `DAY` (`GTC` and `DAY` are rejected on a `MARKET` order) | `GTC` for `LIMIT`, `IOC` for `MARKET` |
 | `postOnly` | `true` or `false`; `LIMIT` only, and only with `GTC` | `false` |
 | `displayQuantity` | The peak of an [iceberg](../rulebook/iceberg-orders.md) order, at most `quantity`; `LIMIT` `GTC` only | `0`, fully visible |
 
@@ -185,7 +185,7 @@ peak only (IC-002).
 | `409` | Phase change to the current phase (TP-002) | `INVALID_PHASE_TRANSITION` |
 | `404` | Cancel or replace of an order that is not resting (CT-008, OT-005) | `UNKNOWN_ORDER` |
 | `422` | Off-tick price (OE-002) | `OFF_TICK_PRICE` |
-| `422` | Rejected by the engine (CT-007, CT-009, OT-001, OT-004); the body carries the `orderId` it consumed | `INVALID_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `NO_LIQUIDITY`, `INVALID_TIME_IN_FORCE`, `POST_ONLY_WOULD_TRADE`, `INVALID_DISPLAY_QUANTITY`, `STOP_PRICE_ALREADY_REACHED`, `NOT_ALLOWED_IN_PHASE` |
+| `422` | Rejected by the engine (CT-007, CT-009, OT-001, OT-004); the body carries the `orderId` it consumed | `INVALID_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `NO_LIQUIDITY`, `INVALID_TIME_IN_FORCE`, `POST_ONLY_WOULD_TRADE`, `INVALID_DISPLAY_QUANTITY`, `STOP_PRICE_ALREADY_REACHED`, `NOT_ALLOWED_IN_PHASE`, `INVALID_TICK_SIZE` |
 | `422` | Replace refused by the engine (OT-005); the order is unchanged | the same reasons |
 | `503` | Queue full (OE-005), with `Retry-After: 1` | `OVERLOADED` |
 | `503` | Instrument halted (OE-006) or venue shutting down (OE-007) | `HALTED`, `STOPPED` |

@@ -1,7 +1,5 @@
 # Rulebook: volatility interruptions
 
-- **Status:** Draft
-
 A market that moves too far too fast is paused, and reopened with an auction (MiFID II RTS 7: trading
 halts and circuit breakers; ESMA requires venues to have them). The engine decides from prices only, so
 it stays deterministic (CT-015); *how long* the pause lasts is decided outside it, as for any phase

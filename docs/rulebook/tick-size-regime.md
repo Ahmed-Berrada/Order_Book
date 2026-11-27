@@ -1,7 +1,5 @@
 # Rulebook: tick-size regime
 
-- **Status:** Draft
-
 A venue lets prices move in steps, the **tick size**, and a regime may make the step coarser as the
 price rises (MiFID II RTS 11: tick sizes by price band). This chapter adds the regime to
 [continuous trading](continuous-trading.md). Every rule ID is cited by tests through

@@ -1,7 +1,5 @@
 # Rulebook: day orders
 
-- **Status:** Draft
-
 An order that is good for the trading day only expires when the day ends. The venue has no clock
 (CT-015); the day ends when the instrument is **closed** (TP-004), so a `SetPhase(CLOSED)` command is the
 end of the day. This chapter adds the `DAY` time in force to [order types](order-types.md) and
