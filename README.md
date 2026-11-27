@@ -23,8 +23,8 @@ backed by **invariant tests**, and **measured before it is optimised**.
 > **Phase 4, Venue functionality, in progress:** IOC, FOK, post-only and cancel/replace with priority
 > rules ([order types](docs/rulebook/order-types.md)), [iceberg orders](docs/rulebook/iceberg-orders.md),
 > [stop orders](docs/rulebook/stop-orders.md) and
-> [self-trade prevention](docs/rulebook/self-trade-prevention.md) are in force; auctions, trading phases
-> and circuit breakers come next (see [Roadmap](#roadmap)).
+> [self-trade prevention](docs/rulebook/self-trade-prevention.md) and [trading phases and call auctions](docs/rulebook/trading-phases.md) are in force; volatility
+> interruptions, throttles and the kill switch come next (see [Roadmap](#roadmap)).
 
 ---
 
@@ -305,7 +305,7 @@ The full rationale is in [ADR-0001](docs/adr/0001-foundations.md), [ADR-0002](do
 [ADR-0006](docs/adr/0006-fix-gateway.md), [ADR-0007](docs/adr/0007-market-data.md),
 [ADR-0008](docs/adr/0008-binary-feed-and-drop-copy.md), [ADR-0009](docs/adr/0009-order-types-and-replace.md),
 [ADR-0010](docs/adr/0010-iceberg-orders.md), [ADR-0011](docs/adr/0011-stop-orders.md) and
-[ADR-0012](docs/adr/0012-self-trade-prevention.md).
+[ADR-0012](docs/adr/0012-self-trade-prevention.md) and [ADR-0013](docs/adr/0013-trading-phases-and-auctions.md).
 The matching behaviour itself is specified in the [rulebook](docs/rulebook/continuous-trading.md).
 
 | Decision | Choice | Reason |
@@ -473,7 +473,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 1 | **Core engine**: rulebook, LIMIT / MARKET / cancel, property tests, reference model, quality gates | ✅ |
 | 2 | **Durability & audit**: write-ahead journal, snapshots, crash recovery, replay | ✅ |
 | 3 | **Connectivity**: service layer, REST API, FIX order entry and drop copy, WebSocket and binary market data | ✅ |
-| 4 | **Venue functionality**: IOC / FOK / post-only / cancel-replace ✅, iceberg orders ✅, stop orders ✅, self-trade prevention ✅; auctions, trading phases, circuit breakers | ⏳ |
+| 4 | **Venue functionality**: IOC / FOK / post-only / cancel-replace ✅, iceberg orders ✅, stop orders ✅, self-trade prevention ✅, trading phases and call auctions ✅; circuit breakers, throttles | ⏳ |
 | 5 | **Pre-trade risk & members** | |
 | 6 | **Performance**: JMH, zero-allocation hot path, published latency | |
 | 7 | **Regulatory evidence**: MiFID II compliance matrix, RTS 22 / 24 reporting, surveillance | |

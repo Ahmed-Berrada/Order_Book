@@ -1,7 +1,9 @@
 package io.github.ahmedberrada.lob.core;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.TreeSet;
 
 /**
  * Deliberately naive implementation of the rulebook, used as an oracle (ADR-0002 §7).
@@ -46,6 +48,7 @@ final class ReferenceEngine {
     private long lastOrderId;
     private long lastSequence;
     private boolean stoppedBySelfTrade;
+    private TradingPhase phase = TradingPhase.CONTINUOUS;
 
     ReferenceEngine(Instrument instrument) {
         this.instrument = instrument;
@@ -62,8 +65,11 @@ final class ReferenceEngine {
                     order.timeInForce(), false, 0, order.selfTrade(), events);
             case ReplaceOrder replace -> replace(replace, events);
             case StopOrder stop -> stop(stop, events);
+            case SetPhase setPhase -> setPhase(setPhase.phase(), events);
         }
-        release(events);
+        if (phase == TradingPhase.CONTINUOUS) {
+            release(events);
+        }
         return events;
     }
 
@@ -73,7 +79,10 @@ final class ReferenceEngine {
 
     private void stop(StopOrder order, List<Event> events) {
         long id = ++lastOrderId;
-        RejectReason reason = validate(order.stopPriceTicks(), true, order.quantity());
+        RejectReason reason = phase == TradingPhase.CLOSED ? RejectReason.NOT_ALLOWED_IN_PHASE : null;
+        if (reason == null) {
+            reason = validate(order.stopPriceTicks(), true, order.quantity());
+        }
         if (reason == null && order.limitPriceTicks() != 0) {
             reason = validate(order.limitPriceTicks(), true, order.quantity());
         }
@@ -139,7 +148,9 @@ final class ReferenceEngine {
     private void replace(ReplaceOrder replace, List<Event> events) {
         Resting order = find(replace.orderId());
         RejectReason reason;
-        if (order == null) {
+        if (phase == TradingPhase.CLOSED) {
+            reason = RejectReason.NOT_ALLOWED_IN_PHASE;
+        } else if (order == null) {
             reason = RejectReason.UNKNOWN_ORDER;
         } else {
             reason = validate(replace.priceTicks(), true, replace.quantity());
@@ -161,6 +172,11 @@ final class ReferenceEngine {
             return;
         }
         resting.remove(order);
+        if (phase == TradingPhase.CALL) {
+            enterCall(new Resting(order.id, order.side, replace.priceTicks(), replace.quantity(), order.postOnly,
+                    order.display, order.stp), events);
+            return;
+        }
         long left = fill(order.id, order.side, replace.priceTicks(), true, replace.quantity(), order.stp, events);
         if (stoppedBySelfTrade) {
             events.add(new OrderCancelled(++lastSequence, order.id, left, CancelReason.SELF_TRADE_PREVENTION));
@@ -188,6 +204,116 @@ final class ReferenceEngine {
         events.add(new CancelRejected(++lastSequence, orderId, RejectReason.UNKNOWN_ORDER));
     }
 
+    private void enterCall(Resting order, List<Event> events) {
+        List<Resting> conflicts = order.stp.group() == 0 ? List.of() : resting.stream()
+                .filter(o -> crosses(o, order.side, order.price, true) && o.stp.group() == order.stp.group())
+                .sorted(Comparator.comparingLong((Resting o) -> order.side == Side.BUY ? o.price : -o.price))
+                .toList();
+        if (!conflicts.isEmpty()) {
+            if (order.stp.mode() != SelfTradeMode.CANCEL_NEWEST) {
+                for (Resting o : conflicts) {
+                    resting.remove(o);
+                    events.add(new OrderCancelled(++lastSequence, o.id, o.remaining,
+                            CancelReason.SELF_TRADE_PREVENTION));
+                }
+            }
+            if (order.stp.mode() != SelfTradeMode.CANCEL_OLDEST) {
+                events.add(new OrderCancelled(++lastSequence, order.id, order.remaining,
+                        CancelReason.SELF_TRADE_PREVENTION));
+                return;
+            }
+        }
+        order.visible = order.remaining;
+        rest(order, events);
+    }
+
+    private void setPhase(TradingPhase target, List<Event> events) {
+        if (target == phase) {
+            events.add(new PhaseChangeRejected(++lastSequence, RejectReason.INVALID_PHASE_TRANSITION));
+            return;
+        }
+        TradingPhase from = phase;
+        if (from == TradingPhase.CALL) {
+            uncross(events);
+        }
+        phase = target;
+        events.add(new PhaseChanged(++lastSequence, from, target));
+        if (target == TradingPhase.CALL || from == TradingPhase.CALL) {
+            resting.stream().filter(o -> o.display != 0).sorted(Comparator.comparingLong(o -> o.id)).toList()
+                    .forEach(o -> {
+                        long shown = target == TradingPhase.CALL ? o.remaining : Math.min(o.display, o.remaining);
+                        if (o.visible != shown) {
+                            o.visible = shown;
+                            events.add(new OrderReplenished(++lastSequence, o.id, o.side, o.price, shown));
+                        }
+                    });
+        }
+    }
+
+    private long buyVolume(long p) {
+        return resting.stream().filter(o -> o.side == Side.BUY && o.price >= p).mapToLong(o -> o.remaining).sum();
+    }
+
+    private long sellVolume(long p) {
+        return resting.stream().filter(o -> o.side == Side.SELL && o.price <= p).mapToLong(o -> o.remaining).sum();
+    }
+
+    private void uncross(List<Event> events) {
+        TreeSet<Long> prices = new TreeSet<>();
+        resting.forEach(o -> prices.add(o.price));
+        long best = prices.stream().mapToLong(p -> Math.min(buyVolume(p), sellVolume(p))).max().orElse(0);
+        if (best == 0) {
+            return;
+        }
+        List<Long> tied = prices.stream().filter(p -> Math.min(buyVolume(p), sellVolume(p)) == best).toList();
+        long minSurplus = tied.stream().mapToLong(p -> Math.abs(buyVolume(p) - sellVolume(p))).min().getAsLong();
+        List<Long> finalists = tied.stream()
+                .filter(p -> Math.abs(buyVolume(p) - sellVolume(p)) == minSurplus).toList();
+        long price;
+        if (finalists.stream().allMatch(p -> buyVolume(p) > sellVolume(p))) {
+            price = finalists.stream().mapToLong(p -> p).max().getAsLong();
+        } else if (finalists.stream().allMatch(p -> buyVolume(p) < sellVolume(p))) {
+            price = finalists.stream().mapToLong(p -> p).min().getAsLong();
+        } else if (lastTrade == 0) {
+            price = finalists.stream().mapToLong(p -> p).max().getAsLong();
+        } else {
+            price = finalists.stream().min(Comparator.comparingLong((Long p) -> Math.abs(p - lastTrade))
+                    .thenComparing(Comparator.reverseOrder())).get();
+        }
+        events.add(new AuctionPriceDetermined(++lastSequence, price, best));
+        List<Resting> buys = resting.stream().filter(o -> o.side == Side.BUY && o.price >= price)
+                .sorted(Comparator.comparingLong((Resting o) -> -o.price)).toList();   // stable: arrival order
+        List<Resting> sells = resting.stream().filter(o -> o.side == Side.SELL && o.price <= price)
+                .sorted(Comparator.comparingLong((Resting o) -> o.price)).toList();
+        int b = 0;
+        int s = 0;
+        long left = best;
+        while (left > 0) {
+            Resting buy = buys.get(b);
+            Resting sell = sells.get(s);
+            long fill = Math.min(left, Math.min(buy.remaining, sell.remaining));
+            buy.remaining -= fill;
+            sell.remaining -= fill;
+            buy.visible = buy.remaining;
+            sell.visible = sell.remaining;
+            left -= fill;
+            Resting taker = buy.id > sell.id ? buy : sell;
+            Resting maker = taker == buy ? sell : buy;
+            events.add(new TradeExecuted(++lastSequence, taker.id, maker.id, taker.side, price, fill,
+                    taker.remaining, maker.remaining));
+            if (buy.remaining == 0) {
+                resting.remove(buy);
+                b++;
+            }
+            if (sell.remaining == 0) {
+                resting.remove(sell);
+                s++;
+            }
+        }
+        lastTrade = price;
+        commandTrades.add(price);
+    }
+
     private void rest(Resting order, List<Event> events) {
         resting.add(order);
         events.add(new OrderRested(++lastSequence, order.id, order.side, order.price, order.remaining, order.visible));
@@ -196,7 +322,14 @@ final class ReferenceEngine {
     private void newOrder(Side side, long price, boolean isLimit, long quantity, TimeInForce tif, boolean postOnly,
             long display, SelfTradeInstruction stp, List<Event> events) {
         long id = ++lastOrderId;
-        RejectReason reason = validate(price, isLimit, quantity);
+        RejectReason reason = null;
+        if (phase == TradingPhase.CLOSED
+                || (phase == TradingPhase.CALL && (!isLimit || tif != TimeInForce.GTC || postOnly))) {
+            reason = RejectReason.NOT_ALLOWED_IN_PHASE;
+        }
+        if (reason == null) {
+            reason = validate(price, isLimit, quantity);
+        }
         boolean anyCross = resting.stream().anyMatch(o -> crosses(o, side, price, isLimit));
         if (reason == null) {
             reason = attributeFailure(side, isLimit, tif, postOnly, anyCross, stp);
@@ -212,6 +345,10 @@ final class ReferenceEngine {
             return;
         }
         events.add(new OrderAccepted(++lastSequence, id));
+        if (phase == TradingPhase.CALL) {
+            enterCall(new Resting(id, side, price, quantity, false, display == quantity ? 0 : display, stp), events);
+            return;
+        }
         complete(id, side, price, isLimit, quantity, tif, postOnly, display == quantity ? 0 : display, stp, events);
     }
 

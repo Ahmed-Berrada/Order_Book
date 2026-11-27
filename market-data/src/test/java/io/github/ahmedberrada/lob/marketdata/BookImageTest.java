@@ -14,10 +14,12 @@ import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.Rulebook;
 import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
 import io.github.ahmedberrada.lob.core.SelfTradeMode;
+import io.github.ahmedberrada.lob.core.SetPhase;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
+import io.github.ahmedberrada.lob.core.TradingPhase;
 import io.github.ahmedberrada.lob.journal.EventBatch;
 import io.github.ahmedberrada.lob.marketdata.MarketDataMessage.Update;
 import io.github.ahmedberrada.lob.service.InstrumentState;
@@ -61,8 +63,10 @@ class BookImageTest {
                 Arbitraries.of(0L, 95L, 105L), Arbitraries.longs().between(1, 20), stp).as(StopOrder::new);
         Arbitrary<Command> replace = Combinators.combine(Arbitraries.longs().between(1, 120),
                 Arbitraries.longs().between(95, 105), Arbitraries.longs().between(1, 20)).as(ReplaceOrder::new);
+        Arbitrary<Command> phase = Arbitraries.of(TradingPhase.class).map(SetPhase::new);
         return Arbitraries.frequencyOf(Tuple.of(6, limit), Tuple.of(2, market), Tuple.of(3, cancel), Tuple.of(1, invalid),
-                        Tuple.of(2, ioc), Tuple.of(3, replace), Tuple.of(3, iceberg), Tuple.of(3, stop))
+                        Tuple.of(2, ioc), Tuple.of(3, replace), Tuple.of(3, iceberg), Tuple.of(3, stop),
+                        Tuple.of(2, phase))
                 .list().ofMaxSize(120);
     }
 
@@ -72,7 +76,7 @@ class BookImageTest {
     }
 
     @Property(tries = 300)
-    @Rulebook({"MD-002", "MD-003", "MD-004", "MD-005", "MD-006", "MD-007", "OT-008", "IC-002", "IC-006", "ST-003", "SP-003"})
+    @Rulebook({"MD-002", "MD-003", "MD-004", "MD-005", "MD-006", "MD-007", "OT-008", "IC-002", "IC-006", "ST-003", "SP-003", "AU-002", "TP-008"})
     void imageAndSubscribersMatchTheEngineAfterEveryCommand(@ForAll("commands") List<Command> commands,
             @ForAll @IntRange(max = 120) int history, @ForAll @IntRange(max = 120) int subscribeAt) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);

@@ -23,5 +23,9 @@ public enum RejectReason {
     /** A stop order's stop price has already been reached by the last trade (ST-002). */
     STOP_PRICE_ALREADY_REACHED,
     /** An order's self-trade prevention group is negative (SP-001). */
-    INVALID_SELF_TRADE_GROUP
+    INVALID_SELF_TRADE_GROUP,
+    /** The order, or the replace, is not allowed in the current trading phase (TP-004, TP-005). */
+    NOT_ALLOWED_IN_PHASE,
+    /** A phase change asked for the phase the instrument is already in (TP-002). */
+    INVALID_PHASE_TRANSITION
 }

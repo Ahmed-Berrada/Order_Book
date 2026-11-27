@@ -10,8 +10,10 @@ import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
 import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.SetPhase;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.TimeInForce;
+import io.github.ahmedberrada.lob.core.TradingPhase;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.SplittableRandom;
@@ -29,7 +31,7 @@ final class CommandStream {
         List<Command> commands = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             Side side = random.nextBoolean() ? Side.BUY : Side.SELL;
-            int kind = random.nextInt(13);
+            int kind = random.nextInt(15);
             TimeInForce[] tifs = TimeInForce.values();
             SelfTradeInstruction selfTrade = random.nextInt(3) == 0
                     ? new SelfTradeInstruction(random.nextLong(1, 3), SelfTradeMode.values()[random.nextInt(3)])
@@ -52,6 +54,8 @@ final class CommandStream {
             } else if (kind == 12) {
                 commands.add(new StopOrder(side, random.nextLong(95, 106),
                         random.nextBoolean() ? 0 : random.nextLong(95, 106), random.nextLong(1, 30), selfTrade));
+            } else if (kind == 13) {
+                commands.add(new SetPhase(TradingPhase.values()[random.nextInt(3)]));
             } else {
                 commands.add(new CancelOrder(random.nextLong(1, i + 2)));
             }

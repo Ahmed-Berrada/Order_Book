@@ -6,6 +6,7 @@ import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.Instrument;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
 import io.github.ahmedberrada.lob.core.OrderBook;
+import io.github.ahmedberrada.lob.core.TradingPhase;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -212,6 +213,11 @@ public final class JournaledEngine implements AutoCloseable {
     /** Read-only view of the resting orders. */
     public OrderBook book() {
         return engine.book();
+    }
+
+    /** The instrument's current trading phase (TP-001). */
+    public TradingPhase phase() {
+        return engine.phase();
     }
 
     public Instrument instrument() {

@@ -1,6 +1,7 @@
 package io.github.ahmedberrada.lob.service;
 
 import io.github.ahmedberrada.lob.core.Command;
+import io.github.ahmedberrada.lob.core.TradingPhase;
 import io.github.ahmedberrada.lob.journal.EventBatch;
 import io.github.ahmedberrada.lob.journal.JournalOptions;
 import io.github.ahmedberrada.lob.journal.JournaledEngine;
@@ -105,6 +106,11 @@ public final class MatchingService implements AutoCloseable {
             throw new IllegalArgumentException("depth must not be negative: " + depth);
         }
         return withWorker(symbol, worker -> worker.book(depth));
+    }
+
+    /** The trading phase of an instrument (TP-001). */
+    public CompletableFuture<TradingPhase> phase(String symbol) {
+        return book(symbol, 0).thenApply(BookSnapshot::phase);
     }
 
     /**

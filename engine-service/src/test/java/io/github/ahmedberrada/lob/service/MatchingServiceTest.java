@@ -13,8 +13,10 @@ import io.github.ahmedberrada.lob.core.MatchingEngine;
 import io.github.ahmedberrada.lob.core.OrderBook;
 import io.github.ahmedberrada.lob.core.RestingOrder;
 import io.github.ahmedberrada.lob.core.Rulebook;
+import io.github.ahmedberrada.lob.core.SetPhase;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.TimeInForce;
+import io.github.ahmedberrada.lob.core.TradingPhase;
 import io.github.ahmedberrada.lob.journal.EventBatch;
 import io.github.ahmedberrada.lob.journal.FsyncPolicy;
 import io.github.ahmedberrada.lob.journal.JournalCorruptedException;
@@ -145,6 +147,28 @@ class MatchingServiceTest {
 
             assertThat(service.book("AAPL", 10).join().asks()).containsExactly(new OrderBook.Level(18_600, 8, 2));
             assertThat(service.restingQuantity("AAPL", 1).join()).isEqualTo(40);
+        }
+    }
+
+    @Test
+    @Rulebook({"TP-002", "AU-006"})
+    void aPhaseChangeIsJournaledAndSurvivesARestart() throws IOException {
+        try (MatchingService service = start()) {
+            assertThat(service.phase("AAPL").join()).isEqualTo(TradingPhase.CONTINUOUS);
+            service.submit("AAPL", new SetPhase(TradingPhase.CALL)).join();
+            service.submit("AAPL", new LimitOrder(Side.BUY, 18_600, 5)).join();
+            service.submit("AAPL", new LimitOrder(Side.SELL, 18_500, 5)).join();
+
+            assertThat(service.phase("AAPL").join()).isEqualTo(TradingPhase.CALL);
+            assertThat(service.book("AAPL", 5).join().phase()).isEqualTo(TradingPhase.CALL);
+            assertThat(service.phase("MSFT").join()).isEqualTo(TradingPhase.CONTINUOUS);
+        }
+        try (MatchingService service = start()) {
+            assertThat(service.phase("AAPL").join()).isEqualTo(TradingPhase.CALL);
+            assertThat(service.book("AAPL", 5).join().bids()).containsExactly(new OrderBook.Level(18_600, 5, 1));
+            assertThat(service.book("AAPL", 5).join().asks()).containsExactly(new OrderBook.Level(18_500, 5, 1));
+            service.submit("AAPL", new SetPhase(TradingPhase.CONTINUOUS)).join();
+            assertThat(service.book("AAPL", 5).join().bids()).isEmpty();
         }
     }
 

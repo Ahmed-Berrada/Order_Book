@@ -104,6 +104,12 @@ final class PriceLevel {
         order.displayed = newDisplayed;
     }
 
+    /** Changes how much of an order is shown (TP-003, TP-008). */
+    void show(Order order, long newDisplayed) {
+        displayedQuantity += newDisplayed - order.displayed;
+        order.displayed = newDisplayed;
+    }
+
     /** Removes an order from anywhere in the queue. O(n) in v1, by decision (ADR-0001 §5). */
     void remove(Order order) {
         orders.remove(order);

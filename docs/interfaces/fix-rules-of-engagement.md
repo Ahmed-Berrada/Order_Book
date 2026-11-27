@@ -171,5 +171,10 @@ answered with a `BusinessMessageReject`, reason `6` (Not authorized) (DC-002).
   ClOrdIDs are forgotten. Phase 5 records the member with each command in the journal, which removes
   this limitation.
 - `TimeInForce=0` (Day), FIX's default, is accepted and behaves as GTC: the venue has no trading day
-  yet. Orders will expire at the end of the day once trading phases exist (phase 4).
+  yet. Orders will expire at the end of the day once the venue has a trading calendar (phase 4f).
+- Trading phases ([trading phases](../rulebook/trading-phases.md)) are set by an operator over REST, not
+  announced over FIX: the gateway sends no `TradingSessionStatus`. In a call phase the venue accepts
+  limit GTC orders and stops, and rejects the rest with `OrdRejReason=2` (Exchange closed) and text
+  `NOT_ALLOWED_IN_PHASE`; the same reason is given for every new order while the instrument is closed.
+  Auction fills are reported as ordinary `ExecType=Trade` reports at the auction price.
 - No mass cancel yet (phase 4, kill switch).

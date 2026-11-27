@@ -1,24 +1,27 @@
 package io.github.ahmedberrada.lob.api;
 
 import io.github.ahmedberrada.lob.core.OrderBook;
+import io.github.ahmedberrada.lob.core.TradingPhase;
 import io.github.ahmedberrada.lob.service.BookSnapshot;
 import io.github.ahmedberrada.lob.service.InstrumentConfig;
 import java.util.List;
 
 /**
- * The best levels of a book, as of {@code commandSequence}.
+ * The best levels of a book, as of {@code commandSequence}. During a {@code CALL} phase the book may be
+ * crossed (AU-003).
  *
  * @param bids best (highest) price first
  * @param asks best (lowest) price first
  */
-public record BookResponse(String symbol, long commandSequence, List<Level> bids, List<Level> asks) {
+public record BookResponse(String symbol, long commandSequence, TradingPhase phase, List<Level> bids,
+        List<Level> asks) {
 
     /** Aggregated quantity and number of orders at one price. */
     public record Level(String price, long quantity, int orders) {
     }
 
     static BookResponse of(InstrumentConfig instrument, BookSnapshot book) {
-        return new BookResponse(instrument.symbol(), book.lastCommandSequence(),
+        return new BookResponse(instrument.symbol(), book.lastCommandSequence(), book.phase(),
                 levels(instrument, book.bids()), levels(instrument, book.asks()));
     }
 

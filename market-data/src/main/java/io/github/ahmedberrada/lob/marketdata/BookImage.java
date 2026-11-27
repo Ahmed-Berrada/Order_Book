@@ -90,6 +90,11 @@ final class BookImage {
                     // an emptied iceberg peak stays until the OrderReplenished that follows (IC-006)
                     show(e.makerOrderId(), maker, maker.visible - e.quantity(), e.makerRemainingQuantity() == 0);
                     changed(maker.side, changedBids, changedAsks).add(maker.priceTicks);
+                    Order taker = orders.get(e.takerOrderId());
+                    if (taker != null) {                     // an auction trade: both orders were resting (AU-002)
+                        show(e.takerOrderId(), taker, taker.visible - e.quantity(), e.takerRemainingQuantity() == 0);
+                        changed(taker.side, changedBids, changedAsks).add(taker.priceTicks);
+                    }
                 }
                 case OrderReplenished e -> {
                     show(e.orderId(), orders.get(e.orderId()), e.displayedQuantity(), false);

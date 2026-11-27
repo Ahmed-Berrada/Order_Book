@@ -32,6 +32,7 @@ class OpenApiTest {
                 "/api/v1/instruments",
                 "/api/v1/instruments/{symbol}/book",
                 "/api/v1/instruments/{symbol}/orders",
+                "/api/v1/instruments/{symbol}/phase",
                 "/api/v1/instruments/{symbol}/orders/{orderId}");
         document.extractingPath("$.paths['/api/v1/instruments/{symbol}/orders/{orderId}']").asMap()
                 .containsOnlyKeys("get", "put", "delete");

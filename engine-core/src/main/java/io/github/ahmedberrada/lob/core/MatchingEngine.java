@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.TreeMap;
 
 /**
@@ -25,6 +26,7 @@ public final class MatchingEngine {
     private long lastTradePrice;
     /** Stop orders waiting for their trigger, by order ID, hence in arrival order (ST-005). */
     private final TreeMap<Long, ParkedStop> parkedStops = new TreeMap<>();
+    private TradingPhase phase = TradingPhase.CONTINUOUS;
     /** Lowest and highest trade prices of the command being processed, cascades included (ST-004). */
     private long commandLowTrade;
     private long commandHighTrade;
@@ -45,6 +47,8 @@ public final class MatchingEngine {
             throw new IllegalArgumentException("next order ID and next sequence must be positive");
         }
         MatchingEngine engine = new MatchingEngine(snapshot.instrument());
+        engine.phase = snapshot.phase();
+        boolean call = snapshot.phase() == TradingPhase.CALL;
         engine.nextOrderId = snapshot.nextOrderId();
         engine.nextSequence = snapshot.nextSequence();
         for (RestingOrder order : snapshot.restingOrders()) {
@@ -56,7 +60,7 @@ public final class MatchingEngine {
             }
             if (order.remainingQuantity() <= 0 || order.remainingQuantity() > snapshot.instrument().maxOrderQuantity()
                     || order.priceTicks() <= 0 || order.priceTicks() > snapshot.instrument().maxPriceTicks()
-                    || !hasValidPeak(order) || order.selfTrade().group() < 0) {
+                    || !hasValidPeak(order, call) || order.selfTrade().group() < 0) {
                 throw new IllegalArgumentException("invalid resting order: " + order);
             }
             Order restored = new Order(order.orderId(), order.side(), order.priceTicks(), order.remainingQuantity(),
@@ -65,7 +69,7 @@ public final class MatchingEngine {
             engine.book.rest(restored);
         }
         OrderBook book = engine.book;
-        if (book.bestBid().isPresent() && book.bestAsk().isPresent()
+        if (!call && book.bestBid().isPresent() && book.bestAsk().isPresent()
                 && book.bestBid().getAsLong() >= book.bestAsk().getAsLong()) {
             throw new IllegalArgumentException("snapshot book is crossed");
         }
@@ -90,7 +94,10 @@ public final class MatchingEngine {
     }
 
     /** A fully visible order shows everything; an iceberg a peak between 1 and its display size. */
-    private static boolean hasValidPeak(RestingOrder order) {
+    private static boolean hasValidPeak(RestingOrder order, boolean call) {
+        if (call) {
+            return order.displayedQuantity() == order.remainingQuantity();   // shown in full (TP-008)
+        }
         if (order.displayQuantity() == 0) {
             return order.displayedQuantity() == order.remainingQuantity();
         }
@@ -102,7 +109,12 @@ public final class MatchingEngine {
     /** Captures the complete engine state (ADR-0003). */
     public EngineSnapshot snapshot() {
         return new EngineSnapshot(instrument, nextOrderId, nextSequence, book.restingOrders(), lastTradePrice,
-                List.copyOf(parkedStops.values()));
+                List.copyOf(parkedStops.values()), phase);
+    }
+
+    /** The current trading phase (TP-001). */
+    public TradingPhase phase() {
+        return phase;
     }
 
     public Instrument instrument() {
@@ -126,14 +138,22 @@ public final class MatchingEngine {
             case CancelOrder cancel -> onCancel(cancel, events);
             case ReplaceOrder replace -> onReplace(replace, events);
             case StopOrder stop -> onStop(stop, events);
+            case SetPhase setPhase -> onSetPhase(setPhase, events);
         }
-        releaseTriggeredStops(events);
+        if (phase == TradingPhase.CONTINUOUS) {
+            releaseTriggeredStops(events);                       // TP-007
+        }
         return Collections.unmodifiableList(events);
     }
 
     private void onLimitOrder(LimitOrder order, List<Event> events) {
         long orderId = nextOrderId++;
-        RejectReason reason = validateQuantity(order.quantity());
+        RejectReason reason = phase == TradingPhase.CLOSED
+                || (phase == TradingPhase.CALL && (order.timeInForce() != TimeInForce.GTC || order.postOnly()))
+                ? RejectReason.NOT_ALLOWED_IN_PHASE : null;                                  // TP-004, TP-005
+        if (reason == null) {
+            reason = validateQuantity(order.quantity());
+        }
         if (reason == null) {
             reason = validatePrice(order.priceTicks());
         }
@@ -155,6 +175,12 @@ public final class MatchingEngine {
             return;
         }
         events.add(new OrderAccepted(nextSequence++, orderId));
+        if (phase == TradingPhase.CALL) {
+            long display = order.displayQuantity() == order.quantity() ? 0 : order.displayQuantity();
+            enterCall(new Order(orderId, order.side(), order.priceTicks(), order.quantity(), false, display,
+                    order.selfTrade()), events);
+            return;
+        }
 
         if (order.timeInForce() == TimeInForce.FOK
                 && book.availableQuantity(order.side(), order.priceTicks(), order.quantity(),
@@ -183,7 +209,8 @@ public final class MatchingEngine {
 
     private void onMarketOrder(MarketOrder order, List<Event> events) {
         long orderId = nextOrderId++;
-        RejectReason reason = validateQuantity(order.quantity());
+        RejectReason reason = phase == TradingPhase.CONTINUOUS ? validateQuantity(order.quantity())
+                : RejectReason.NOT_ALLOWED_IN_PHASE;                                         // TP-004, TP-005
         if (reason == null && order.timeInForce() == TimeInForce.GTC) {
             reason = RejectReason.INVALID_TIME_IN_FORCE;
         }
@@ -230,7 +257,8 @@ public final class MatchingEngine {
 
     private void onReplace(ReplaceOrder replace, List<Event> events) {
         Order order = book.find(replace.orderId());
-        RejectReason reason = order == null ? RejectReason.UNKNOWN_ORDER : validateQuantity(replace.quantity());
+        RejectReason reason = phase == TradingPhase.CLOSED ? RejectReason.NOT_ALLOWED_IN_PHASE
+                : order == null ? RejectReason.UNKNOWN_ORDER : validateQuantity(replace.quantity());
         if (reason == null) {
             reason = validatePrice(replace.priceTicks());
         }
@@ -251,6 +279,11 @@ public final class MatchingEngine {
             return;
         }
         book.remove(order.orderId);
+        if (phase == TradingPhase.CALL) {                       // TP-006
+            enterCall(new Order(order.orderId, order.side, replace.priceTicks(), replace.quantity(), order.postOnly,
+                    order.displayQuantity, order.selfTrade), events);
+            return;
+        }
         long remaining = match(order.orderId, order.side, replace.priceTicks(), replace.quantity(), order.selfTrade,
                 events);
         if (selfTradeStopped) {
@@ -269,7 +302,8 @@ public final class MatchingEngine {
 
     private void onStop(StopOrder stop, List<Event> events) {
         long orderId = nextOrderId++;
-        RejectReason reason = validateQuantity(stop.quantity());
+        RejectReason reason = phase == TradingPhase.CLOSED ? RejectReason.NOT_ALLOWED_IN_PHASE
+                : validateQuantity(stop.quantity());
         if (reason == null) {
             reason = validatePrice(stop.stopPriceTicks());
         }
@@ -292,6 +326,82 @@ public final class MatchingEngine {
         events.add(new OrderAccepted(nextSequence++, orderId));
         parkedStops.put(orderId, parked);
         events.add(new OrderParked(nextSequence++, orderId, stop.side(), stop.stopPriceTicks(), stop.quantity()));
+    }
+
+    /**
+     * An order entering a call phase: self-trade prevention against the orders it crosses (AU-004),
+     * then it rests, shown in full, without matching (TP-005, TP-008).
+     */
+    private void enterCall(Order order, List<Event> events) {
+        List<Order> conflicts = book.crossingGroup(order.side, order.priceTicks, order.selfTrade);
+        if (!conflicts.isEmpty()) {
+            if (order.selfTrade.mode() != SelfTradeMode.CANCEL_NEWEST) {
+                for (Order resting : conflicts) {
+                    book.remove(resting.orderId);
+                    events.add(new OrderCancelled(nextSequence++, resting.orderId, resting.remainingQuantity,
+                            CancelReason.SELF_TRADE_PREVENTION));
+                }
+            }
+            if (order.selfTrade.mode() != SelfTradeMode.CANCEL_OLDEST) {
+                cancelForSelfTrade(order.orderId, order.remainingQuantity, events);
+                return;
+            }
+        }
+        order.displayed = order.remainingQuantity;
+        rest(order, events);
+    }
+
+    private void onSetPhase(SetPhase setPhase, List<Event> events) {
+        if (setPhase.phase() == phase) {
+            events.add(new PhaseChangeRejected(nextSequence++, RejectReason.INVALID_PHASE_TRANSITION));
+            return;
+        }
+        TradingPhase from = phase;
+        if (from == TradingPhase.CALL) {
+            uncross(events);
+        }
+        phase = setPhase.phase();
+        events.add(new PhaseChanged(nextSequence++, from, phase));
+        if (phase == TradingPhase.CALL || from == TradingPhase.CALL) {
+            for (Order iceberg : book.icebergs()) {
+                long shown = phase == TradingPhase.CALL ? iceberg.remainingQuantity
+                        : iceberg.peak(iceberg.remainingQuantity);
+                if (iceberg.displayed != shown) {
+                    book.show(iceberg, shown);
+                    events.add(new OrderReplenished(
+                            nextSequence++, iceberg.orderId, iceberg.side, iceberg.priceTicks, shown));
+                }
+            }
+        }
+    }
+
+    /** Determines the auction price and trades at it (AU-001 to AU-003, AU-005). */
+    private void uncross(List<Event> events) {
+        Optional<AuctionPricer.Result> result = AuctionPricer.determine(
+                book.depth(Side.BUY), book.depth(Side.SELL), lastTradePrice);
+        if (result.isEmpty()) {
+            return;
+        }
+        long price = result.get().priceTicks();
+        long left = result.get().volume();
+        events.add(new AuctionPriceDetermined(nextSequence++, price, left));
+        while (left > 0) {
+            PriceLevel buyLevel = book.bestLevel(Side.BUY);
+            PriceLevel sellLevel = book.bestLevel(Side.SELL);
+            Order buy = buyLevel.first();
+            Order sell = sellLevel.first();
+            long fill = Math.min(left, Math.min(buy.remainingQuantity, sell.remainingQuantity));
+            book.fillFirst(buyLevel, fill);
+            book.fillFirst(sellLevel, fill);
+            left -= fill;
+            Order taker = buy.orderId > sell.orderId ? buy : sell;       // the later order, AU-002
+            Order maker = taker == buy ? sell : buy;
+            events.add(new TradeExecuted(nextSequence++, taker.orderId, maker.orderId, taker.side, price, fill,
+                    taker.remainingQuantity, maker.remainingQuantity));
+        }
+        lastTradePrice = price;
+        commandLowTrade = Math.min(commandLowTrade, price);
+        commandHighTrade = Math.max(commandHighTrade, price);
     }
 
     /**
