@@ -1,14 +1,15 @@
 package io.github.ahmedberrada.lob.core;
 
-import java.util.ArrayDeque;
-import java.util.Collection;
-import java.util.Collections;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
 
 /** All resting orders of one side at one price, in arrival order (CT-002). */
 final class PriceLevel {
 
     private final long priceTicks;
-    private final ArrayDeque<Order> orders = new ArrayDeque<>();
+    private Order head;
+    private Order tail;
+    private int size;
     private long totalQuantity;
     private long displayedQuantity;
 
@@ -31,21 +32,38 @@ final class PriceLevel {
     }
 
     int orderCount() {
-        return orders.size();
+        return size;
     }
 
     boolean isEmpty() {
-        return orders.isEmpty();
+        return size == 0;
     }
 
-    /** The queue, oldest order first. Read-only. */
-    Collection<Order> orders() {
-        return Collections.unmodifiableCollection(orders);
+    /** The queue, oldest order first. Read-only: do not change the level while iterating. */
+    Iterable<Order> orders() {
+        return () -> new Iterator<>() {
+            private Order cursor = head;
+
+            @Override
+            public boolean hasNext() {
+                return cursor != null;
+            }
+
+            @Override
+            public Order next() {
+                if (cursor == null) {
+                    throw new NoSuchElementException();
+                }
+                Order current = cursor;
+                cursor = cursor.next;
+                return current;
+            }
+        };
     }
 
     /** Whether any resting order here belongs to a self-trade prevention group (SP-006). */
     boolean holdsGroup(long group) {
-        for (Order order : orders) {
+        for (Order order = head; order != null; order = order.next) {
             if (order.selfTrade.group() == group) {
                 return true;
             }
@@ -55,14 +73,42 @@ final class PriceLevel {
 
     /** The order with time priority at this price. */
     Order first() {
-        return orders.peekFirst();
+        return head;
     }
 
     /** Joins the back of the queue (CT-005). */
     void add(Order order) {
-        orders.addLast(order);
+        link(order);
         totalQuantity += order.remainingQuantity;
         displayedQuantity += order.displayed;
+    }
+
+    private void link(Order order) {
+        order.previous = tail;
+        order.next = null;
+        if (tail == null) {
+            head = order;
+        } else {
+            tail.next = order;
+        }
+        tail = order;
+        size++;
+    }
+
+    private void unlink(Order order) {
+        if (order.previous == null) {
+            head = order.next;
+        } else {
+            order.previous.next = order.next;
+        }
+        if (order.next == null) {
+            tail = order.previous;
+        } else {
+            order.next.previous = order.previous;
+        }
+        order.previous = null;
+        order.next = null;
+        size--;
     }
 
     /**
@@ -73,20 +119,20 @@ final class PriceLevel {
      * @return whether the first order was an iceberg that refilled its peak
      */
     boolean fillFirst(long quantity) {
-        Order first = orders.peekFirst();
+        Order first = head;
         first.remainingQuantity -= quantity;
         first.displayed -= quantity;
         totalQuantity -= quantity;
         displayedQuantity -= quantity;
         if (first.remainingQuantity == 0) {
-            orders.pollFirst();
+            unlink(first);
             return false;
         }
         if (first.displayed == 0) {
-            orders.pollFirst();
+            unlink(first);
             first.displayed = first.peak(first.remainingQuantity);
             displayedQuantity += first.displayed;
-            orders.addLast(first);
+            link(first);
             return true;
         }
         return false;
@@ -110,9 +156,9 @@ final class PriceLevel {
         order.displayed = newDisplayed;
     }
 
-    /** Removes an order from anywhere in the queue. O(n) in v1, by decision (ADR-0001 §5). */
+    /** Removes an order from anywhere in the queue, in constant time (ADR-0016). */
     void remove(Order order) {
-        orders.remove(order);
+        unlink(order);
         totalQuantity -= order.remainingQuantity;
         displayedQuantity -= order.displayed;
     }
