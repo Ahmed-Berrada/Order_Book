@@ -22,6 +22,9 @@ final class Order {
     final long memberId;
     long remainingQuantity;
     long displayed;
+    /** Neighbours in the price level's queue, oldest first; {@code null} at the ends (O(1) removal). */
+    Order previous;
+    Order next;
 
     Order(long orderId, Side side, long priceTicks, long remainingQuantity, boolean postOnly, long displayQuantity,
             SelfTradeInstruction selfTrade, boolean day, long memberId) {
