@@ -1,6 +1,6 @@
 # ADR-0013: Trading phases and call auctions
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-24
 
 ## Context

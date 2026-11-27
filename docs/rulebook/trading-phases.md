@@ -1,7 +1,5 @@
 # Rulebook: trading phases and call auctions
 
-- **Status:** Draft
-
 A venue does not trade continuously all day: it opens and closes with an **auction**, in which orders are
 collected and then matched at one price, and it can pause trading. This chapter adds trading phases and
 the call auction to [continuous trading](continuous-trading.md). Every rule ID is cited by tests through

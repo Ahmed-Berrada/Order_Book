@@ -521,6 +521,8 @@ final class FixApplication implements Application, EventListener {
             case INVALID_TIME_IN_FORCE -> OrdRejReason.UNSUPPORTED_ORDER_CHARACTERISTIC;
             case INVALID_DISPLAY_QUANTITY -> OrdRejReason.INCORRECT_QUANTITY;
             case INVALID_SELF_TRADE_GROUP -> OrdRejReason.OTHER;
+            case NOT_ALLOWED_IN_PHASE -> OrdRejReason.EXCHANGE_CLOSED;                   // TP-004, TP-005
+            case INVALID_PHASE_TRANSITION -> OrdRejReason.OTHER;
             case INVALID_PRICE, NO_LIQUIDITY, UNKNOWN_ORDER, POST_ONLY_WOULD_TRADE, STOP_PRICE_ALREADY_REACHED ->
                     OrdRejReason.OTHER;
         };

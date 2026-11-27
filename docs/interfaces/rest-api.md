@@ -25,8 +25,30 @@ REST is not the low-latency path: members trading at speed will use FIX (phase 3
 Listed instruments.
 
 ```json
-[{"symbol":"AAPL","tickSize":"0.01","maxOrderQuantity":1000000,"maxPrice":"100000.00","halted":false}]
+[{"symbol":"AAPL","tickSize":"0.01","maxOrderQuantity":1000000,"maxPrice":"100000.00","halted":false,"phase":"CONTINUOUS"}]
 ```
+
+`phase` is the [trading phase](../rulebook/trading-phases.md): `CONTINUOUS`, `CALL` or `CLOSED`.
+
+### `PUT /api/v1/instruments/{symbol}/phase`
+
+Moves an instrument to another trading phase (TP-002). Leaving `CALL` runs the uncross (AU-001).
+
+```json
+{"phase":"CONTINUOUS"}
+```
+
+```json
+{"symbol":"AAPL","from":"CALL","to":"CONTINUOUS","auctionPrice":"185.50","auctionVolume":5,"trades":1,
+ "commandSequence":6,"timestamp":"2026-10-08T09:11:38.669599Z"}
+```
+
+`auctionPrice` is `null`, and `auctionVolume` and `trades` are `0`, when nothing traded. A request for the
+current phase is a `409` (`INVALID_PHASE_TRANSITION`). Until members and authentication exist (phases 5
+and 8) this is an operator action that anyone who reaches the port can take.
+
+In a `CALL` phase the book can be crossed. Market, IOC, FOK and post-only orders are refused with `422`
+(`NOT_ALLOWED_IN_PHASE`); in `CLOSED` every new order and every replace is.
 
 ### `POST /api/v1/instruments/{symbol}/orders`
 
@@ -148,6 +170,7 @@ peak only (IC-002).
 {
   "symbol": "AAPL",
   "commandSequence": 43,
+  "phase": "CONTINUOUS",
   "bids": [{"price": "185.20", "quantity": 12, "orders": 2}],
   "asks": [{"price": "185.25", "quantity": 4, "orders": 1}]
 }
@@ -159,9 +182,10 @@ peak only (IC-002).
 |---|---|---|
 | `400` | Malformed JSON, missing or unknown field, fractional quantity, price, `postOnly` or `displayQuantity` on a market order, depth out of range | — |
 | `404` | Unknown symbol (OE-001) | `UNKNOWN_INSTRUMENT` |
+| `409` | Phase change to the current phase (TP-002) | `INVALID_PHASE_TRANSITION` |
 | `404` | Cancel or replace of an order that is not resting (CT-008, OT-005) | `UNKNOWN_ORDER` |
 | `422` | Off-tick price (OE-002) | `OFF_TICK_PRICE` |
-| `422` | Rejected by the engine (CT-007, CT-009, OT-001, OT-004); the body carries the `orderId` it consumed | `INVALID_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `NO_LIQUIDITY`, `INVALID_TIME_IN_FORCE`, `POST_ONLY_WOULD_TRADE`, `INVALID_DISPLAY_QUANTITY`, `STOP_PRICE_ALREADY_REACHED` |
+| `422` | Rejected by the engine (CT-007, CT-009, OT-001, OT-004); the body carries the `orderId` it consumed | `INVALID_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `NO_LIQUIDITY`, `INVALID_TIME_IN_FORCE`, `POST_ONLY_WOULD_TRADE`, `INVALID_DISPLAY_QUANTITY`, `STOP_PRICE_ALREADY_REACHED`, `NOT_ALLOWED_IN_PHASE` |
 | `422` | Replace refused by the engine (OT-005); the order is unchanged | the same reasons |
 | `503` | Queue full (OE-005), with `Retry-After: 1` | `OVERLOADED` |
 | `503` | Instrument halted (OE-006) or venue shutting down (OE-007) | `HALTED`, `STOPPED` |

@@ -56,6 +56,12 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @ExceptionHandler
+    ResponseEntity<ProblemDetail> phaseUnchanged(PhaseChangeRejectedException e) {
+        return problem(HttpStatus.CONFLICT, "Phase unchanged", e.getMessage(),
+                RejectReason.INVALID_PHASE_TRANSITION.name());
+    }
+
+    @ExceptionHandler
     ResponseEntity<ProblemDetail> notResting(OrderNotRestingException e) {
         ResponseEntity<ProblemDetail> response = problem(HttpStatus.NOT_FOUND, "Order not resting",
                 e.getMessage(), RejectReason.UNKNOWN_ORDER.name());

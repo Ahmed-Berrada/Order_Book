@@ -36,8 +36,8 @@ class InstrumentApiTest {
     @Test
     void listsTheConfiguredInstruments() {
         assertThat(mvc.get().uri("/api/v1/instruments")).hasStatusOk().bodyJson().isStrictlyEqualTo("""
-                [{"symbol":"AAPL","tickSize":"0.01","maxOrderQuantity":1000000,"maxPrice":"100000.00","halted":false},
-                 {"symbol":"MSFT","tickSize":"0.01","maxOrderQuantity":1000000,"maxPrice":"100000.00","halted":false}]""");
+                [{"symbol":"AAPL","tickSize":"0.01","maxOrderQuantity":1000000,"maxPrice":"100000.00","halted":false,"phase":"CONTINUOUS"},
+                 {"symbol":"MSFT","tickSize":"0.01","maxOrderQuantity":1000000,"maxPrice":"100000.00","halted":false,"phase":"CONTINUOUS"}]""");
     }
 
     @Test
@@ -49,7 +49,7 @@ class InstrumentApiTest {
         limit("SELL", "185.50", 2);
 
         assertThat(mvc.get().uri("/api/v1/instruments/AAPL/book")).hasStatusOk().bodyJson().isStrictlyEqualTo("""
-                {"symbol":"AAPL","commandSequence":5,
+                {"symbol":"AAPL","commandSequence":5,"phase":"CONTINUOUS",
                  "bids":[{"price":"185.20","quantity":12,"orders":2},{"price":"185.10","quantity":1,"orders":1}],
                  "asks":[{"price":"185.30","quantity":4,"orders":1},{"price":"185.50","quantity":2,"orders":1}]}""");
         assertThat(mvc.get().uri("/api/v1/instruments/AAPL/book?depth=1")).bodyJson()
