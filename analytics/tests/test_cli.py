@@ -1,0 +1,67 @@
+import io
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from lob_analytics.__main__ import main
+from tests.fixtures import RECORDS, TRADES
+
+
+class CliTest(unittest.TestCase):
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.trades = Path(self.dir.name, "trades.csv")
+        self.records = Path(self.dir.name, "records.csv")
+        self.trades.write_text(TRADES, encoding="utf-8")
+        self.records.write_text(RECORDS, encoding="utf-8")
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def run_cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        code = main(list(args), out, err)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_json_report_holds_every_metric(self):
+        code, out, err = self.run_cli("--trades", str(self.trades), "--records", str(self.records), "--json")
+        self.assertEqual((code, err), (0, ""))
+        data = json.loads(out)
+        first = data["days"][0]
+        self.assertEqual((first["vwap"], first["net_revenue"], first["traded_buckets"]), ("10.0275", "0.06", 4))
+        self.assertEqual(first["trade_size_percentiles"], {"p50": 50, "p90": 200, "p99": 200, "p100": 200})
+        self.assertEqual(first["realized_volatility"]["returns"], 3)
+        self.assertEqual(first["price_impact"]["observations"], 3)
+        self.assertIsNone(data["days"][1]["realized_volatility"])
+        self.assertIsNone(data["days"][1]["price_impact"])
+        self.assertEqual([o["member_id"] for o in data["order_to_trade"]], [1, 2, 3])
+
+    def test_markdown_report(self):
+        code, out, _ = self.run_cli("--trades", str(self.trades), "--records", str(self.records), "--bucket", "30")
+        self.assertEqual(code, 0)
+        self.assertIn("## PTX on 2026-11-26", out)
+        self.assertIn("| 5 | 400 | 4011.00 | 10.0275 | 10.00 | 10.10 | 9.80 | 9.80 | 7.5% | 0.06 |", out)
+        self.assertIn("over 30 s buckets", out)
+        self.assertIn("not enough traded buckets", out)
+        self.assertIn("| PTX | 3 | 1 | 0 | no trades |", out)
+        self.assertIn("| PTX | 2 | 4 | 3 | 1.33 |", out)
+        code, out, _ = self.run_cli("--trades", str(self.trades))
+        self.assertNotIn("Order-to-trade", out)
+
+    def test_errors(self):
+        code, out, err = self.run_cli()
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("the following arguments are required: --trades", err)
+        code, _, err = self.run_cli("--trades", str(self.trades), "--bucket", "0")
+        self.assertEqual((code, err), (2, "error: --bucket must be positive\n"))
+        code, _, err = self.run_cli("--trades", str(Path(self.dir.name, "missing.csv")))
+        self.assertEqual(code, 1)
+        self.assertIn("error:", err)
+        code, _, err = self.run_cli("--trades", str(self.records))
+        self.assertEqual(code, 1)
+        self.assertIn("not a trade file", err)
+        code, out, _ = self.run_cli("--help")
+        self.assertEqual(code, 0)
+        self.assertIn("Market-microstructure report", out)

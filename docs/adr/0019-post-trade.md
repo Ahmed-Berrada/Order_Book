@@ -72,4 +72,4 @@ file.
   order type; they would change the instrument model of every module. Out of scope for this project.
 - **Billing periods, tiers and caps** (volume tiers, monthly minimums, fee caps per trade). The schedule is
   flat per liquidity. Tiers need a month of trades and are a reporting step on top of the statement.
-- **Python analytics** are phase 10b: they read the records export and this trade file.
+- **Python analytics** are phase 10b ([analytics](../analytics.md)): they read the records export and this trade file.
