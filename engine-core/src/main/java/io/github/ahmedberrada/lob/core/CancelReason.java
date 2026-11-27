@@ -11,5 +11,9 @@ public enum CancelReason {
     /** A FOK order that could not be filled in full on arrival (OT-003). */
     FILL_OR_KILL,
     /** An order of the same self-trade prevention group was met (SP-002 to SP-004). */
-    SELF_TRADE_PREVENTION
+    SELF_TRADE_PREVENTION,
+    /** A DAY order expired when the instrument closed (DY-002). */
+    DAY_EXPIRED,
+    /** The remainder of an order that met the volatility band (VI-003). */
+    VOLATILITY_INTERRUPTION
 }

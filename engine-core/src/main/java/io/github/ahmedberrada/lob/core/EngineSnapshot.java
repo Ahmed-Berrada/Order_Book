@@ -13,11 +13,12 @@ import java.util.Objects;
  * @param lastTradePriceTicks price of the most recent trade, or 0 before the first one (ST-002)
  * @param parkedStops  stop orders waiting for their trigger, in order of order ID (ST-008)
  * @param phase        trading phase (AU-006)
+ * @param referencePriceTicks the volatility reference price, or 0 before the first trade (VI-001, VI-006)
  */
 public record EngineSnapshot(
         Instrument instrument, long nextOrderId, long nextSequence, List<RestingOrder> restingOrders,
         long lastTradePriceTicks, List<ParkedStop> parkedStops,
-        TradingPhase phase) {
+        TradingPhase phase, long referencePriceTicks) {
 
     public EngineSnapshot {
         Objects.requireNonNull(instrument, "instrument");
@@ -30,11 +31,18 @@ public record EngineSnapshot(
     public EngineSnapshot(Instrument instrument, long nextOrderId, long nextSequence,
             List<RestingOrder> restingOrders, long lastTradePriceTicks, List<ParkedStop> parkedStops) {
         this(instrument, nextOrderId, nextSequence, restingOrders, lastTradePriceTicks, parkedStops,
-                TradingPhase.CONTINUOUS);
+                TradingPhase.CONTINUOUS, 0);
+    }
+
+    /** A state with no reference price yet. */
+    public EngineSnapshot(Instrument instrument, long nextOrderId, long nextSequence,
+            List<RestingOrder> restingOrders, long lastTradePriceTicks, List<ParkedStop> parkedStops,
+            TradingPhase phase) {
+        this(instrument, nextOrderId, nextSequence, restingOrders, lastTradePriceTicks, parkedStops, phase, 0);
     }
 
     /** A state with no trade yet and no parked stop. */
     public EngineSnapshot(Instrument instrument, long nextOrderId, long nextSequence, List<RestingOrder> restingOrders) {
-        this(instrument, nextOrderId, nextSequence, restingOrders, 0, List.of(), TradingPhase.CONTINUOUS);
+        this(instrument, nextOrderId, nextSequence, restingOrders, 0, List.of(), TradingPhase.CONTINUOUS, 0);
     }
 }

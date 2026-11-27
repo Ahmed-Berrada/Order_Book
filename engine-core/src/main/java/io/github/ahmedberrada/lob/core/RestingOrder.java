@@ -8,13 +8,21 @@ import java.util.Objects;
  * @param displayQuantity   an iceberg's peak size, or 0 for a fully visible order
  * @param displayedQuantity the quantity currently visible: the remainder, or the current peak
  * @param selfTrade         the instruction the order came with, applied if it becomes incoming again (SP-008)
+ * @param day               whether it expires when the instrument closes (DY-002, DY-003)
  */
 public record RestingOrder(long orderId, Side side, long priceTicks, long remainingQuantity, boolean postOnly,
-        long displayQuantity, long displayedQuantity, SelfTradeInstruction selfTrade) {
+        long displayQuantity, long displayedQuantity, SelfTradeInstruction selfTrade, boolean day) {
 
     public RestingOrder {
         Objects.requireNonNull(side, "side");
         Objects.requireNonNull(selfTrade, "selfTrade");
+    }
+
+    /** A good-till-cancelled order. */
+    public RestingOrder(long orderId, Side side, long priceTicks, long remainingQuantity, boolean postOnly,
+            long displayQuantity, long displayedQuantity, SelfTradeInstruction selfTrade) {
+        this(orderId, side, priceTicks, remainingQuantity, postOnly, displayQuantity, displayedQuantity, selfTrade,
+                false);
     }
 
     /** A resting order with no self-trade prevention. */
