@@ -95,7 +95,7 @@ final class SymbolWorker implements AutoCloseable {
     CompletableFuture<BookSnapshot> book(int depth) {
         return enqueue(() -> {
             OrderBook book = engine.book();
-            return new BookSnapshot(engine.lastCommandSequence(), top(book.displayedDepth(Side.BUY), depth),
+            return new BookSnapshot(engine.lastCommandSequence(), engine.phase(), top(book.displayedDepth(Side.BUY), depth),
                     top(book.displayedDepth(Side.SELL), depth));
         });
     }
