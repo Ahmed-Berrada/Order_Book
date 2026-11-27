@@ -51,7 +51,15 @@ public final class MatchingService implements AutoCloseable {
      */
     public static MatchingService start(Path dataDirectory, List<InstrumentConfig> instruments,
             JournalOptions options, TimeSource timeSource, int queueCapacity) throws IOException {
+        return start(dataDirectory, instruments, options, timeSource, queueCapacity, CommandObserver.NONE);
+    }
+
+    /** Like {@link #start(Path, List, JournalOptions, TimeSource, int)}, telling an observer how long each command took. */
+    public static MatchingService start(Path dataDirectory, List<InstrumentConfig> instruments,
+            JournalOptions options, TimeSource timeSource, int queueCapacity, CommandObserver observer)
+            throws IOException {
         Objects.requireNonNull(dataDirectory, "dataDirectory");
+        Objects.requireNonNull(observer, "observer");
         if (queueCapacity < 1) {
             throw new IllegalArgumentException("queueCapacity must be positive: " + queueCapacity);
         }
@@ -69,7 +77,7 @@ public final class MatchingService implements AutoCloseable {
                 JournaledEngine engine = JournaledEngine.open(
                         dataDirectory.resolve(config.symbol()), config.instrument(), options, timeSource);
                 recoveries.put(config.symbol(), engine.recovery());
-                workers.put(config.symbol(), new SymbolWorker(engine, queueCapacity, listeners));
+                workers.put(config.symbol(), new SymbolWorker(engine, queueCapacity, listeners, observer));
             }
         } catch (IOException | RuntimeException e) {
             IOException closeFailure = closeAll(workers.values());
@@ -145,6 +153,18 @@ public final class MatchingService implements AutoCloseable {
     /** All listed instruments, in configuration order. */
     public List<InstrumentConfig> instruments() {
         return List.copyOf(instruments.values());
+    }
+
+    /** Commands waiting for an instrument's thread, or 0 for an unknown instrument (for metrics). */
+    public int queueDepth(String symbol) {
+        SymbolWorker worker = workers.get(symbol);
+        return worker == null ? 0 : worker.queueDepth();
+    }
+
+    /** How many commands an instrument's queue holds before it refuses with {@code OVERLOADED}. */
+    public int queueCapacity(String symbol) {
+        SymbolWorker worker = workers.get(symbol);
+        return worker == null ? 0 : worker.queueCapacity();
     }
 
     /** Whether an instrument stopped after a journal failure (OE-006). */

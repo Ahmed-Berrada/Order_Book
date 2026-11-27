@@ -43,6 +43,8 @@ final class SymbolWorker implements AutoCloseable {
     private final Thread thread;
     private volatile boolean accepting = true;
     private volatile boolean halted;
+    private final CommandObserver observer;
+    private final int capacity;
 
     SymbolWorker(JournaledEngine engine, int queueCapacity) {
         this(engine, queueCapacity, List.of());
@@ -50,6 +52,13 @@ final class SymbolWorker implements AutoCloseable {
 
     /** @param listeners read on every command; the list may change while the worker runs */
     SymbolWorker(JournaledEngine engine, int queueCapacity, List<EventListener> listeners) {
+        this(engine, queueCapacity, listeners, CommandObserver.NONE);
+    }
+
+    SymbolWorker(JournaledEngine engine, int queueCapacity, List<EventListener> listeners,
+            CommandObserver observer) {
+        this.observer = observer;
+        this.capacity = queueCapacity;
         this.symbol = engine.instrument().symbol();
         this.engine = engine;
         this.listeners = listeners;
@@ -81,7 +90,9 @@ final class SymbolWorker implements AutoCloseable {
                 throw new RequestRefusedException(Reason.HALTED, symbol);
             }
             try {
+                long started = System.nanoTime();
                 EventBatch batch = engine.process(command, memberId);
+                observe(batch, System.nanoTime() - started);
                 halted = engine.isStopped();    // a later write failed: this command counts, the next ones do not
                 notifyListeners(batch, context);
                 return batch;
@@ -112,6 +123,23 @@ final class SymbolWorker implements AutoCloseable {
     /** Remaining quantity of a resting order, 0 if it is not resting. */
     CompletableFuture<Long> restingQuantity(long orderId) {
         return enqueue(() -> engine.book().restingQuantity(orderId));
+    }
+
+    /** Commands waiting for the instrument's thread (for metrics). */
+    int queueDepth() {
+        return queue.size();
+    }
+
+    int queueCapacity() {
+        return capacity;
+    }
+
+    private void observe(EventBatch batch, long nanos) {
+        try {
+            observer.processed(symbol, batch, nanos);
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.ERROR, "Command observer failed on " + symbol, e);
+        }
     }
 
     /**
