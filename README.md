@@ -6,7 +6,7 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 
 A **limit order book (LOB) matching engine** written in Java 21: price-time priority matching,
-a REST API on Spring Boot, and published JMH benchmarks.
+a REST API on Spring Boot, and JMH benchmarks planned for phase 6.
 
 The goal is engineering rigour rather than feature count. The engine is **deterministic**,
 backed by **invariant tests**, and **measured before it is optimised**.
