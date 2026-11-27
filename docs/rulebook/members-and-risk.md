@@ -46,7 +46,7 @@ snapshot restores them (RS-010).
 A negative limit, or member `0`, is refused with `MemberCommandRejected(member, INVALID_MEMBER_LIMITS)`
 and changes nothing. A new member starts with no limits.
 
-**RK-002: Checks.** After the checks of CT-009, TK-002, OT-004, IC-001, ST-002, SP-001 and TP-004/TP-005,
+**RK-002: Checks.** After the checks of CT-007, CT-009, TK-002, OT-004, IC-001, ST-002, SP-001 and TP-004/TP-005,
 and in this order, a new order of a member other than `0` is rejected (and a replace refused) with:
 
 | Reason | When |

@@ -19,12 +19,14 @@ final class Order {
     final long displayQuantity;
     final SelfTradeInstruction selfTrade;
     final boolean day;
+    final long memberId;
     long remainingQuantity;
     long displayed;
 
     Order(long orderId, Side side, long priceTicks, long remainingQuantity, boolean postOnly, long displayQuantity,
-            SelfTradeInstruction selfTrade, boolean day) {
+            SelfTradeInstruction selfTrade, boolean day, long memberId) {
         this.day = day;
+        this.memberId = memberId;
         this.orderId = orderId;
         this.side = side;
         this.priceTicks = priceTicks;

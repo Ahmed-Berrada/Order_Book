@@ -4,11 +4,18 @@ import java.util.Objects;
 
 /** A stop order waiting for its trigger, as captured in an {@link EngineSnapshot} (ST-008). */
 public record ParkedStop(
-        long orderId, Side side, long stopPriceTicks, long limitPriceTicks, long quantity, SelfTradeInstruction selfTrade) {
+        long orderId, Side side, long stopPriceTicks, long limitPriceTicks, long quantity, SelfTradeInstruction selfTrade,
+        long memberId) {
 
     public ParkedStop {
         Objects.requireNonNull(side, "side");
         Objects.requireNonNull(selfTrade, "selfTrade");
+    }
+
+    /** A stop of member 0. */
+    public ParkedStop(long orderId, Side side, long stopPriceTicks, long limitPriceTicks, long quantity,
+            SelfTradeInstruction selfTrade) {
+        this(orderId, side, stopPriceTicks, limitPriceTicks, quantity, selfTrade, 0);
     }
 
     /** A stop with no self-trade prevention. */

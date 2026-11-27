@@ -15,5 +15,7 @@ public enum CancelReason {
     /** A DAY order expired when the instrument closed (DY-002). */
     DAY_EXPIRED,
     /** The remainder of an order that met the volatility band (VI-003). */
-    VOLATILITY_INTERRUPTION
+    VOLATILITY_INTERRUPTION,
+    /** The member was suspended and its open orders cancelled (RK-004). */
+    KILL_SWITCH
 }

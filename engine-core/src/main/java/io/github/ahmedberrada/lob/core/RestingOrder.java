@@ -9,13 +9,21 @@ import java.util.Objects;
  * @param displayedQuantity the quantity currently visible: the remainder, or the current peak
  * @param selfTrade         the instruction the order came with, applied if it becomes incoming again (SP-008)
  * @param day               whether it expires when the instrument closes (DY-002, DY-003)
+ * @param memberId          the member that entered it (MB-002)
  */
 public record RestingOrder(long orderId, Side side, long priceTicks, long remainingQuantity, boolean postOnly,
-        long displayQuantity, long displayedQuantity, SelfTradeInstruction selfTrade, boolean day) {
+        long displayQuantity, long displayedQuantity, SelfTradeInstruction selfTrade, boolean day, long memberId) {
 
     public RestingOrder {
         Objects.requireNonNull(side, "side");
         Objects.requireNonNull(selfTrade, "selfTrade");
+    }
+
+    /** An order of member 0. */
+    public RestingOrder(long orderId, Side side, long priceTicks, long remainingQuantity, boolean postOnly,
+            long displayQuantity, long displayedQuantity, SelfTradeInstruction selfTrade, boolean day) {
+        this(orderId, side, priceTicks, remainingQuantity, postOnly, displayQuantity, displayedQuantity, selfTrade,
+                day, 0);
     }
 
     /** A good-till-cancelled order. */

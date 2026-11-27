@@ -27,6 +27,12 @@ public final class MatchingEngine {
     /** Stop orders waiting for their trigger, by order ID, hence in arrival order (ST-005). */
     private final TreeMap<Long, ParkedStop> parkedStops = new TreeMap<>();
     private TradingPhase phase = TradingPhase.CONTINUOUS;
+    /** What the engine keeps per member (MB-004), created on first use. */
+    private final TreeMap<Long, MemberRecord> members = new TreeMap<>();
+    /** What members have parked as stop orders, for their open-order and position limits (RK-002). */
+    private final java.util.Map<Long, Exposure> parkedExposures = new java.util.HashMap<>();
+    /** The member the command being processed is for (MB-001). */
+    private long currentMember;
     /** The price continuous trades are compared with for volatility, 0 before the first trade (VI-001). */
     private long referencePrice;
     /** Whether the last {@link #match} stopped at the volatility band (VI-002), and where. */
@@ -37,6 +43,17 @@ public final class MatchingEngine {
     /** Lowest and highest trade prices of the command being processed, cascades included (ST-004). */
     private long commandLowTrade;
     private long commandHighTrade;
+
+    /** A member's limits, suspension and net position. */
+    private static final class MemberRecord {
+        MemberLimits limits = MemberLimits.NONE;
+        boolean suspended;
+        long netPosition;
+
+        boolean isDefault() {
+            return limits.equals(MemberLimits.NONE) && !suspended && netPosition == 0;
+        }
+    }
 
     public MatchingEngine(Instrument instrument) {
         this.instrument = Objects.requireNonNull(instrument, "instrument");
@@ -67,11 +84,11 @@ public final class MatchingEngine {
             }
             if (order.remainingQuantity() <= 0 || order.remainingQuantity() > snapshot.instrument().maxOrderQuantity()
                     || order.priceTicks() <= 0 || order.priceTicks() > snapshot.instrument().maxPriceTicks()
-                    || !hasValidPeak(order, call) || order.selfTrade().group() < 0) {
+                    || !hasValidPeak(order, call) || order.selfTrade().group() < 0 || order.memberId() < 0) {
                 throw new IllegalArgumentException("invalid resting order: " + order);
             }
             Order restored = new Order(order.orderId(), order.side(), order.priceTicks(), order.remainingQuantity(),
-                    order.postOnly(), order.displayQuantity(), order.selfTrade(), order.day());
+                    order.postOnly(), order.displayQuantity(), order.selfTrade(), order.day(), order.memberId());
             restored.displayed = order.displayedQuantity();
             engine.book.rest(restored);
         }
@@ -89,17 +106,30 @@ public final class MatchingEngine {
             throw new IllegalArgumentException("invalid reference price: " + snapshot.referencePriceTicks());
         }
         engine.referencePrice = snapshot.referencePriceTicks();
+        long previous = -1;
+        for (MemberState state : snapshot.members()) {
+            if (state.memberId() < 0 || state.memberId() <= previous || !state.limits().isValid()
+                    || (state.memberId() == 0 && state.suspended())) {
+                throw new IllegalArgumentException("invalid member state: " + state);
+            }
+            previous = state.memberId();
+            MemberRecord record = engine.members.computeIfAbsent(state.memberId(), id -> new MemberRecord());
+            record.limits = state.limits();
+            record.suspended = state.suspended();
+            record.netPosition = state.netPosition();
+        }
         for (ParkedStop stop : snapshot.parkedStops()) {
             boolean valid = stop.orderId() >= 1 && stop.orderId() < snapshot.nextOrderId()
                     && book.restingQuantity(stop.orderId()) == 0 && !engine.parkedStops.containsKey(stop.orderId())
                     && stop.quantity() > 0 && stop.quantity() <= instrument.maxOrderQuantity()
                     && stop.stopPriceTicks() > 0 && stop.stopPriceTicks() <= instrument.maxPriceTicks()
                     && stop.limitPriceTicks() >= 0 && stop.limitPriceTicks() <= instrument.maxPriceTicks()
-                    && stop.selfTrade().group() >= 0;
+                    && stop.selfTrade().group() >= 0 && stop.memberId() >= 0;
             if (!valid) {
                 throw new IllegalArgumentException("invalid parked stop: " + stop);
             }
             engine.parkedStops.put(stop.orderId(), stop);
+            engine.parkedExposure(stop.memberId()).add(stop.side(), stop.quantity());
         }
         return engine;
     }
@@ -120,7 +150,31 @@ public final class MatchingEngine {
     /** Captures the complete engine state (ADR-0003). */
     public EngineSnapshot snapshot() {
         return new EngineSnapshot(instrument, nextOrderId, nextSequence, book.restingOrders(), lastTradePrice,
-                List.copyOf(parkedStops.values()), phase, referencePrice);
+                List.copyOf(parkedStops.values()), phase, referencePrice, memberStates());
+    }
+
+    private List<MemberState> memberStates() {
+        List<MemberState> states = new ArrayList<>();
+        members.forEach((id, record) -> {
+            if (!record.isDefault()) {
+                states.add(new MemberState(id, record.limits, record.suspended, record.netPosition));
+            }
+        });
+        return states;
+    }
+
+    /** A member's net position in lots: bought minus sold (RK-003). */
+    public long netPosition(long memberId) {
+        MemberRecord record = members.get(memberId);
+        return record == null ? 0 : record.netPosition;
+    }
+
+    private MemberRecord member(long memberId) {
+        return members.computeIfAbsent(memberId, id -> new MemberRecord());
+    }
+
+    private Exposure parkedExposure(long memberId) {
+        return parkedExposures.computeIfAbsent(memberId, id -> new Exposure());
     }
 
     /** The current trading phase (TP-001). */
@@ -137,9 +191,22 @@ public final class MatchingEngine {
         return book;
     }
 
-    /** Applies one command and returns its events, in the order of rulebook CT-012 and OT-008. */
+    /** Applies one command for member 0 and returns its events, in the order of rulebook CT-012 and OT-008. */
     public List<Event> process(Command command) {
+        return process(command, 0);
+    }
+
+    /**
+     * Applies one command on behalf of a member (MB-001).
+     *
+     * @throws IllegalArgumentException if the member ID is negative
+     */
+    public List<Event> process(Command command, long memberId) {
         Objects.requireNonNull(command, "command");
+        if (memberId < 0) {
+            throw new IllegalArgumentException("member ID must not be negative: " + memberId);
+        }
+        currentMember = memberId;
         List<Event> events = new ArrayList<>();
         commandLowTrade = Long.MAX_VALUE;
         commandHighTrade = Long.MIN_VALUE;
@@ -150,6 +217,9 @@ public final class MatchingEngine {
             case ReplaceOrder replace -> onReplace(replace, events);
             case StopOrder stop -> onStop(stop, events);
             case SetPhase setPhase -> onSetPhase(setPhase, events);
+            case SetMemberLimits set -> onSetMemberLimits(set, events);
+            case SuspendMember suspend -> onSuspend(suspend, events);
+            case ResumeMember resume -> onResume(resume, events);
         }
         if (phase == TradingPhase.CONTINUOUS && !interruptionPending) {
             releaseTriggeredStops(events);                       // TP-007
@@ -186,6 +256,9 @@ public final class MatchingEngine {
         if (reason == null && order.selfTrade().group() < 0) {
             reason = RejectReason.INVALID_SELF_TRADE_GROUP;
         }
+        if (reason == null) {
+            reason = riskCheck(order.side(), order.priceTicks(), order.priceTicks(), order.quantity(), 0, false);
+        }
         if (reason != null) {
             events.add(new OrderRejected(nextSequence++, orderId, reason));
             return;
@@ -194,7 +267,7 @@ public final class MatchingEngine {
         if (phase == TradingPhase.CALL) {
             long display = order.displayQuantity() == order.quantity() ? 0 : order.displayQuantity();
             enterCall(new Order(orderId, order.side(), order.priceTicks(), order.quantity(), false, display,
-                    order.selfTrade(), order.timeInForce() == TimeInForce.DAY), events);
+                    order.selfTrade(), order.timeInForce() == TimeInForce.DAY, currentMember), events);
             return;
         }
 
@@ -204,7 +277,8 @@ public final class MatchingEngine {
             events.add(new OrderCancelled(nextSequence++, orderId, order.quantity(), CancelReason.FILL_OR_KILL));
             return;
         }
-        long remaining = match(orderId, order.side(), order.priceTicks(), order.quantity(), order.selfTrade(), events);
+        long remaining = match(orderId, currentMember, order.side(), order.priceTicks(), order.quantity(),
+                order.selfTrade(), events);
         if (selfTradeStopped) {
             cancelForSelfTrade(orderId, remaining, events);
             return;
@@ -216,7 +290,7 @@ public final class MatchingEngine {
             // a display quantity equal to the quantity means fully visible (IC-001)
             long display = order.displayQuantity() == order.quantity() ? 0 : order.displayQuantity();
             Order rested = new Order(orderId, order.side(), order.priceTicks(), remaining, order.postOnly(), display,
-                    order.selfTrade(), order.timeInForce() == TimeInForce.DAY);
+                    order.selfTrade(), order.timeInForce() == TimeInForce.DAY, currentMember);
             if (breached) {
                 enterCall(rested, events);                                       // VI-003
             } else {
@@ -243,6 +317,9 @@ public final class MatchingEngine {
         if (reason == null && book.bestLevel(order.side().opposite()) == null) {
             reason = RejectReason.NO_LIQUIDITY;
         }
+        if (reason == null) {
+            reason = riskCheck(order.side(), 0, 0, order.quantity(), 0, false);
+        }
         if (reason != null) {
             events.add(new OrderRejected(nextSequence++, orderId, reason));
             return;
@@ -257,7 +334,8 @@ public final class MatchingEngine {
             events.add(new OrderCancelled(nextSequence++, orderId, order.quantity(), CancelReason.FILL_OR_KILL));
             return;
         }
-        long remaining = match(orderId, order.side(), limit, order.quantity(), order.selfTrade(), events);
+        long remaining = match(orderId, currentMember, order.side(), limit, order.quantity(), order.selfTrade(),
+                events);
         if (selfTradeStopped) {
             cancelForSelfTrade(orderId, remaining, events);
         } else if (breached) {
@@ -269,8 +347,15 @@ public final class MatchingEngine {
     }
 
     private void onCancel(CancelOrder cancel, List<Event> events) {
+        Order resting = book.find(cancel.orderId());
+        ParkedStop parked = resting == null ? parkedStops.get(cancel.orderId()) : null;
+        long owner = resting != null ? resting.memberId : parked != null ? parked.memberId() : -1;
+        if (currentMember != 0 && owner != currentMember) {                  // MB-003: absent or someone else's
+            events.add(new CancelRejected(nextSequence++, cancel.orderId(), RejectReason.UNKNOWN_ORDER));
+            return;
+        }
         Order order = book.remove(cancel.orderId());
-        ParkedStop stop = order == null ? parkedStops.remove(cancel.orderId()) : null;
+        ParkedStop stop = order == null ? removeParked(cancel.orderId()) : null;
         if (stop != null) {
             events.add(new OrderCancelled(nextSequence++, stop.orderId(), stop.quantity(), CancelReason.CLIENT_REQUEST));
         } else if (order == null) {
@@ -284,12 +369,17 @@ public final class MatchingEngine {
     private void onReplace(ReplaceOrder replace, List<Event> events) {
         Order order = book.find(replace.orderId());
         RejectReason reason = phase == TradingPhase.CLOSED ? RejectReason.NOT_ALLOWED_IN_PHASE
-                : order == null ? RejectReason.UNKNOWN_ORDER : validateQuantity(replace.quantity());
+                : order == null || (currentMember != 0 && order.memberId != currentMember)
+                ? RejectReason.UNKNOWN_ORDER : validateQuantity(replace.quantity());       // MB-003
         if (reason == null) {
             reason = validatePrice(replace.priceTicks());
         }
         if (reason == null && order.postOnly && wouldTrade(order.side, replace.priceTicks())) {
             reason = RejectReason.POST_ONLY_WOULD_TRADE;
+        }
+        if (reason == null) {
+            reason = riskCheck(order.side, replace.priceTicks(), replace.priceTicks(), replace.quantity(),
+                    order.remainingQuantity, true);
         }
         if (reason != null) {
             events.add(new ReplaceRejected(nextSequence++, replace.orderId(), reason));
@@ -307,16 +397,16 @@ public final class MatchingEngine {
         book.remove(order.orderId);
         if (phase == TradingPhase.CALL) {                       // TP-006
             enterCall(new Order(order.orderId, order.side, replace.priceTicks(), replace.quantity(), order.postOnly,
-                    order.displayQuantity, order.selfTrade, order.day), events);
+                    order.displayQuantity, order.selfTrade, order.day, order.memberId), events);
             return;
         }
-        long remaining = match(order.orderId, order.side, replace.priceTicks(), replace.quantity(), order.selfTrade,
+        long remaining = match(order.orderId, order.memberId, order.side, replace.priceTicks(), replace.quantity(), order.selfTrade,
                 events);
         if (selfTradeStopped) {
             cancelForSelfTrade(order.orderId, remaining, events);
         } else if (remaining > 0) {
             Order rested = new Order(order.orderId, order.side, replace.priceTicks(), remaining, order.postOnly,
-                    order.displayQuantity, order.selfTrade, order.day);
+                    order.displayQuantity, order.selfTrade, order.day, order.memberId);
             if (breached) {
                 enterCall(rested, events);                                       // VI-003
             } else {
@@ -346,9 +436,14 @@ public final class MatchingEngine {
         }
         ParkedStop parked = new ParkedStop(
                 orderId, stop.side(), stop.stopPriceTicks(), stop.limitPriceTicks(), stop.quantity(),
-                stop.selfTrade());
+                stop.selfTrade(), currentMember);
         if (reason == null && lastTradePrice != 0 && parked.isTriggeredBy(lastTradePrice)) {
             reason = RejectReason.STOP_PRICE_ALREADY_REACHED;
+        }
+        if (reason == null) {
+            boolean isLimit = stop.limitPriceTicks() != 0;
+            reason = riskCheck(stop.side(), isLimit ? stop.limitPriceTicks() : stop.stopPriceTicks(),
+                    isLimit ? stop.limitPriceTicks() : 0, stop.quantity(), 0, false);
         }
         if (reason != null) {
             events.add(new OrderRejected(nextSequence++, orderId, reason));
@@ -356,6 +451,7 @@ public final class MatchingEngine {
         }
         events.add(new OrderAccepted(nextSequence++, orderId));
         parkedStops.put(orderId, parked);
+        parkedExposure(currentMember).add(parked.side(), parked.quantity());
         events.add(new OrderParked(nextSequence++, orderId, stop.side(), stop.stopPriceTicks(), stop.quantity()));
     }
 
@@ -441,7 +537,8 @@ public final class MatchingEngine {
             Order taker = buy.orderId > sell.orderId ? buy : sell;       // the later order, AU-002
             Order maker = taker == buy ? sell : buy;
             events.add(new TradeExecuted(nextSequence++, taker.orderId, maker.orderId, taker.side, price, fill,
-                    taker.remainingQuantity, maker.remainingQuantity));
+                    taker.remainingQuantity, maker.remainingQuantity, taker.memberId, maker.memberId));
+            traded(taker.memberId, taker.side, maker.memberId, fill);
         }
         lastTradePrice = price;
         referencePrice = price;                                                  // VI-001
@@ -456,16 +553,17 @@ public final class MatchingEngine {
     private void releaseTriggeredStops(List<Event> events) {
         ParkedStop next;
         while (!interruptionPending && (next = nextTriggered()) != null) {
-            parkedStops.remove(next.orderId());
+            removeParked(next.orderId());
             events.add(new StopTriggered(nextSequence++, next.orderId()));
             boolean isLimit = next.limitPriceTicks() != 0;
             long limit = isLimit ? next.limitPriceTicks() : marketLimit(next.side());
-            long remaining = match(next.orderId(), next.side(), limit, next.quantity(), next.selfTrade(), events);
+            long remaining = match(next.orderId(), next.memberId(), next.side(), limit, next.quantity(),
+                    next.selfTrade(), events);
             if (selfTradeStopped) {
                 cancelForSelfTrade(next.orderId(), remaining, events);
             } else if (remaining > 0 && isLimit) {
                 Order rested = new Order(next.orderId(), next.side(), limit, remaining, false, 0, next.selfTrade(),
-                        false);
+                        false, next.memberId());
                 if (breached) {
                     enterCall(rested, events);                                   // VI-003
                 } else {
@@ -488,6 +586,113 @@ public final class MatchingEngine {
             }
         }
         return null;
+    }
+
+    /** Each side's net position changes by the quantity (RK-003). */
+    private void traded(long takerMember, Side takerSide, long makerMember, long quantity) {
+        long signed = takerSide == Side.BUY ? quantity : -quantity;
+        member(takerMember).netPosition += signed;
+        member(makerMember).netPosition -= signed;
+    }
+
+    private ParkedStop removeParked(long orderId) {
+        ParkedStop stop = parkedStops.remove(orderId);
+        if (stop != null) {
+            parkedExposure(stop.memberId()).remove(stop.side(), stop.quantity());
+        }
+        return stop;
+    }
+
+    /** The pre-trade checks of RK-002; {@code null} if the order passes. */
+    private RejectReason riskCheck(Side side, long notionalPrice, long collarPrice, long quantity,
+            long replacedQuantity, boolean replacing) {
+        MemberRecord record = currentMember == 0 ? null : members.get(currentMember);
+        if (record == null) {
+            return null;
+        }
+        if (record.suspended) {
+            return RejectReason.MEMBER_SUSPENDED;
+        }
+        MemberLimits limits = record.limits;
+        if (limits.maxOrderQuantity() > 0 && quantity > limits.maxOrderQuantity()) {
+            return RejectReason.RISK_ORDER_QUANTITY;
+        }
+        long price = notionalPrice != 0 ? notionalPrice : lastTradePrice;
+        if (limits.maxOrderNotional() > 0 && price != 0 && price * quantity > limits.maxOrderNotional()) {
+            return RejectReason.RISK_ORDER_NOTIONAL;
+        }
+        if (limits.priceCollarBps() > 0 && collarPrice != 0 && lastTradePrice != 0
+                && exceedsBps(Math.abs(collarPrice - lastTradePrice), lastTradePrice, limits.priceCollarBps())) {
+            return RejectReason.RISK_PRICE_COLLAR;
+        }
+        Exposure resting = book.exposureOf(currentMember);
+        Exposure parked = parkedExposures.get(currentMember);
+        long openOrders = (resting == null ? 0 : resting.orders) + (parked == null ? 0 : parked.orders);
+        if (!replacing && limits.maxOpenOrders() > 0 && openOrders >= limits.maxOpenOrders()) {
+            return RejectReason.RISK_OPEN_ORDERS;
+        }
+        if (limits.maxNetPosition() > 0) {
+            boolean buy = side == Side.BUY;
+            long open = (resting == null ? 0 : buy ? resting.buyQuantity : resting.sellQuantity)
+                    + (parked == null ? 0 : buy ? parked.buyQuantity : parked.sellQuantity) - replacedQuantity;
+            long worst = (buy ? record.netPosition : -record.netPosition) + open + quantity;
+            if (worst > limits.maxNetPosition()) {
+                return RejectReason.RISK_POSITION;
+            }
+        }
+        return null;
+    }
+
+    /** Whether {@code distance} is more than {@code bps} basis points of {@code base}, without overflow. */
+    private static boolean exceedsBps(long distance, long base, long bps) {
+        return java.math.BigInteger.valueOf(distance).multiply(java.math.BigInteger.valueOf(10_000))
+                .compareTo(java.math.BigInteger.valueOf(base).multiply(java.math.BigInteger.valueOf(bps))) > 0;
+    }
+
+    private void onSetMemberLimits(SetMemberLimits set, List<Event> events) {
+        if (set.memberId() <= 0 || !set.limits().isValid()) {
+            events.add(new MemberCommandRejected(nextSequence++, set.memberId(), RejectReason.INVALID_MEMBER_LIMITS));
+            return;
+        }
+        member(set.memberId()).limits = set.limits();
+        events.add(new MemberLimitsChanged(nextSequence++, set.memberId(), set.limits()));
+    }
+
+    private void onSuspend(SuspendMember suspend, List<Event> events) {
+        MemberRecord record = members.get(suspend.memberId());
+        if (suspend.memberId() <= 0 || (record != null && record.suspended)) {
+            events.add(new MemberCommandRejected(nextSequence++, suspend.memberId(), RejectReason.INVALID_MEMBER));
+            return;
+        }
+        member(suspend.memberId()).suspended = true;
+        List<Order> resting = book.ordersOf(suspend.memberId());
+        List<ParkedStop> stops = parkedStops.values().stream().filter(s -> s.memberId() == suspend.memberId()).toList();
+        events.add(new MemberSuspended(nextSequence++, suspend.memberId(), resting.size() + stops.size()));
+        int r = 0;
+        int s = 0;
+        while (r < resting.size() || s < stops.size()) {                           // in order of order ID
+            boolean takeResting = s >= stops.size()
+                    || (r < resting.size() && resting.get(r).orderId < stops.get(s).orderId());
+            if (takeResting) {
+                Order order = resting.get(r++);
+                book.remove(order.orderId);
+                events.add(new OrderCancelled(
+                        nextSequence++, order.orderId, order.remainingQuantity, CancelReason.KILL_SWITCH));
+            } else {
+                ParkedStop stop = removeParked(stops.get(s++).orderId());
+                events.add(new OrderCancelled(nextSequence++, stop.orderId(), stop.quantity(), CancelReason.KILL_SWITCH));
+            }
+        }
+    }
+
+    private void onResume(ResumeMember resume, List<Event> events) {
+        MemberRecord record = members.get(resume.memberId());
+        if (record == null || !record.suspended) {
+            events.add(new MemberCommandRejected(nextSequence++, resume.memberId(), RejectReason.INVALID_MEMBER));
+            return;
+        }
+        record.suspended = false;
+        events.add(new MemberResumed(nextSequence++, resume.memberId()));
     }
 
     /** Whether the volatility band applies right now (VI-002). */
@@ -528,7 +733,7 @@ public final class MatchingEngine {
      *
      * @return the taker's unfilled quantity
      */
-    private long match(long takerOrderId, Side takerSide, long limitPriceTicks, long quantity,
+    private long match(long takerOrderId, long takerMember, Side takerSide, long limitPriceTicks, long quantity,
             SelfTradeInstruction selfTrade, List<Event> events) {
         Side makerSide = takerSide.opposite();
         long remaining = quantity;
@@ -569,7 +774,8 @@ public final class MatchingEngine {
             commandHighTrade = Math.max(commandHighTrade, lastTradePrice);
             events.add(new TradeExecuted(
                     nextSequence++, takerOrderId, maker.orderId, takerSide,
-                    level.priceTicks(), fill, remaining, maker.remainingQuantity));
+                    level.priceTicks(), fill, remaining, maker.remainingQuantity, takerMember, maker.memberId));
+            traded(takerMember, takerSide, maker.memberId, fill);
             if (replenished) {
                 events.add(new OrderReplenished(
                         nextSequence++, maker.orderId, maker.side, maker.priceTicks, maker.displayed));
