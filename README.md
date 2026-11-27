@@ -454,6 +454,22 @@ Book            3 resting orders
 Verification    OK: 5 event batches identical to the event journal
 ```
 
+### Running it in production
+
+The venue is packaged as a container image (`Dockerfile`) and a Helm chart (`deploy/helm/lob-engine`): one
+replica with its journal on a persistent volume, startup, liveness and readiness probes, and a
+`ServiceMonitor`. `docker compose -f deploy/docker-compose.yml up --build` starts it with Prometheus and Grafana (in the `dev`
+profile, without authentication: local use only).
+
+| Endpoint | What it says |
+|---|---|
+| `/actuator/health/liveness`, `/actuator/health/readiness` | `UP` or `DOWN`, without credentials. Readiness is `DOWN` while an instrument is halted |
+| `/actuator/prometheus` | Command time, trades, rejections, interruptions, queue depth and halts per instrument (`READ` role) |
+
+Every alert links to the [runbook](docs/operations/runbook.md); metrics are listed in
+[observability](docs/operations/observability.md). Failover is designed but not built
+([ADR-0018](docs/adr/0018-operations-and-high-availability.md)).
+
 ---
 
 ## Testing strategy
@@ -509,7 +525,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅; group commit, load test, GC study | ⏳ |
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; RTS 22 reports, surveillance | ⏳ |
 | 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅; TLS and mTLS (phase 9), OIDC | ⏳ |
-| 9 | **Operations & resilience**: observability, failover, runbooks, chaos tests | |
+| 9 | **Operations & resilience**: [Prometheus metrics, probes and alerts](docs/operations/observability.md) ✅, [runbook](docs/operations/runbook.md) ✅, one writer per journal ✅, soak test ✅, container image, compose stack and Helm chart ✅, [HA design](docs/adr/0018-operations-and-high-availability.md) ✅; replication and failover, chaos tests | ⏳ |
 | 10 | **Post-trade & analytics** *(optional)* | |
 
 ---
@@ -527,6 +543,9 @@ Order_Book/
 ├── docs/adr/           architecture decision records
 ├── docs/rulebook/      venue rules, cited by tests
 ├── docs/interfaces/    file and wire formats
+├── docs/operations/    runbook, metrics and alerts
+├── deploy/             compose stack, Helm chart, Prometheus alerts, Grafana dashboard
+├── Dockerfile          container image (non-root, journal on a volume)
 ├── docs/ROADMAP.md     phased plan and exit criteria
 ├── .github/workflows/  CI
 └── mvnw, mvnw.cmd      Maven wrapper
