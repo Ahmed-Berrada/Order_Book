@@ -48,6 +48,8 @@ using each instrument's tick size. Notional computations use `Math.multiplyExact
 `TreeMap<Long, PriceLevel>` holds each side, `ArrayDeque<Order>` holds each level, and
 `HashMap<Long, Order>` indexes orders by ID. Cancel is **O(n) within a price level in v1**.
 This is accepted on purpose: it will be measured with JMH (step 3) and optimised (step 4).
+*Update, [ADR-0016](0016-performance-and-the-queue.md): measured, and replaced by an intrusive doubly linked
+list per level; cancel is O(1).*
 
 ### 6. Determinism
 
