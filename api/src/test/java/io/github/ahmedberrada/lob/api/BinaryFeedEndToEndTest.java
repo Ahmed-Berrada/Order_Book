@@ -38,7 +38,7 @@ class BinaryFeedEndToEndTest {
             servicePort = tcp.getLocalPort();
         }
         try (ConfigurableApplicationContext venue = new SpringApplicationBuilder(LobEngineApplication.class)
-                .run("--server.port=0", "--lob.data-directory=" + directory, "--lob.fsync=OS",
+                .run("--server.port=0", "--lob.data-directory=" + directory, "--lob.fsync=OS", "--lob.security.enabled=false",
                         "--lob.fix.enabled=false", "--lob.binary-feed.stream-port=" + streamPort,
                         "--lob.binary-feed.service-port=" + servicePort);
                 BinaryFeedClient consumer = new BinaryFeedClient(new InetSocketAddress(loopback, streamPort),

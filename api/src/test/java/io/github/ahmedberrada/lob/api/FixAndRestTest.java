@@ -42,7 +42,7 @@ class FixAndRestTest {
             fixPort = socket.getLocalPort();
         }
         try (ConfigurableApplicationContext venue = new SpringApplicationBuilder(LobEngineApplication.class)
-                .run("--server.port=0", "--lob.data-directory=" + directory.resolve("venue"), "--lob.fsync=OS",
+                .run("--server.port=0", "--lob.data-directory=" + directory.resolve("venue"), "--lob.fsync=OS", "--lob.security.enabled=false",
                         "--lob.fix.enabled=true", "--lob.fix.port=" + fixPort, "--lob.binary-feed.enabled=false");
                 FixTestClient member = new FixTestClient("MEMBER1", fixPort, directory.resolve("client")).logon()) {
 
@@ -75,7 +75,7 @@ class FixAndRestTest {
             fixPort = socket.getLocalPort();
         }
         try (ConfigurableApplicationContext venue = new SpringApplicationBuilder(LobEngineApplication.class)
-                .run("--server.port=0", "--lob.data-directory=" + directory.resolve("venue"), "--lob.fsync=OS",
+                .run("--server.port=0", "--lob.data-directory=" + directory.resolve("venue"), "--lob.fsync=OS", "--lob.security.enabled=false",
                         "--lob.fix.enabled=true", "--lob.fix.port=" + fixPort, "--lob.binary-feed.enabled=false",
                         "--lob.fix.self-trade-mode=CANCEL_OLDEST");
                 FixTestClient member = new FixTestClient("MEMBER1", fixPort, directory.resolve("client")).logon()) {
