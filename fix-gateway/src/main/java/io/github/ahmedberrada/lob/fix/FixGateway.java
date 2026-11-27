@@ -39,7 +39,7 @@ public final class FixGateway implements AutoCloseable {
         Map<SessionID, SelfTradeInstruction> selfTrade = new HashMap<>();
         for (String member : config.memberCompIds()) {
             selfTrade.put(new SessionID(BEGIN_STRING, config.senderCompId(), member), new SelfTradeInstruction(
-                    FixGatewayConfig.selfTradeGroup(member), config.selfTradeMode()));
+                    config.memberId(member), config.selfTradeMode()));
         }
         FixApplication application = new FixApplication(service, dropCopies, selfTrade);
         service.addListener(application);

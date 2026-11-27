@@ -178,7 +178,7 @@ final class FixApplication implements Application, EventListener {
             return;
         }
         NewOrderContext context = new NewOrderContext(session, clOrdId, instrument.get(), side, lots);
-        service.submit(symbol, command, context).whenComplete((batch, failure) -> {
+        service.submit(symbol, command, memberOf(session), context).whenComplete((batch, failure) -> {
             if (failure != null) {
                 onFailure(unwrap(failure), session, clOrdId, symbol, side, quantity);
             }
@@ -211,7 +211,8 @@ final class FixApplication implements Application, EventListener {
             rejectCancel(session, order, clOrdId, origClOrdId, CxlRejReason.UNKNOWN_ORDER, "UNKNOWN_ORDER");
             return;
         }
-        service.submit(order.instrument.symbol(), new CancelOrder(order.orderId), new CancelContext(clOrdId, order))
+        service.submit(order.instrument.symbol(), new CancelOrder(order.orderId), memberOf(session),
+                new CancelContext(clOrdId, order))
                 .whenComplete((batch, failure) -> {
                     if (failure instanceof Throwable f && unwrap(f) instanceof RequestRefusedException refused) {
                         rejectCancel(session, order, clOrdId, origClOrdId, CxlRejReason.OTHER, refused.reason().name());
@@ -277,7 +278,7 @@ final class FixApplication implements Application, EventListener {
             return;
         }
         service.submit(order.instrument.symbol(), new ReplaceOrder(order.orderId, ticks, remaining),
-                        new ReplaceContext(clOrdId, origClOrdId, order))
+                        memberOf(session), new ReplaceContext(clOrdId, origClOrdId, order))
                 .whenComplete((batch, failure) -> {
                     if (failure instanceof Throwable f && unwrap(f) instanceof RequestRefusedException refused) {
                         refuseReplace(session, order, clOrdId, origClOrdId, CxlRejReason.OTHER,
@@ -516,6 +517,11 @@ final class FixApplication implements Application, EventListener {
         report(ExecutionReports.withoutOrder(ExecType.REJECTED, clOrdId, symbol, side, quantity, reason, text), session);
     }
 
+    /** The member a session acts for: its self-trade group, which is its member ID (MB-002). */
+    private long memberOf(SessionID session) {
+        return selfTrade.getOrDefault(session, SelfTradeInstruction.NONE).group();
+    }
+
     private static int ordRejReason(RejectReason reason) {
         return switch (reason) {
             case INVALID_QUANTITY -> OrdRejReason.INCORRECT_QUANTITY;
@@ -524,7 +530,9 @@ final class FixApplication implements Application, EventListener {
             case INVALID_DISPLAY_QUANTITY -> OrdRejReason.INCORRECT_QUANTITY;
             case INVALID_SELF_TRADE_GROUP -> OrdRejReason.OTHER;
             case NOT_ALLOWED_IN_PHASE -> OrdRejReason.EXCHANGE_CLOSED;                   // TP-004, TP-005
-            case INVALID_TICK_SIZE -> OrdRejReason.OTHER;
+            case RISK_ORDER_QUANTITY, RISK_ORDER_NOTIONAL, RISK_PRICE_COLLAR, RISK_OPEN_ORDERS, RISK_POSITION ->
+                    OrdRejReason.ORDER_EXCEEDS_LIMIT;                                         // RK-002
+            case INVALID_TICK_SIZE, MEMBER_SUSPENDED, INVALID_MEMBER_LIMITS, INVALID_MEMBER -> OrdRejReason.OTHER;
             case INVALID_PHASE_TRANSITION -> OrdRejReason.OTHER;
             case INVALID_PRICE, NO_LIQUIDITY, UNKNOWN_ORDER, POST_ONLY_WOULD_TRADE, STOP_PRICE_ALREADY_REACHED ->
                     OrdRejReason.OTHER;

@@ -2,6 +2,7 @@ package io.github.ahmedberrada.lob.fix;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
@@ -53,7 +54,7 @@ class FailureMappingTest {
 
     private Message reportFor(Throwable failure) throws Exception {
         when(service.instrument("AAPL")).thenReturn(Optional.of(FixVenue.AAPL));
-        when(service.submit(anyString(), any(), any())).thenReturn(CompletableFuture.failedFuture(failure));
+        when(service.submit(anyString(), any(), anyLong(), any())).thenReturn(CompletableFuture.failedFuture(failure));
         sent.clear();
         application.fromApp(Orders.market("B-" + System.nanoTime(), Side.BUY, "1"), SESSION);
         assertThat(sent).hasSize(1);
@@ -77,10 +78,10 @@ class FailureMappingTest {
     /** Places an order whose acknowledgement never arrives, and returns the context attached to it. */
     private Object pendingOrder(String clOrdId) throws Exception {
         when(service.instrument("AAPL")).thenReturn(Optional.of(FixVenue.AAPL));
-        when(service.submit(anyString(), any(), any())).thenReturn(new CompletableFuture<>());
+        when(service.submit(anyString(), any(), anyLong(), any())).thenReturn(new CompletableFuture<>());
         application.fromApp(Orders.limit(clOrdId, Side.BUY, "185.25", "10"), SESSION);
         ArgumentCaptor<Object> context = ArgumentCaptor.forClass(Object.class);
-        verify(service, atLeastOnce()).submit(anyString(), any(), context.capture());
+        verify(service, atLeastOnce()).submit(anyString(), any(), anyLong(), context.capture());
         return context.getValue();
     }
 
@@ -126,14 +127,14 @@ class FailureMappingTest {
     void refusedCancelIsACancelRejectAndUnknownCancelIsPending() throws Exception {
         acknowledgedOrder("B-1");
 
-        when(service.submit(anyString(), any(), any()))
+        when(service.submit(anyString(), any(), anyLong(), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RequestRefusedException(Reason.HALTED, "AAPL")));
         Message refused = cancel("C-1", "B-1");
         assertThat(refused.getInt(CxlRejReason.FIELD)).isEqualTo(CxlRejReason.OTHER);
         assertThat(refused.getString(Text.FIELD)).isEqualTo("HALTED");
         assertThat(refused.getString(OrderID.FIELD)).isEqualTo("AAPL-1");
 
-        when(service.submit(anyString(), any(), any()))
+        when(service.submit(anyString(), any(), anyLong(), any()))
                 .thenReturn(CompletableFuture.failedFuture(new UncheckedIOException(new IOException("disk"))));
         Message unknown = cancel("C-2", "B-1");
         assertThat(unknown.getChar(ExecType.FIELD)).isEqualTo(ExecType.PENDING_CANCEL);
