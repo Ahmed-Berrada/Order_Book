@@ -1,7 +1,5 @@
 # Rulebook: post-trade
 
-- **Status:** Draft
-
 After the trading day, the venue hands its trades to clearing and charges its members. Both are computed
 from the journals, never from the running engine: the journals are the record (RS-006, RS-007), and a
 computation that only reads them can be rerun, checked and corrected without touching trading. This
