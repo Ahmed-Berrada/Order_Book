@@ -41,4 +41,16 @@ class LatencyRunTest {
         }
         assertThat(kinds).hasSize(3);                    // limit, cancel and market orders
     }
+
+    @Test
+    void aShortSoakRecoversToTheSameStateAfterEveryRestart() throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        SoakRun.Result result = SoakRun.run(60_000_000_000L, 3_000, 10_000, new PrintStream(out));
+
+        assertThat(result.consistent()).isTrue();
+        assertThat(result.commands()).isEqualTo(10_000);
+        assertThat(result.restarts()).isEqualTo(4);                  // 3 mid-run restarts and the final recovery
+        assertThat(out.toString()).contains("state matches").doesNotContain("DIFFERS");
+    }
 }
