@@ -132,4 +132,35 @@ class PostTradeToolTest {
         assertThat(out.toString(StandardCharsets.UTF_8)).isEmpty();
         assertThat(err.toString(StandardCharsets.UTF_8)).contains("ends at command 1 of 2");
     }
+
+    @Test
+    @Rulebook("PT-008")
+    void recordsThatDoNotBalanceProduceNothing() {
+        FeeSchedule fees = FeeSchedule.parse(FEES, 2);
+        TradeRecord buy = StatementTest.record(StatementTest.MONDAY, "PTX", 1, Side.BUY, 5, "50.00", "0.01");
+        TradeRecord sell = StatementTest.record(StatementTest.MONDAY, "PTX", 2, Side.SELL, 4, "40.00", "0.01");
+        for (boolean statement : new boolean[] {false, true}) {
+            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+            assertThat(PostTradeTool.write(List.of(buy, sell), statement, fees,
+                    new PrintStream(stdout, true, StandardCharsets.UTF_8),
+                    new PrintStream(stderr, true, StandardCharsets.UTF_8))).isEqualTo(PostTradeTool.FAILED);
+            assertThat(stdout.toString(StandardCharsets.UTF_8)).isEmpty();
+            assertThat(stderr.toString(StandardCharsets.UTF_8))
+                    .isEqualTo("error: the trades do not balance on 2026-11-23: 5 lots bought but 4 sold (PT-008)"
+                            + System.lineSeparator());
+        }
+    }
+
+    @Test
+    @Rulebook("PT-010")
+    void theFormatDoesNotDependOnHowTheTimeOrTheRatesFall(@TempDir Path onTheSecond) throws IOException {
+        Journals.write(onTheSecond, Journals.MORNING - 1, List.of(                // the trade at exactly 09:00:00
+                by(1, new LimitOrder(Side.SELL, 100, 1)),
+                by(2, new LimitOrder(Side.BUY, 100, 1))));
+        assertThat(run("trades", onTheSecond.toString(), "--tick-size", "0.01",
+                "--fees", "maker=-0.20,taker=0.30,auction=0.10")).isZero();
+        assertThat(lines()).element(1).isEqualTo(
+                "PTX-4,2026-11-26,2026-11-26T09:00:00.000000Z,PTX,2,2,BUY,TAKER,100,1.00,1,1.00,0.3,0.00");
+    }
 }

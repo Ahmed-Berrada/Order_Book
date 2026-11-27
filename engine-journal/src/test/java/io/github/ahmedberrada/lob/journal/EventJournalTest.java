@@ -68,7 +68,7 @@ class EventJournalTest {
     }
 
     @Test
-    @Rulebook("RS-007")
+    @Rulebook({"RS-007", "PT-008"})
     void anEventJournalBehindItsCommandsIsRefusedAtItsEnd() throws IOException {
         write(other, CommandStream.INSTRUMENT, 1);
         write(directory, CommandStream.INSTRUMENT, 3);
@@ -99,5 +99,57 @@ class EventJournalTest {
         copy(other, directory, JournaledEngine.EVENTS_FILE);
         assertThatThrownBy(() -> EventJournal.open(directory)).isInstanceOf(JournalCorruptedException.class)
                 .hasMessageContaining("belongs to");
+    }
+
+    @Test
+    @Rulebook("PT-008")
+    void anEventJournalOfAnotherDayIsRefused() throws IOException {
+        try (JournaledEngine engine = JournaledEngine.open(other, CommandStream.INSTRUMENT, NO_SNAPSHOTS,
+                new ManualClock(2_000))) {                                       // the same commands, another day
+            engine.process(new LimitOrder(Side.SELL, 100, 2), 5);
+            engine.process(new LimitOrder(Side.BUY, 100, 2), 6);
+        }
+        write(directory, CommandStream.INSTRUMENT, 2);
+        copy(other, directory, JournaledEngine.EVENTS_FILE);
+        try (EventJournal journal = EventJournal.open(directory)) {
+            assertThatThrownBy(journal::next).isInstanceOf(JournalCorruptedException.class)
+                    .hasMessageContaining("does not belong to that command");
+        }
+    }
+
+    @Test
+    @Rulebook("PT-008")
+    void anEventBatchOfAnotherMemberIsRefused() throws IOException {
+        try (JournaledEngine engine = JournaledEngine.open(other, CommandStream.INSTRUMENT, NO_SNAPSHOTS,
+                new ManualClock(1_000))) {
+            engine.process(new LimitOrder(Side.SELL, 100, 2), 9);
+        }
+        write(directory, CommandStream.INSTRUMENT, 1);
+        copy(other, directory, JournaledEngine.EVENTS_FILE);
+        try (EventJournal journal = EventJournal.open(directory)) {
+            assertThatThrownBy(journal::next).isInstanceOf(JournalCorruptedException.class)
+                    .hasMessageContaining("timestamp or member differs");
+        }
+    }
+
+    @Test
+    void aJournalOfTheWrongKindIsRefused() throws IOException {
+        write(directory, CommandStream.INSTRUMENT, 1);
+        Files.copy(directory.resolve(JournaledEngine.COMMANDS_FILE), directory.resolve(JournaledEngine.EVENTS_FILE),
+                StandardCopyOption.REPLACE_EXISTING);
+        assertThatThrownBy(() -> EventJournal.open(directory)).isInstanceOf(JournalCorruptedException.class)
+                .hasMessageContaining("expected EVENTS");
+    }
+
+    @Test
+    void manyCommandsAreCheckedBatchByBatch() throws IOException {
+        write(directory, CommandStream.INSTRUMENT, 3_000);
+        try (EventJournal journal = EventJournal.open(directory)) {
+            long batches = 0;
+            while (journal.next() != null) {
+                batches++;
+            }
+            assertThat(batches).isEqualTo(3_000).isEqualTo(journal.commands());
+        }
     }
 }

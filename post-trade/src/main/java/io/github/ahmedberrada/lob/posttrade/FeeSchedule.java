@@ -30,6 +30,9 @@ public record FeeSchedule(BigDecimal makerBps, BigDecimal takerBps, BigDecimal a
                 throw new IllegalArgumentException("a fee rate must be between -100 and 100 basis points: " + rate);
             }
         }
+        makerBps = makerBps.stripTrailingZeros();            // 0.30 and 0.3 are one schedule, printed alike
+        takerBps = takerBps.stripTrailingZeros();
+        auctionBps = auctionBps.stripTrailingZeros();
         if (currencyScale < 0 || currencyScale > 8) {
             throw new IllegalArgumentException("currency scale must be 0 to 8: " + currencyScale);
         }

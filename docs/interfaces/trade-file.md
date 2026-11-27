@@ -23,9 +23,12 @@ java -cp "$CP" io.github.ahmedberrada.lob.posttrade.PostTradeTool statement data
 | `--fees` | Rates in basis points of the notional for `maker`, `taker` and `auction`, each between -100 and 100; negative is a rebate |
 | `--currency-scale` | Decimal places fees are rounded to (default `2`) |
 
-The tool only reads. It can run while the venue trades, but then covers only the commands recorded so far; for
-a day's file, run it after the close. It refuses, and prints nothing, if the event journal lags behind the
-command journal (open the venue once to recover it) or if the trades do not balance (PT-008). Exit codes: `0`
+The tool only reads. Run it when no commands arrive, after the close or with the venue stopped: the command and
+event journals of a command are written one after the other, so a command recorded while the tool reads makes
+the event journal look behind, and the tool refuses rather than miss trades. Run it again in that case; if it
+still refuses, the venue stopped before recording some events, and opening the venue once recovers them
+(RS-007). It also refuses an event journal that belongs to other commands (PT-008). A refusal prints nothing
+on standard output. Exit codes: `0`
 success, `1` unreadable, incomplete or unbalanced journal, `2` usage error.
 
 ## Trade file
@@ -36,7 +39,7 @@ One line per side of every trade, in the order of the trades, buyer before selle
 |---|---|---|
 | `trade_id` | `AAPL-4` | Instrument and the trade's event sequence number; the two sides share it (PT-001) |
 | `trade_date` | `2026-11-26` | UTC date of the command that made the trade (PT-005) |
-| `timestamp_utc` | `2026-11-26T09:00:00.000001Z` | The command's timestamp, ISO 8601, microseconds |
+| `timestamp_utc` | `2026-11-26T09:00:00.000001Z` | The command's timestamp, ISO 8601 in UTC, always six fractional digits |
 | `instrument` | `AAPL` | Symbol |
 | `member_id` | `2` | The member of this side |
 | `order_id` | `2` | The member's order |
@@ -46,7 +49,7 @@ One line per side of every trade, in the order of the trades, buyer before selle
 | `price` | `185.50` | Price in currency: ticks times the tick size |
 | `quantity` | `100` | Lots |
 | `notional` | `18550.00` | Price times quantity, exact |
-| `fee_rate_bps` | `0.3` | The rate applied |
+| `fee_rate_bps` | `0.3` | The rate applied, without trailing zeros (`--fees taker=0.30` prints `0.3`) |
 | `fee` | `0.56` | The member's fee; negative for a rebate (PT-007) |
 
 The counterparty is not in the file: the CCP becomes the counterparty of both sides. The venue's own record of

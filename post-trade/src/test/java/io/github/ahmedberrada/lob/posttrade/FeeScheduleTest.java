@@ -17,10 +17,15 @@ class FeeScheduleTest {
     void parsesOneRatePerLiquidityInAnyOrder() {
         FeeSchedule fees = FeeSchedule.parse(" Auction = 0.1 ,maker=-0.2,TAKER=0.30", 2);
         assertThat(fees.rate(Liquidity.MAKER)).isEqualTo("-0.2");
-        assertThat(fees.rate(Liquidity.TAKER)).isEqualTo("0.30");
+        assertThat(fees.rate(Liquidity.TAKER)).isEqualTo("0.3");          // 0.30 and 0.3 are one schedule
         assertThat(fees.rate(Liquidity.AUCTION)).isEqualTo("0.1");
         assertThat(fees.currencyScale()).isEqualTo(2);
-        assertThat(FeeSchedule.parse("maker=100,taker=-100,auction=0", 0).rate(Liquidity.TAKER)).isEqualTo("-100");
+        FeeSchedule bounds = FeeSchedule.parse("maker=100,taker=-100.00,auction=0.000", 0);
+        assertThat(bounds.rate(Liquidity.TAKER).toPlainString()).isEqualTo("-100");
+        assertThat(bounds.rate(Liquidity.MAKER).toPlainString()).isEqualTo("100");
+        assertThat(bounds.rate(Liquidity.AUCTION).toPlainString()).isEqualTo("0");
+        assertThat(FeeSchedule.parse("maker=-0.20,taker=0.30,auction=0.10", 2))
+                .isEqualTo(FeeSchedule.parse("maker=-0.2,taker=0.3,auction=0.1", 2));
     }
 
     @ParameterizedTest

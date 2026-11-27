@@ -56,11 +56,15 @@ given CCP is a mapping. The counterparty member is not in the file: the CCP beco
 both sides (novation), and members do not learn who they traded with. The venue's own records
 (RTS 24 export) keep it.
 
-### 7. A balance check refuses bad input
+### 7. Refuse what clearing would reject, before writing anything
 
-A trade file that does not balance would be rejected by clearing; the tool refuses it first (PT-008). With
-a correct engine it cannot happen, since every trade gives one buy and one sell. The check guards against
-a damaged or mismatched journal and costs one pass.
+Two checks run before a line is printed (PT-008). The first catches bad input: each event batch must carry
+the timestamp and member of the command with its sequence number, so an event journal copied from another
+day or directory is refused, and so is one that lags behind its commands. The second, that each day's
+trades balance, cannot fail with this code, since every trade gives one buy and one sell record; it is an
+assertion on the tool's own output, kept because a file that does not balance must never reach a CCP and
+it costs one pass. The output is printed only once everything is computed, so a refusal leaves no partial
+file.
 
 ## Not done
 

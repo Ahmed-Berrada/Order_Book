@@ -5,6 +5,8 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -34,6 +36,10 @@ public final class PostTradeTool {
     /** Columns of the statement. */
     public static final String STATEMENT_HEADER = "trade_date,instrument,member_id,records,bought_quantity,"
             + "bought_notional,sold_quantity,sold_notional,fees";
+
+    /** Always six fractional digits: the journal's microseconds, in a fixed width a parser can rely on. */
+    private static final DateTimeFormatter TIMESTAMP =
+            DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSS'Z'").withZone(ZoneOffset.UTC);
 
     private static final String USAGE_TEXT = "usage: lob-post-trade trades|statement <instrument-directory> "
             + "--tick-size <value> --fees maker=<bps>,taker=<bps>,auction=<bps> [--currency-scale <digits>]";
@@ -65,28 +71,34 @@ public final class PostTradeTool {
             err.println("error: " + e.getMessage());
             return FAILED;
         }
+        return write(records, arguments.statement(), arguments.fees(), out, err);
+    }
+
+    /** Prints the file, or nothing if the records do not balance (PT-008). */
+    static int write(List<TradeRecord> records, boolean statement, FeeSchedule fees, PrintStream out,
+            PrintStream err) {
         Optional<String> imbalance = Balance.check(records);
         if (imbalance.isPresent()) {
             err.println("error: the trades do not balance on " + imbalance.get() + " (PT-008)");
             return FAILED;
         }
-        if (arguments.statement()) {
+        if (statement) {
             out.println(STATEMENT_HEADER);
             for (Statement line : Statement.of(records)) {
                 out.println(String.join(",", line.tradeDate().toString(), line.instrument(),
                         Long.toString(line.memberId()), Long.toString(line.records()),
                         Long.toString(line.boughtQuantity()), line.boughtNotional().toPlainString(),
                         Long.toString(line.soldQuantity()), line.soldNotional().toPlainString(),
-                        line.fees().setScale(arguments.fees().currencyScale()).toPlainString()));
+                        line.fees().setScale(fees.currencyScale()).toPlainString()));
             }
         } else {
             out.println(TRADES_HEADER);
             for (TradeRecord r : records) {
-                out.println(String.join(",", r.tradeId(), r.tradeDate().toString(), r.timestamp().toString(),
+                out.println(String.join(",", r.tradeId(), r.tradeDate().toString(), TIMESTAMP.format(r.timestamp()),
                         r.instrument(), Long.toString(r.memberId()), Long.toString(r.orderId()), r.side().name(),
                         r.liquidity().name(), Long.toString(r.priceTicks()), r.price().toPlainString(),
                         Long.toString(r.quantity()), r.notional().toPlainString(),
-                        arguments.fees().rate(r.liquidity()).toPlainString(), r.fee().toPlainString()));
+                        fees.rate(r.liquidity()).toPlainString(), r.fee().toPlainString()));
             }
         }
         return OK;

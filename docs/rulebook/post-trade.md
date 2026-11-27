@@ -40,7 +40,8 @@ the trade (RS-006). The engine reads no clock (CT-015 needs it to be determinist
 
 **PT-006: Schedule.** A fee schedule gives one rate per liquidity (`MAKER`, `TAKER`, `AUCTION`), in basis
 points of the notional, and the number of decimal places of the currency. A rate may be negative: the
-member is paid a rebate. A rate is between -100 and 100 basis points.
+member is paid a rebate. A rate is between -100 and 100 basis points. Rates that differ only in trailing
+zeros (`0.30`, `0.3`) are the same schedule and give the same output.
 
 **PT-007: Fee of a record.** The fee of a record is its notional times the rate of its liquidity divided
 by 10,000, rounded to the currency's decimal places, half to even. Each record is rounded once, on its
@@ -48,9 +49,15 @@ own; totals are sums of rounded fees, so a statement always equals the sum of it
 
 ## Checks and statements
 
-**PT-008: Balance.** For each instrument, the quantity bought equals the quantity sold and the notional
-bought equals the notional sold, in total and per trade date. A journal whose trades do not balance is
-refused: no file is produced and the tool reports the first imbalance.
+**PT-008: Consistency.** The output is produced only from journals that agree with each other and only if
+it balances; otherwise nothing is printed and the tool reports why.
+
+- Every event batch belongs to the command of its sequence number, with the same timestamp and member, and
+  there is one batch per command: an event journal copied from another day or directory, or one that has
+  not yet recorded every command's events (RS-007), is refused.
+- For each trade date, the quantity bought equals the quantity sold and the notional bought equals the
+  notional sold. Each trade gives one buy and one sell record, so this holds by construction; it is checked
+  before anything is written so that a defect in the tool itself can never reach clearing.
 
 **PT-009: Statement.** A member's statement gives, per trade date and instrument: the number of records,
 the quantity and notional bought and sold, and the total fee. It is computed from the same records as the
