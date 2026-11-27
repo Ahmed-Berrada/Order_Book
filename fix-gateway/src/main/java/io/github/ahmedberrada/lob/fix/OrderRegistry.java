@@ -92,6 +92,12 @@ final class OrderRegistry {
             ordStatus = quickfix.field.OrdStatus.CANCELED;
         }
 
+        /** The order expired at the end of the day (DY-002). */
+        synchronized void expire() {
+            leavesQuantity = 0;
+            ordStatus = quickfix.field.OrdStatus.EXPIRED;
+        }
+
         synchronized long cumulativeQuantity() {
             return cumulativeQuantity;
         }

@@ -125,6 +125,13 @@ final class ExecutionReports {
         return report;
     }
 
+    /** A DAY order expired when the instrument closed (DY-002): ExecType and OrdStatus Expired. */
+    static ExecutionReport expired(FixOrder order, long eventSequence, long timestampMicros) {
+        ExecutionReport report = of(order, ExecType.EXPIRED, eventSequence, timestampMicros);
+        report.setString(Text.FIELD, "DAY_EXPIRED");
+        return report;
+    }
+
     /**
      * A stop order was triggered (ST-005). FIX 4.4 has no ExecType for it (5.0 added {@code L}), so it is
      * reported as Restated, with reason Other and {@code Text=STOP_TRIGGERED}.

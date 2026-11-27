@@ -7,7 +7,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.ahmedberrada.lob.core.Instrument;
 import io.github.ahmedberrada.lob.core.Rulebook;
+import io.github.ahmedberrada.lob.core.TickBand;
 import java.math.BigDecimal;
+import java.util.List;
 import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.constraints.LongRange;
@@ -19,6 +21,36 @@ class InstrumentConfigTest {
 
     private static final InstrumentConfig AAPL =
             new InstrumentConfig("AAPL", new BigDecimal("0.01"), 1_000_000, new BigDecimal("100000.00"));
+
+    @Test
+    @Rulebook({"TK-001", "VI-002"})
+    void convertsTheTickRegimeAndTheVolatilityBandToTicks() {
+        InstrumentConfig regime = new InstrumentConfig("X", new BigDecimal("0.01"), 10, new BigDecimal("1000.00"),
+                List.of(new InstrumentConfig.PriceBand(new BigDecimal("0.01"), new BigDecimal("0.01")),
+                        new InstrumentConfig.PriceBand(new BigDecimal("50.00"), new BigDecimal("0.05"))), 250);
+
+        Instrument instrument = regime.instrument();
+
+        assertThat(instrument.tickBands()).containsExactly(new TickBand(1, 1), new TickBand(5_000, 5));
+        assertThat(instrument.volatilityBandBps()).isEqualTo(250);
+        assertThat(AAPL.instrument().tickBands()).containsExactly(new TickBand(1, 1));
+        assertThat(AAPL.instrument().volatilityBandBps()).isZero();
+    }
+
+    @Test
+    @Rulebook("TK-001")
+    void refusesARegimeThatIsNotOnTheTickGridOrTooLarge() {
+        BigDecimal one = BigDecimal.ONE;
+        assertThatIllegalArgumentException().isThrownBy(() -> new InstrumentConfig("X", new BigDecimal("0.01"), 10,
+                new BigDecimal("1000.00"), List.of(new InstrumentConfig.PriceBand(one, new BigDecimal("0.005"))), 0)
+                .instrument()).withMessageContaining("multiple of the tick size");
+        assertThatIllegalArgumentException().isThrownBy(() -> new InstrumentConfig("X", new BigDecimal("1E-30"), 10,
+                new BigDecimal("1000.00"), List.of(new InstrumentConfig.PriceBand(
+                        new BigDecimal("1E+30"), one)), 0).instrument());
+        assertThatNullPointerException().isThrownBy(() -> new InstrumentConfig("X", one, 1, one, null, 0));
+        assertThatNullPointerException().isThrownBy(() -> new InstrumentConfig.PriceBand(null, one));
+        assertThatNullPointerException().isThrownBy(() -> new InstrumentConfig.PriceBand(one, null));
+    }
 
     @Test
     @Rulebook("OE-002")

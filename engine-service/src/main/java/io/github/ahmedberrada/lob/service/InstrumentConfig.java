@@ -1,7 +1,10 @@
 package io.github.ahmedberrada.lob.service;
 
 import io.github.ahmedberrada.lob.core.Instrument;
+import io.github.ahmedberrada.lob.core.TickBand;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -13,8 +16,28 @@ import java.util.regex.Pattern;
  * @param tickSize         smallest price increment, e.g. {@code 0.01}
  * @param maxOrderQuantity largest accepted order, in lots
  * @param maxPrice         largest accepted price; a multiple of the tick size
+ * @param tickRegime       bands of coarser steps at higher prices, lowest first; empty for the tick size
+ *                         everywhere (TK-001)
+ * @param volatilityBandBps largest move from the reference price, in basis points; 0 for none (VI-002)
  */
-public record InstrumentConfig(String symbol, BigDecimal tickSize, long maxOrderQuantity, BigDecimal maxPrice) {
+public record InstrumentConfig(String symbol, BigDecimal tickSize, long maxOrderQuantity, BigDecimal maxPrice,
+        List<PriceBand> tickRegime, long volatilityBandBps) {
+
+    /**
+     * One band of the tick-size regime (TK-001): prices from {@code fromPrice} up to the next band's start
+     * move in steps of {@code step}. Both are multiples of the instrument's tick size.
+     */
+    public record PriceBand(BigDecimal fromPrice, BigDecimal step) {
+        public PriceBand {
+            Objects.requireNonNull(fromPrice, "fromPrice");
+            Objects.requireNonNull(step, "step");
+        }
+    }
+
+    /** An instrument with one tick size everywhere and no volatility band. */
+    public InstrumentConfig(String symbol, BigDecimal tickSize, long maxOrderQuantity, BigDecimal maxPrice) {
+        this(symbol, tickSize, maxOrderQuantity, maxPrice, List.of(), 0);
+    }
 
     private static final Pattern SYMBOL = Pattern.compile("[A-Z0-9._-]{1,16}");
 
@@ -22,6 +45,8 @@ public record InstrumentConfig(String symbol, BigDecimal tickSize, long maxOrder
         Objects.requireNonNull(symbol, "symbol");
         Objects.requireNonNull(tickSize, "tickSize");
         Objects.requireNonNull(maxPrice, "maxPrice");
+        Objects.requireNonNull(tickRegime, "tickRegime");
+        tickRegime = List.copyOf(tickRegime);
         if (!SYMBOL.matcher(symbol).matches() || symbol.equals(".") || symbol.equals("..")) {
             throw new IllegalArgumentException("symbol must match " + SYMBOL + ": " + symbol);
         }
@@ -41,7 +66,26 @@ public record InstrumentConfig(String symbol, BigDecimal tickSize, long maxOrder
         } catch (ArithmeticException e) {
             throw new IllegalArgumentException("maxPrice is too large for the tick size: " + maxPrice, e);
         }
-        return new Instrument(symbol, maxOrderQuantity, maxPriceTicks);
+        List<TickBand> bands = new ArrayList<>();
+        for (PriceBand band : tickRegime) {
+            bands.add(new TickBand(ticks(band.fromPrice()), ticks(band.step())));
+        }
+        if (bands.isEmpty()) {
+            bands.add(new TickBand(1, 1));
+        }
+        return new Instrument(symbol, maxOrderQuantity, maxPriceTicks, bands, volatilityBandBps);
+    }
+
+    /** A price or step that must be a whole number of ticks, as configuration. */
+    private long ticks(BigDecimal value) {
+        try {
+            if (value.remainder(tickSize).signum() != 0) {
+                throw new IllegalArgumentException("not a multiple of the tick size " + tickSize + ": " + value);
+            }
+            return value.divide(tickSize).longValueExact();
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException("too large for the tick size: " + value, e);
+        }
     }
 
     /**

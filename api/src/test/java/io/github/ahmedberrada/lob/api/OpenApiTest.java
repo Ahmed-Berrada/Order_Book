@@ -39,7 +39,7 @@ class OpenApiTest {
         document.extractingPath("$.components.schemas.OrderRequest.required").asArray()
                 .containsExactlyInAnyOrder("side", "type", "quantity");
         document.extractingPath("$.components.schemas.OrderRequest.properties.timeInForce.enum").asArray()
-                .containsExactly("GTC", "IOC", "FOK");
+                .containsExactly("GTC", "IOC", "FOK", "DAY");
         document.extractingPath("$.components.schemas.ReplaceRequest.required").asArray()
                 .containsExactlyInAnyOrder("price", "quantity");
     }

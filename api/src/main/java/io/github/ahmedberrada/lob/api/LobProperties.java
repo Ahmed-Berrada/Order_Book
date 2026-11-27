@@ -93,11 +93,19 @@ public record LobProperties(
             @NotBlank String symbol,
             @NotNull @Positive BigDecimal tickSize,
             @Positive long maxOrderQuantity,
-            @NotNull @Positive BigDecimal maxPrice) {
+            @NotNull @Positive BigDecimal maxPrice,
+            @DefaultValue List<@Valid TickBandProperties> tickRegime,
+            @PositiveOrZero long volatilityBandBps) {
 
         InstrumentConfig toConfig() {
-            return new InstrumentConfig(symbol, tickSize, maxOrderQuantity, maxPrice);
+            return new InstrumentConfig(symbol, tickSize, maxOrderQuantity, maxPrice,
+                    tickRegime.stream().map(b -> new InstrumentConfig.PriceBand(b.fromPrice(), b.step())).toList(),
+                    volatilityBandBps);
         }
+    }
+
+    /** One band of an instrument's tick-size regime. */
+    public record TickBandProperties(@NotNull @Positive BigDecimal fromPrice, @NotNull @Positive BigDecimal step) {
     }
 
     List<InstrumentConfig> instrumentConfigs() {
