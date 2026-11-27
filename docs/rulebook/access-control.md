@@ -41,3 +41,13 @@ never with a secret.
 
 **AC-007: FIX logon.** A FIX session logs on only if its Logon `Password` is accepted for its CompID; the
 reason of a refusal is not revealed to the peer. Drop-copy sessions authenticate the same way.
+
+## Browsers
+
+**AC-008: No writes from another site.** A browser that has answered a Basic challenge resends the credentials
+on its own, so a page on another site could make it enter or cancel orders for its user (cross-site request
+forgery). A request that changes something (any method but `GET`, `HEAD`, `OPTIONS` and `TRACE`) is refused
+with `403` when the browser marks it as coming from elsewhere: a `Sec-Fetch-Site` other than `same-origin` or
+`none`, or, from a browser too old for Fetch Metadata, an `Origin` header without `Sec-Fetch-Site`. This holds
+with security on or off. Clients that are not browsers send neither header and are not affected.
+

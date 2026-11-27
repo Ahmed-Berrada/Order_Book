@@ -21,8 +21,15 @@ caller act as the wrong member, but cannot make the engine do anything a member 
 Basic authentication is the simplest scheme that works for machine clients, has no session to steal and
 needs no token service. It is only as private as the channel: TLS is required for anything but loopback
 (deployment, phase 9). OAuth 2 / OIDC for people (an operator console) is a different problem and not needed
-for machine members; the roadmap keeps it for when a console exists. CSRF protection is off because no
-cookie or session carries authority: a browser cannot attach the Basic header on its own.
+for machine members; the roadmap keeps it for when a console exists.
+
+**Cross-site request forgery.** A first version of this ADR said CSRF protection was unnecessary because no
+cookie carries authority. That was wrong, and CodeQL flagged it: a browser that has answered a Basic challenge
+caches the credentials and sends them again, on its own, to the same origin, so another site can make it act.
+The token-based defence does not fit a stateless API for machine clients, so the CSRF filter is kept but only
+for writes that the browser itself marks as cross-site (Fetch Metadata `Sec-Fetch-Site`, or `Origin` from older
+browsers, AC-008). Such a request cannot carry a token, because nothing hands one out, and is refused. Machine
+clients send neither header and are not affected.
 
 ### 3. Roles are few and coarse
 

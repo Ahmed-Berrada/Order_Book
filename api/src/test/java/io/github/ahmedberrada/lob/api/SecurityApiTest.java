@@ -85,6 +85,36 @@ class SecurityApiTest {
     }
 
     @Test
+    @Rulebook("AC-008")
+    void aBrowserCannotBeMadeToWriteFromAnotherSite() {
+        String body = "{\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"10.00\",\"quantity\":1}";
+        for (String site : new String[] {"cross-site", "same-site", "something-new"}) {
+            assertThat(mvc.post().uri(AAPL + "/orders").contentType(MediaType.APPLICATION_JSON).content(body)
+                    .header(HttpHeaders.AUTHORIZATION, basic("alice")).header("Sec-Fetch-Site", site))
+                    .as(site).hasStatus(HttpStatus.FORBIDDEN);
+        }
+        assertThat(mvc.post().uri(AAPL + "/orders").contentType(MediaType.APPLICATION_JSON).content(body)
+                .header(HttpHeaders.AUTHORIZATION, basic("alice")).header("Origin", "https://evil.example"))
+                .hasStatus(HttpStatus.FORBIDDEN);                              // an old browser: Origin only
+        assertThat(mvc.put().uri("/api/v1/members/2/suspension").header(HttpHeaders.AUTHORIZATION, basic("admin"))
+                .header("Sec-Fetch-Site", "cross-site")).hasStatus(HttpStatus.FORBIDDEN);
+        assertThat(mvc.delete().uri(AAPL + "/orders/1").header(HttpHeaders.AUTHORIZATION, basic("alice"))
+                .header("Sec-Fetch-Site", "cross-site")).hasStatus(HttpStatus.FORBIDDEN);
+
+        // the venue's own pages, the user's own action, and machine clients
+        assertThat(mvc.post().uri(AAPL + "/orders").contentType(MediaType.APPLICATION_JSON).content(body)
+                .header(HttpHeaders.AUTHORIZATION, basic("alice")).header("Sec-Fetch-Site", "same-origin"))
+                .hasStatus(HttpStatus.CREATED);
+        assertThat(mvc.post().uri(AAPL + "/orders").contentType(MediaType.APPLICATION_JSON).content(body)
+                .header(HttpHeaders.AUTHORIZATION, basic("alice")).header("Sec-Fetch-Site", "none"))
+                .hasStatus(HttpStatus.CREATED);
+        assertThat(order("alice", null, 1)).hasStatus(HttpStatus.CREATED);
+        // reading across sites is not blocked here: the browser keeps the answer from the other site
+        assertThat(mvc.get().uri(AAPL + "/book").header(HttpHeaders.AUTHORIZATION, basic("reader"))
+                .header("Sec-Fetch-Site", "cross-site")).hasStatusOk();
+    }
+
+    @Test
     @Rulebook("AC-004")
     void rolesLimitWhatACallerMayDo() {
         // READ: queries only
