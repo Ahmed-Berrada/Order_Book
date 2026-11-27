@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import quickfix.Application;
 import quickfix.FieldNotFound;
 import quickfix.Message;
+import quickfix.RejectLogon;
 import quickfix.Session;
 import quickfix.SessionID;
 import quickfix.SessionNotFound;
@@ -55,6 +56,7 @@ import quickfix.field.OrdStatus;
 import quickfix.field.OrdType;
 import quickfix.field.OrderQty;
 import quickfix.field.OrigClOrdID;
+import quickfix.field.Password;
 import quickfix.field.Price;
 import quickfix.field.RefMsgType;
 import quickfix.field.RefSeqNum;
@@ -91,6 +93,7 @@ final class FixApplication implements Application, EventListener {
     private final List<SessionID> dropCopies;
     /** The self-trade instruction of each member session; a session not listed has none (SP-001). */
     private final Map<SessionID, SelfTradeInstruction> selfTrade;
+    private final LogonAuthenticator authenticator;
     private final OrderRegistry registry = new OrderRegistry();
 
     /** Attached to a NewOrderSingle's command, so its events can be reported to its sender. */
@@ -107,7 +110,12 @@ final class FixApplication implements Application, EventListener {
     }
 
     FixApplication(MatchingService service, List<SessionID> dropCopies, Map<SessionID, SelfTradeInstruction> selfTrade) {
-        this(service, FixApplication::sendToTarget, dropCopies, selfTrade);
+        this(service, dropCopies, selfTrade, LogonAuthenticator.ALLOW_ALL);
+    }
+
+    FixApplication(MatchingService service, List<SessionID> dropCopies, Map<SessionID, SelfTradeInstruction> selfTrade,
+            LogonAuthenticator authenticator) {
+        this(service, FixApplication::sendToTarget, dropCopies, selfTrade, authenticator);
     }
 
     FixApplication(MatchingService service, Sender sender) {
@@ -116,6 +124,12 @@ final class FixApplication implements Application, EventListener {
 
     FixApplication(MatchingService service, Sender sender, List<SessionID> dropCopies,
             Map<SessionID, SelfTradeInstruction> selfTrade) {
+        this(service, sender, dropCopies, selfTrade, LogonAuthenticator.ALLOW_ALL);
+    }
+
+    FixApplication(MatchingService service, Sender sender, List<SessionID> dropCopies,
+            Map<SessionID, SelfTradeInstruction> selfTrade, LogonAuthenticator authenticator) {
+        this.authenticator = authenticator;
         this.service = service;
         this.sender = sender;
         this.dropCopies = List.copyOf(dropCopies);
@@ -590,8 +604,17 @@ final class FixApplication implements Application, EventListener {
     public void toAdmin(Message message, SessionID session) {
     }
 
+    /** A Logon must carry a password the authenticator accepts; nothing about the attempt but its CompID is logged. */
     @Override
-    public void fromAdmin(Message message, SessionID session) {
+    public void fromAdmin(Message message, SessionID session) throws FieldNotFound, RejectLogon {
+        if (!MsgType.LOGON.equals(message.getHeader().getString(MsgType.FIELD))) {
+            return;
+        }
+        String password = message.isSetField(Password.FIELD) ? message.getString(Password.FIELD) : null;
+        if (!authenticator.authenticate(session.getTargetCompID(), password)) {
+            LOG.warn("FIX logon refused for {}: authentication failed", session.getTargetCompID());
+            throw new RejectLogon("authentication failed");
+        }
     }
 
     @Override

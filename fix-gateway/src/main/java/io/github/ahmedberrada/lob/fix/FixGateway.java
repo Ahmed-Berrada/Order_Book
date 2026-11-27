@@ -32,7 +32,14 @@ public final class FixGateway implements AutoCloseable {
 
     /** Starts accepting member connections. */
     public static FixGateway start(MatchingService service, FixGatewayConfig config) throws ConfigError {
+        return start(service, config, LogonAuthenticator.ALLOW_ALL);
+    }
+
+    /** Starts accepting member connections; a session logs on only if the authenticator accepts it. */
+    public static FixGateway start(MatchingService service, FixGatewayConfig config,
+            LogonAuthenticator authenticator) throws ConfigError {
         Objects.requireNonNull(service, "service");
+        Objects.requireNonNull(authenticator, "authenticator");
         SessionSettings settings = settings(config);
         List<SessionID> dropCopies = config.dropCopyCompIds().stream()
                 .map(target -> new SessionID(BEGIN_STRING, config.senderCompId(), target)).toList();
@@ -41,7 +48,7 @@ public final class FixGateway implements AutoCloseable {
             selfTrade.put(new SessionID(BEGIN_STRING, config.senderCompId(), member), new SelfTradeInstruction(
                     config.memberId(member), config.selfTradeMode()));
         }
-        FixApplication application = new FixApplication(service, dropCopies, selfTrade);
+        FixApplication application = new FixApplication(service, dropCopies, selfTrade, authenticator);
         service.addListener(application);
         Acceptor acceptor = new ThreadedSocketAcceptor(application, new FileStoreFactory(settings), settings,
                 new SLF4JLogFactory(settings), new DefaultMessageFactory());

@@ -1,0 +1,5 @@
+# Local development only: no authentication. Anyone who reaches the ports is the operator (AC-003).
+# Start with:  ./mvnw -pl api spring-boot:run -Dspring-boot.run.profiles=dev
+lob:
+  security:
+    enabled: false

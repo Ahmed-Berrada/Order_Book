@@ -41,7 +41,7 @@ class InstrumentController {
 
     /**
      * Moves an instrument to another trading phase (TP-002). Until members and authentication exist
-     * (phases 5 and 8) this is an operator action that anyone who reaches the port can take.
+     * this needs the ADMIN role (AC-004).
      */
     @PutMapping("/{symbol}/phase")
     CompletableFuture<PhaseResponse> setPhase(@PathVariable String symbol, @Valid @RequestBody PhaseRequest request) {

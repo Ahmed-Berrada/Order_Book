@@ -18,6 +18,20 @@ REST is not the low-latency path: members trading at speed will use FIX (phase 3
 - Timestamps are UTC ISO-8601 with microseconds, e.g. `2026-10-08T09:11:38.669599Z`. All events of a
   command share the command's timestamp (RS-006).
 
+## Authentication
+
+With security on (the default; [access control](../rulebook/access-control.md), ADR-0017) every request
+carries HTTP Basic credentials, ideally over TLS terminated in front of the venue. Roles, from lowest:
+
+| Role | May |
+|---|---|
+| `READ` | every `GET`: instruments, books, order status, the market-data feed |
+| `MEMBER` | also enter, replace and cancel orders, for its own member |
+| `ADMIN` | also set the trading phase, members' limits, and the kill switch; may act for any member with `X-Member-Id` |
+
+No credentials or wrong ones: `401`. A role too low, another member named, or a write the browser marks as coming from another site or with a form body (AC-008): `403`. Everything the API does not
+name is refused. For local development only, the `dev` profile turns all of it off.
+
 ## Endpoints
 
 ### `GET /api/v1/instruments`
@@ -151,15 +165,14 @@ unchanged.
 
 An order that is not resting (filled, cancelled or unknown) returns `resting: false`.
 `restingQuantity` is the full remainder, hidden quantity included: it is meant for the order's owner.
-Until members and authentication exist (phases 5 and 8) the API is bound to `127.0.0.1`.
 
 ### Members
 
 [Members and risk](../rulebook/members-and-risk.md): an order, a replace or a cancel is entered for the member
 named by the header `X-Member-Id` (a positive number); without it the operator (member `0`) acts, with no
-limits. A member can cancel and replace only its own orders (MB-003): another's order is a `404`. Until
-authentication exists (phase 8) the header is not checked against anything: any caller can name any member,
-and every endpoint below is an operator action.
+limits. A member can cancel and replace only its own orders (MB-003): another's order is a `404`. With
+[authentication](#authentication) on, a `MEMBER` user acts for its own member whatever the header says (naming
+another member is a `403`), and the endpoints below need `ADMIN`.
 
 | Endpoint | Does |
 |---|---|

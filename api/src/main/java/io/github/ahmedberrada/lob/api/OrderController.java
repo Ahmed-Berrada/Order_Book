@@ -15,6 +15,7 @@ import jakarta.validation.constraints.PositiveOrZero;
 import java.net.URI;
 import java.util.concurrent.CompletableFuture;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,21 +34,24 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/instruments/{symbol}/orders")
 class OrderController {
 
-    /** The member an order is entered for; absent means the operator (MB-001). Unauthenticated until phase 8. */
+    /** The member an order is entered for; absent means the operator, or the caller's own member (MB-001, AC-005). */
     static final String MEMBER_HEADER = "X-Member-Id";
 
     private final MatchingService service;
+    private final MemberResolver members;
 
-    OrderController(MatchingService service) {
+    OrderController(MatchingService service, MemberResolver members) {
         this.service = service;
+        this.members = members;
     }
 
     @PostMapping
     CompletableFuture<ResponseEntity<OrderResponse>> placeOrder(
-            @PathVariable String symbol, @RequestHeader(name = MEMBER_HEADER, defaultValue = "0") @PositiveOrZero long member,
+            @PathVariable String symbol, @RequestHeader(name = MEMBER_HEADER, required = false) @PositiveOrZero Long memberHeader,
+            Authentication authentication,
             @Valid @RequestBody OrderRequest request) {
         InstrumentConfig instrument = instrument(symbol);
-        return service.submit(symbol, request.toCommand(instrument), member, null).thenApply(batch -> {
+        return service.submit(symbol, request.toCommand(instrument), members.resolve(authentication, memberHeader), null).thenApply(batch -> {
             if (batch.events().getFirst() instanceof OrderRejected rejected) {
                 throw new OrderRejectedException(rejected.orderId(), rejected.reason());
             }
@@ -59,8 +63,9 @@ class OrderController {
 
     @DeleteMapping("/{orderId}")
     CompletableFuture<CancelResponse> cancelOrder(@PathVariable String symbol, @PathVariable long orderId,
-            @RequestHeader(name = MEMBER_HEADER, defaultValue = "0") @PositiveOrZero long member) {
-        return service.submit(symbol, new CancelOrder(orderId), member, null).thenApply(batch -> {
+            @RequestHeader(name = MEMBER_HEADER, required = false) @PositiveOrZero Long memberHeader,
+            Authentication authentication) {
+        return service.submit(symbol, new CancelOrder(orderId), members.resolve(authentication, memberHeader), null).thenApply(batch -> {
             Event event = batch.events().getFirst();
             if (event instanceof CancelRejected) {
                 throw new OrderNotRestingException(orderId);
@@ -73,10 +78,11 @@ class OrderController {
 
     @PutMapping("/{orderId}")
     CompletableFuture<ReplaceResponse> replaceOrder(@PathVariable String symbol, @PathVariable long orderId,
-            @RequestHeader(name = MEMBER_HEADER, defaultValue = "0") @PositiveOrZero long member,
+            @RequestHeader(name = MEMBER_HEADER, required = false) @PositiveOrZero Long memberHeader,
+            Authentication authentication,
             @Valid @RequestBody ReplaceRequest request) {
         InstrumentConfig instrument = instrument(symbol);
-        return service.submit(symbol, request.toCommand(orderId, instrument), member, null).thenApply(batch -> {
+        return service.submit(symbol, request.toCommand(orderId, instrument), members.resolve(authentication, memberHeader), null).thenApply(batch -> {
             if (batch.events().getFirst() instanceof ReplaceRejected rejected) {
                 if (rejected.reason() == RejectReason.UNKNOWN_ORDER) {
                     throw new OrderNotRestingException(orderId);

@@ -306,4 +306,12 @@ class OrderApiTest {
         assertThat(post(limit("SELL", "1.00", 1))).bodyJson()
                 .isLenientlyEqualTo("{\"orderId\":1,\"commandSequence\":1}");
     }
+
+    @Test
+    @Rulebook("AC-008")
+    void crossSiteWritesAreRefusedEvenWithSecurityOff() {
+        assertThat(mvc.post().uri(ORDERS).contentType(MediaType.APPLICATION_JSON).content(limit("BUY", "185.00", 1))
+                .header("Sec-Fetch-Site", "cross-site")).hasStatus(HttpStatus.FORBIDDEN);
+        assertThat(post(limit("BUY", "185.00", 1))).hasStatus(HttpStatus.CREATED);
+    }
 }

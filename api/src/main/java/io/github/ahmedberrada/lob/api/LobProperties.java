@@ -42,7 +42,33 @@ public record LobProperties(
         @DefaultValue @Valid FixProperties fix,
         @DefaultValue @Valid MarketDataProperties marketData,
         @DefaultValue @Valid BinaryFeedProperties binaryFeed,
-        @DefaultValue List<@Valid MemberProperties> members) {
+        @DefaultValue List<@Valid MemberProperties> members,
+        @DefaultValue @Valid SecurityProperties security) {
+
+    /**
+     * Who may call the venue (docs/rulebook/access-control.md).
+     *
+     * @param enabled whether callers must authenticate; on unless switched off by name (AC-003)
+     * @param users   the REST principals
+     */
+    public record SecurityProperties(
+            @DefaultValue("true") boolean enabled, @DefaultValue List<@Valid UserProperties> users) {
+    }
+
+    /**
+     * A REST user.
+     *
+     * @param password a salted hash with its algorithm prefix, e.g. {@code {bcrypt}$2a$10$...} (AC-002)
+     * @param roles    {@code READ}, {@code MEMBER} or {@code ADMIN}; a higher role includes the lower ones
+     * @param memberId the member a {@code MEMBER} user acts for (AC-005)
+     */
+    public record UserProperties(
+            @NotBlank String name, @NotBlank String password, @NotEmpty List<Role> roles,
+            @PositiveOrZero long memberId) {
+    }
+
+    /** What a user may do (AC-004). */
+    public enum Role { READ, MEMBER, ADMIN }
 
     /**
      * A member: who it is, which FIX sessions act for it and its limits per instrument (RK-001).
@@ -100,8 +126,8 @@ public record LobProperties(
     }
 
     /**
-     * The FIX acceptor. It listens on the loopback interface unless told otherwise: sessions are not
-     * authenticated until phase 8.
+     * The FIX acceptor. It listens on the loopback interface unless told otherwise; with security on, a
+     * session needs a password hash in {@code passwords} (AC-007).
      *
      * @param dropCopySessions read-only sessions receiving a copy of every execution report (DC-001)
      * @param storeDirectory sequence numbers and sent messages; defaults to {@code <data-directory>/fix}
@@ -116,7 +142,8 @@ public record LobProperties(
             @DefaultValue List<String> members,
             @DefaultValue List<String> dropCopySessions,
             Path storeDirectory,
-            @DefaultValue("CANCEL_NEWEST") SelfTradeMode selfTradeMode) {
+            @DefaultValue("CANCEL_NEWEST") SelfTradeMode selfTradeMode,
+            @DefaultValue java.util.Map<String, String> passwords) {
     }
 
     /** One listed instrument. */
