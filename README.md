@@ -479,7 +479,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 4 | **Venue functionality**: IOC / FOK / post-only / cancel-replace ✅, iceberg orders ✅, stop orders ✅, self-trade prevention ✅, trading phases and call auctions ✅, tick regime, DAY orders and volatility interruptions ✅; throttles, kill switch (phase 5) | ⏳ |
 | 5 | **Pre-trade risk & members** | |
 | 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅; group commit, load test, GC study | ⏳ |
-| 7 | **Regulatory evidence**: MiFID II compliance matrix, RTS 22 / 24 reporting, surveillance | |
+| 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; RTS 22 reports, surveillance | ⏳ |
 | 8 | **Security & supply chain**: mTLS, OIDC, SBOM, signed releases | |
 | 9 | **Operations & resilience**: observability, failover, runbooks, chaos tests | |
 | 10 | **Post-trade & analytics** *(optional)* | |
