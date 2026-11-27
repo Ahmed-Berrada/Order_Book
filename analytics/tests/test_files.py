@@ -33,7 +33,8 @@ class ReadingTest(unittest.TestCase):
         self.assertEqual(lines[2].timestamp.microsecond, 1)
         self.assertEqual(lines[2].timestamp.utcoffset().total_seconds(), 0)
         records = read_records(io.StringIO(RECORDS))
-        self.assertEqual(records[-1].detail, "MemberLimits[maxOrderQuantity=5, maxOrderNotional=0]")   # quoted
+        (limits,) = [r for r in records if r.record == "MEMBER_LIMITS_CHANGED"]
+        self.assertEqual(limits.detail, "MemberLimits[maxOrderQuantity=5, maxOrderNotional=0]")         # quoted
 
     def test_refuses_another_file(self):
         with self.assertRaisesRegex(FormatError, "not a trade file"):
