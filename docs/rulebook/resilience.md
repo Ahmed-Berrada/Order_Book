@@ -54,3 +54,8 @@ the event journal.
 **RS-010: Snapshot fidelity.** An engine restored from a snapshot cannot be distinguished from the
 engine the snapshot was taken from: same resting orders and queue positions, same next order ID, same
 next event sequence number.
+
+**RS-011: One writer.** An instrument's journal directory is opened by one engine at a time. Opening a
+directory that another engine, in this process or another, holds fails with an error and changes nothing:
+two writers would interleave frames and corrupt the journal. The lock is released when the engine is
+closed, or by the operating system if the process dies, so a crash leaves no stale lock.

@@ -43,10 +43,12 @@ public final class JournaledEngine implements AutoCloseable {
     private long commandsSinceSnapshot;
     private boolean failed;
     private boolean closed;
+    private final DirectoryLock lock;
 
     private JournaledEngine(MatchingEngine engine, JournalOptions options, TimeSource timeSource,
             FrameWriter commands, FrameWriter events, SnapshotStore snapshots, RecoveryReport recovery,
-            long lastTimestampMicros) {
+            long lastTimestampMicros, DirectoryLock lock) {
+        this.lock = lock;
         this.engine = engine;
         this.options = options;
         this.timeSource = timeSource;
@@ -71,6 +73,21 @@ public final class JournaledEngine implements AutoCloseable {
         Objects.requireNonNull(options, "options");
         Objects.requireNonNull(timeSource, "timeSource");
         Files.createDirectories(directory);
+        DirectoryLock lock = DirectoryLock.acquire(directory);                 // RS-011
+        try {
+            return recover(directory, instrument, options, timeSource, lock);
+        } catch (IOException | RuntimeException e) {
+            try {
+                lock.close();
+            } catch (IOException suppressed) {
+                e.addSuppressed(suppressed);
+            }
+            throw e;
+        }
+    }
+
+    private static JournaledEngine recover(Path directory, Instrument instrument, JournalOptions options,
+            TimeSource timeSource, DirectoryLock lock) throws IOException {
         Path commandsFile = directory.resolve(COMMANDS_FILE);
         Path eventsFile = directory.resolve(EVENTS_FILE);
         SnapshotStore snapshots = new SnapshotStore(directory, instrument);
@@ -142,7 +159,7 @@ public final class JournaledEngine implements AutoCloseable {
             RecoveryReport report = new RecoveryReport(
                     snapshotSequence, replayed, reader.lastSequence(), missingBatches.size(), tornBytes);
             return new JournaledEngine(engine, options, timeSource, commandWriter, eventWriter, snapshots,
-                    report, reader.lastTimestampMicros());
+                    report, reader.lastTimestampMicros(), lock);
         }
     }
 
@@ -251,7 +268,7 @@ public final class JournaledEngine implements AutoCloseable {
             return;
         }
         closed = true;
-        try (commands; events) {
+        try (commands; events; lock) {
             if (!failed) {
                 commands.force();
                 events.force();
