@@ -93,14 +93,25 @@ final class SymbolWorker implements AutoCloseable {
                 long started = System.nanoTime();
                 EventBatch batch = engine.process(command, memberId);
                 observe(batch, System.nanoTime() - started);
-                halted = engine.isStopped();    // a later write failed: this command counts, the next ones do not
+                if (engine.isStopped()) {       // a later write failed: this command counts, the next ones do not
+                    halt(null);
+                }
                 notifyListeners(batch, context);
                 return batch;
             } catch (UncheckedIOException e) {
-                halted = true;
+                halt(e);
                 throw e;
             }
         });
+    }
+
+    /** Stops the instrument (OE-006) and says why in the log, once: the runbook starts from that line. */
+    private void halt(UncheckedIOException cause) {
+        if (!halted) {
+            halted = true;
+            LOG.log(System.Logger.Level.ERROR, "Instrument " + symbol
+                    + " halted: its journal could not be written; restart the venue once the cause is fixed", cause);
+        }
     }
 
     /**
