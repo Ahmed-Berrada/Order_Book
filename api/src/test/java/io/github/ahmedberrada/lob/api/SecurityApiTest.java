@@ -85,6 +85,18 @@ class SecurityApiTest {
     }
 
     @Test
+    @Rulebook({"AC-001", "AC-004"})
+    void healthProbesAreOpenButMetricsNeedARole() {
+        assertThat(mvc.get().uri("/actuator/health/liveness")).hasStatusOk();
+        assertThat(mvc.get().uri("/actuator/health/readiness")).hasStatusOk();
+        assertThat(mvc.get().uri("/actuator/prometheus")).hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(mvc.get().uri("/actuator/prometheus").header(HttpHeaders.AUTHORIZATION, basic("reader")))
+                .hasStatusOk();
+        assertThat(mvc.get().uri("/actuator/env").header(HttpHeaders.AUTHORIZATION, basic("admin")))
+                .hasStatus(HttpStatus.NOT_FOUND);                               // not exposed at all
+    }
+
+    @Test
     @Rulebook("AC-008")
     void aBrowserCannotBeMadeToWriteFromAnotherSite() {
         String body = "{\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"10.00\",\"quantity\":1}";

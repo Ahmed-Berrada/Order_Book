@@ -1,0 +1,35 @@
+groups:
+  - name: lob-engine
+    rules:
+      - alert: InstrumentHalted
+        expr: lob_instrument_halted == 1
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: "{{ $labels.symbol }} stopped after a journal failure"
+          runbook: "docs/operations/runbook.md#an-instrument-is-halted"
+      - alert: VenueDown
+        expr: up{job="lob-engine"} == 0
+        for: 1m
+        labels: {severity: page}
+        annotations:
+          summary: "The venue does not answer"
+          runbook: "docs/operations/runbook.md#the-venue-does-not-start"
+      - alert: QueueNearlyFull
+        expr: lob_queue_depth / lob_queue_capacity > 0.8
+        for: 1m
+        labels: {severity: warn}
+        annotations:
+          summary: "{{ $labels.symbol }}: the command queue is over 80% full; OVERLOADED refusals are next"
+      - alert: CommandLatencyHigh
+        expr: histogram_quantile(0.99, sum by (le, symbol) (rate(lob_command_duration_seconds_bucket[5m]))) > 0.005
+        for: 5m
+        labels: {severity: warn}
+        annotations:
+          summary: "{{ $labels.symbol }}: p99 command time over 5 ms (journal sync?)"
+      - alert: VolatilityInterruption
+        expr: increase(lob_volatility_interruptions_total[5m]) > 0
+        labels: {severity: info}
+        annotations:
+          summary: "{{ $labels.symbol }} was interrupted by the volatility band: an operator must end the call phase"
+          runbook: "docs/operations/runbook.md#a-volatility-interruption"

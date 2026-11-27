@@ -67,3 +67,18 @@ lob:
   #       price-collar-bps: 500
   #       max-open-orders: 500
   #       max-net-position: 50000
+
+# Operations (docs/operations/observability.md). Health is open (status only); metrics need the READ role.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+      group:
+        readiness:
+          include: readinessState,lob

@@ -200,6 +200,33 @@ class MatchingServiceTest {
     }
 
     @Test
+    void anObserverSeesEveryCommandWithItsDurationAndAFailingObserverChangesNothing() throws IOException {
+        List<String> seen = new CopyOnWriteArrayList<>();
+        AtomicLong failures = new AtomicLong();
+        CommandObserver observer = (symbol, batch, nanos) -> {
+            assertThat(nanos).isNotNegative();
+            seen.add(symbol + ":" + batch.commandSequence());
+            if (failures.incrementAndGet() == 2) {
+                throw new IllegalStateException("observer failure");
+            }
+        };
+        try (MatchingService service = MatchingService.start(directory, List.of(AAPL, MSFT), OPTIONS, time, 100,
+                observer)) {
+            service.submit("AAPL", new LimitOrder(Side.BUY, 18_500, 5)).join();
+            assertThat(service.submit("AAPL", new LimitOrder(Side.BUY, 18_400, 5)).join().events()).isNotEmpty();
+            service.submit("MSFT", new LimitOrder(Side.SELL, 18_600, 1)).join();
+
+            assertThat(seen).containsExactly("AAPL:1", "AAPL:2", "MSFT:1");
+            assertThat(service.queueDepth("AAPL")).isZero();
+            assertThat(service.queueCapacity("AAPL")).isEqualTo(100);
+            assertThat(service.queueDepth("TSLA")).isZero();
+            assertThat(service.queueCapacity("TSLA")).isZero();
+        }
+        assertThatNullPointerException().isThrownBy(() -> MatchingService.start(directory, List.of(AAPL), OPTIONS,
+                time, 100, null));
+    }
+
+    @Test
     void stateIsTheEnginesSnapshotAsOfTheLastCommand() throws IOException {
         try (MatchingService service = start()) {
             service.submit("AAPL", new LimitOrder(Side.BUY, 18_500, 10)).join();

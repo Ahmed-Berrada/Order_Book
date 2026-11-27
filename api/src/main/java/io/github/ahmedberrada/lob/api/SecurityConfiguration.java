@@ -115,6 +115,7 @@ class SecurityConfiguration {
         }
         return http.httpBasic(Customizer.withDefaults())
                 .authorizeHttpRequests(a -> a
+                        .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/instruments/*/phase").hasRole("ADMIN")
                         .requestMatchers("/api/v1/members/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/instruments/*/orders").hasRole("MEMBER")

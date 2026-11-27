@@ -1,0 +1,6 @@
+apiVersion: v2
+name: lob-engine
+description: A limit order book venue: one writer per instrument, a journal on a persistent volume
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -555,4 +555,37 @@ class JournaledEngineTest {
         });
         assertThat(recorded.getLast().events().getFirst()).isInstanceOf(io.github.ahmedberrada.lob.core.OrderRejected.class);
     }
+
+    @Test
+    @Rulebook("RS-011")
+    void aJournalDirectoryHasOneWriterAndTheLockIsReleasedOnClose() throws IOException {
+        JournaledEngine first = open(NO_SNAPSHOTS);
+        try {
+            first.process(new LimitOrder(Side.BUY, 100, 5));
+
+            assertThatThrownBy(() -> open(NO_SNAPSHOTS)).isInstanceOf(IOException.class)
+                    .hasMessageContaining("in use by another engine");
+            assertThat(Files.readAllBytes(commandsFile())).isNotEmpty();
+        } finally {
+            first.close();
+        }
+
+        try (JournaledEngine second = open(NO_SNAPSHOTS)) {                 // the lock is free again
+            assertThat(second.recovery().lastCommandSequence()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    @Rulebook("RS-011")
+    void aFailedRecoveryReleasesTheLock() throws IOException {
+        try (JournaledEngine engine = open(NO_SNAPSHOTS)) {
+            engine.process(new LimitOrder(Side.BUY, 100, 5));
+        }
+        byte[] bytes = Files.readAllBytes(commandsFile());
+        bytes[bytes.length / 2] ^= 0x55;                                     // damage a frame in the middle
+        Files.write(commandsFile(), bytes);
+
+        assertThatThrownBy(() -> open(NO_SNAPSHOTS)).isInstanceOf(JournalCorruptedException.class);
+        assertThatThrownBy(() -> open(NO_SNAPSHOTS)).isInstanceOf(JournalCorruptedException.class);   // not "in use"
+    }
 }

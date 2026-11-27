@@ -23,7 +23,13 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.stream.Stream;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -36,7 +42,35 @@ class SymbolWorkerTest {
     Path directory;
 
     private final BlockingClock clock = new BlockingClock();
+    private final List<LogRecord> log = new CopyOnWriteArrayList<>();
+    private final Logger logger = Logger.getLogger(SymbolWorker.class.getName());
+    private final Handler capture = new Handler() {
+        @Override
+        public void publish(LogRecord record) {
+            log.add(record);
+        }
+
+        @Override
+        public void flush() {
+        }
+
+        @Override
+        public void close() {
+        }
+    };
     private SymbolWorker worker;
+
+    @BeforeEach
+    void captureLog() {
+        logger.addHandler(capture);
+    }
+
+    /** The halt is logged once, at ERROR, with the symbol: the runbook starts from that line. */
+    private void assertHaltLoggedOnce() {
+        assertThat(log).filteredOn(r -> r.getMessage().contains("halted")).singleElement()
+                .satisfies(r -> assertThat(r.getLevel()).isEqualTo(Level.SEVERE))
+                .satisfies(r -> assertThat(r.getMessage()).startsWith("Instrument WRK halted"));
+    }
 
     private SymbolWorker start(JournalOptions options, int capacity) throws IOException {
         worker = new SymbolWorker(JournaledEngine.open(directory, INSTRUMENT, options, clock), capacity);
@@ -45,6 +79,7 @@ class SymbolWorkerTest {
 
     @AfterEach
     void stop() throws IOException {
+        logger.removeHandler(capture);
         clock.open();
         if (worker != null) {
             worker.close();
@@ -132,6 +167,7 @@ class SymbolWorkerTest {
         assertThat(worker.isHalted()).isTrue();
         assertRefused(worker.submit(buy(100, 1)), Reason.HALTED);
         assertThat(worker.book(1).join().bids()).containsExactly(new OrderBook.Level(100, 5, 1));
+        assertHaltLoggedOnce();
     }
 
     @Test
@@ -150,6 +186,8 @@ class SymbolWorkerTest {
         assertThat(worker.isHalted()).isTrue();
         assertRefused(worker.submit(buy(100, 1)), Reason.HALTED);
         assertThat(worker.book(5).join().bids()).containsExactly(new OrderBook.Level(99, 1, 1));
+        assertHaltLoggedOnce();
+        assertThat(log.get(0).getThrown()).isInstanceOf(UncheckedIOException.class);    // with its cause
     }
 
     @Test

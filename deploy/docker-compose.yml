@@ -1,0 +1,24 @@
+# A single venue with Prometheus and Grafana, for trying the operations tooling locally.
+#   docker compose -f deploy/docker-compose.yml up --build
+# The venue needs users: set them below (hashes from HashPassword, see the README) or use the dev profile.
+services:
+  lob:
+    build: ..
+    ports: ["8080:8080", "9878:9878"]
+    volumes: ["lob-data:/data"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev           # no authentication: local use only
+    restart: unless-stopped
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports: ["3000:3000"]
+    volumes:
+      - ./grafana/lob-engine.json:/var/lib/grafana/dashboards/lob-engine.json:ro
+volumes:
+  lob-data:
