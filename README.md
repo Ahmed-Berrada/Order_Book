@@ -454,6 +454,24 @@ Book            3 resting orders
 Verification    OK: 5 event batches identical to the event journal
 ```
 
+### Trade file and fees
+
+`lob-post-trade` turns an instrument's journals into the file a clearing house receives (one line per side of
+every trade, the counterparty hidden) and the members' fee statements, with maker, taker and auction rates in
+basis points. Auction trades are neither maker nor taker. Rules: [post-trade](docs/rulebook/post-trade.md);
+format: [trade file](docs/interfaces/trade-file.md).
+
+```bash
+java -cp "$CP:post-trade/target/post-trade-0.1.0-SNAPSHOT.jar" io.github.ahmedberrada.lob.posttrade.PostTradeTool \
+    trades data/AAPL --tick-size 0.01 --fees maker=-0.20,taker=0.30,auction=0.10
+```
+
+```
+trade_id,trade_date,timestamp_utc,instrument,member_id,order_id,side,liquidity,price_ticks,price,quantity,notional,fee_rate_bps,fee
+AAPL-4,2026-11-26,2026-11-26T09:00:00.000001Z,AAPL,2,2,BUY,TAKER,18550,185.50,100,18550.00,0.3,0.56
+AAPL-4,2026-11-26,2026-11-26T09:00:00.000001Z,AAPL,1,1,SELL,MAKER,18550,185.50,100,18550.00,-0.2,-0.37
+```
+
 ### Running it in production
 
 The venue is packaged as a container image (`Dockerfile`) and a Helm chart (`deploy/helm/lob-engine`): one
@@ -526,7 +544,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; RTS 22 reports, surveillance | ⏳ |
 | 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅; TLS and mTLS (phase 9), OIDC | ⏳ |
 | 9 | **Operations & resilience**: [Prometheus metrics, probes and alerts](docs/operations/observability.md) ✅, [runbook](docs/operations/runbook.md) ✅, one writer per journal ✅, soak test ✅, container image, compose stack and Helm chart ✅, [HA design](docs/adr/0018-operations-and-high-availability.md) ✅; replication and failover, chaos tests | ⏳ |
-| 10 | **Post-trade & analytics** *(optional)* | |
+| 10 | **Post-trade & analytics** *(optional)*: [clearing trade file and maker/taker/auction fees](docs/interfaces/trade-file.md) ✅; Python microstructure analytics | ⏳ |
 
 ---
 
@@ -539,6 +557,7 @@ Order_Book/
 ├── engine-service/     writer thread per instrument, routing, price conversion, event listeners
 ├── fix-gateway/        FIX 4.4 order entry (QuickFIX/J)
 ├── market-data/        level-2 feed built from the event stream
+├── post-trade/         clearing trade file and fees, computed from the journals
 ├── api/                Spring Boot REST adapter, OpenAPI
 ├── docs/adr/           architecture decision records
 ├── docs/rulebook/      venue rules, cited by tests
