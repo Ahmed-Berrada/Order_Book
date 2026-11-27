@@ -285,7 +285,7 @@ class OrderApiTest {
             "{\"side\":\"BUY\",\"type\":\"LIMIT\",\"quantity\":1}",                       // limit without price
             "{\"side\":\"BUY\",\"type\":\"MARKET\",\"price\":\"1.00\",\"quantity\":1}",   // market with price
             "{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":1,\"trailing\":1}",     // unknown field
-            "{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":1,\"timeInForce\":\"DAY\"}", // unknown TIF
+            "{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":1,\"timeInForce\":\"WEEK\"}", // unknown TIF
             "{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":1,\"postOnly\":false}", // post-only market
             "{\"side\":\"BUY\",\"type\":\"STOP\",\"quantity\":1}",                      // stop without stop price
             "{\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"1.00\",\"stopPrice\":\"1.00\",\"quantity\":1}",

@@ -74,7 +74,7 @@ public final class OrderBook {
                 for (Order order : level.orders()) {
                     orders.add(new RestingOrder(order.orderId, order.side, order.priceTicks,
                             order.remainingQuantity, order.postOnly, order.displayQuantity, order.displayed,
-                            order.selfTrade));
+                            order.selfTrade, order.day));
                 }
             }
         }
@@ -141,6 +141,18 @@ public final class OrderBook {
     /** Shows an order's quantity as {@code displayed} (TP-003, TP-008). */
     void show(Order order, long displayed) {
         levels(order.side).get(order.priceTicks).show(order, displayed);
+    }
+
+    /** Every resting DAY order, by order ID (DY-002). */
+    List<Order> dayOrders() {
+        List<Order> found = new ArrayList<>();
+        for (Order order : ordersById.values()) {
+            if (order.day) {
+                found.add(order);
+            }
+        }
+        found.sort(Comparator.comparingLong(order -> order.orderId));
+        return found;
     }
 
     /** Every resting iceberg order, by order ID. */

@@ -110,7 +110,9 @@ class TradingPhasesFixTest {
     @Test
     @Rulebook("TP-004")
     void aClosedVenueRejectsNewOrdersButAnOrderCanStillBeCancelled() throws Exception {
-        member1.send(Orders.limit("S-1", Side.SELL, "185.00", "5"));
+        Message resting = Orders.limit("S-1", Side.SELL, "185.00", "5");
+        resting.setChar(quickfix.field.TimeInForce.FIELD, quickfix.field.TimeInForce.GOOD_TILL_CANCEL);
+        member1.send(resting);
         member1.next();
         phase(TradingPhase.CLOSED);
 
@@ -121,5 +123,27 @@ class TradingPhasesFixTest {
 
         member1.send(cancel("C-1", "S-1", Side.SELL));
         assertThat(field(member1.next(), ExecType.FIELD)).isEqualTo("4");
+    }
+
+    @Test
+    @Rulebook({"DY-001", "DY-002"})
+    void aDayOrderExpiresWhenTheVenueClosesAndAGoodTillCancelledOneDoesNot() throws Exception {
+        member1.send(Orders.limit("DAY-1", Side.SELL, "185.00", "5"));         // no TimeInForce: Day, FIX's default
+        member1.next();
+        Message gtc = Orders.limit("GTC-1", Side.SELL, "186.00", "5");
+        gtc.setChar(quickfix.field.TimeInForce.FIELD, quickfix.field.TimeInForce.GOOD_TILL_CANCEL);
+        member1.send(gtc);
+        member1.next();
+
+        phase(TradingPhase.CLOSED);
+
+        Message expired = member1.next();
+        assertThat(field(expired, ClOrdID.FIELD)).isEqualTo("DAY-1");
+        assertThat(field(expired, ExecType.FIELD)).isEqualTo("C");
+        assertThat(field(expired, OrdStatus.FIELD)).isEqualTo("C");
+        assertThat(field(expired, LeavesQty.FIELD)).isEqualTo("0");
+        assertThat(field(expired, Text.FIELD)).isEqualTo("DAY_EXPIRED");
+        assertThat(venue.service.restingQuantity("AAPL", 1).join()).isZero();
+        assertThat(venue.service.restingQuantity("AAPL", 2).join()).isEqualTo(5);
     }
 }

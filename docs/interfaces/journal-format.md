@@ -1,4 +1,4 @@
-# Journal file formats (version 6)
+# Journal file formats (version 7)
 
 Binary formats of the files written by `engine-journal`. Rules and rationale are in the rulebook
 chapter [`resilience.md`](../rulebook/resilience.md) and [ADR-0003](../adr/0003-journal-and-recovery.md).
@@ -32,11 +32,14 @@ Every file is a sequence of frames:
 | Size | Field | Value |
 |---|---|---|
 | 4 | magic | `0x4C4F424A` (`"LOBJ"`) |
-| 2 | format version | `5` |
+| 2 | format version | `7` |
 | 1 | file kind | `1` commands, `2` events, `3` snapshot |
 | 2+n | symbol | modified UTF-8 |
 | 8 | max order quantity | lots |
 | 8 | max price | ticks |
+| 4 | number of tick bands | |
+| 16 each | tick band | lowest price (8), step (8), in ticks |
+| 8 | volatility band | basis points; `0` for none |
 
 A journal must name the instrument it is opened for, or recovery stops (RS-004).
 
@@ -89,6 +92,7 @@ Each event starts with its type (1 byte) and its event sequence number (8 bytes)
 | 12 | `PhaseChanged` | from phase (1), to phase (1) |
 | 13 | `PhaseChangeRejected` | reject reason (1) |
 | 14 | `AuctionPriceDetermined` | price (8), volume (8) |
+| 15 | `VolatilityInterruption` | reference price (8), breaching price (8) |
 
 ## Snapshot (`snapshot-*.snap`: a single frame)
 
@@ -102,11 +106,11 @@ Each event starts with its type (1 byte) and its event sequence number (8 bytes)
 
 Then each resting order, in priority order (bids best first, then asks best first, oldest first within
 a price): order ID (8), side (1), price (8), remaining quantity (8), post-only (1), display quantity (8;
-`0` for a fully visible order), displayed quantity (8), self-trade instruction (9).
+`0` for a fully visible order), displayed quantity (8), self-trade instruction (9), day (1).
 
 After the resting orders: the last trade price (8; `0` before the first trade), the number of parked
 stops (4), then each stop in order of order ID: order ID (8), side (1), stop price (8), limit price (8),
-quantity (8), self-trade instruction (9). The snapshot ends with the trading phase (1).
+quantity (8), self-trade instruction (9). The snapshot ends with the trading phase (1) and the volatility reference price (8; `0` before the first trade).
 
 ## Enumeration codes
 
@@ -132,6 +136,7 @@ Codes are fixed here and never derived from Java enum order, so old journals kee
 | INVALID_SELF_TRADE_GROUP | 11 |
 | NOT_ALLOWED_IN_PHASE | 12 |
 | INVALID_PHASE_TRANSITION | 13 |
+| INVALID_TICK_SIZE | 14 |
 
 | Trading phase | Code |
 |---|---|
@@ -146,6 +151,8 @@ Codes are fixed here and never derived from Java enum order, so old journals kee
 | IMMEDIATE_OR_CANCEL | 3 |
 | FILL_OR_KILL | 4 |
 | SELF_TRADE_PREVENTION | 5 |
+| DAY_EXPIRED | 6 |
+| VOLATILITY_INTERRUPTION | 7 |
 
 | Self-trade mode | Code |
 |---|---|
@@ -158,6 +165,7 @@ Codes are fixed here and never derived from Java enum order, so old journals kee
 | GTC | 1 |
 | IOC | 2 |
 | FOK | 3 |
+| DAY | 4 |
 
 ## Compatibility
 
@@ -172,3 +180,4 @@ does not know.
 | 4 | Stop orders: stop command, `OrderParked` and `StopTriggered` events, last trade price and parked stops in snapshots (ADR-0011). Earlier versions are refused |
 | 5 | Self-trade prevention: group and mode on limit, market and stop commands, on resting orders and on parked stops in snapshots; `INVALID_SELF_TRADE_GROUP` and `SELF_TRADE_PREVENTION` codes (ADR-0012). Earlier versions are refused |
 | 6 | Trading phases: `SetPhase` command, `PhaseChanged`, `PhaseChangeRejected` and `AuctionPriceDetermined` events, the phase in snapshots, `NOT_ALLOWED_IN_PHASE` and `INVALID_PHASE_TRANSITION` codes (ADR-0013). Earlier versions are refused |
+| 7 | Venue controls: the instrument header carries the tick table and the volatility band; `DAY` time in force; `DAY_EXPIRED`, `VOLATILITY_INTERRUPTION` and `INVALID_TICK_SIZE` codes; `VolatilityInterruption` event; the day attribute of resting orders and the reference price in snapshots (ADR-0014). Earlier versions are refused |

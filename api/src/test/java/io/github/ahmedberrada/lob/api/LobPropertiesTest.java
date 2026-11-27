@@ -25,6 +25,11 @@ class LobPropertiesTest {
         "lob.instruments[0].max-price=1000.00",
     };
 
+    private static String[] with(String... more) {
+        return java.util.stream.Stream.concat(java.util.Arrays.stream(VALID), java.util.Arrays.stream(more))
+                .toArray(String[]::new);
+    }
+
     @Test
     void appliesDefaults() {
         runner.withPropertyValues(VALID).run(context -> {
@@ -47,6 +52,22 @@ class LobPropertiesTest {
         runner.withPropertyValues(VALID).withPropertyValues("lob.fix.self-trade-mode=CANCEL_BOTH").run(context ->
                 assertThat(context.getBean(LobProperties.class).fix().selfTradeMode()).isEqualTo(SelfTradeMode.CANCEL_BOTH));
         runner.withPropertyValues(VALID).withPropertyValues("lob.fix.self-trade-mode=CANCEL_EVERYONE")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void readsTheTickRegimeAndTheVolatilityBand() {
+        runner.withPropertyValues(with(
+                "lob.data-directory=target/test-venue-regime", "lob.instruments[0].tick-regime[0].from-price=0.01",
+                "lob.instruments[0].tick-regime[0].step=0.01",
+                "lob.instruments[0].tick-regime[1].from-price=500.00", "lob.instruments[0].tick-regime[1].step=0.05",
+                "lob.instruments[0].volatility-band-bps=300")).run(context -> {
+                    var instrument = context.getBean(MatchingService.class).instruments().getFirst();
+                    assertThat(instrument.tickRegime()).hasSize(2);
+                    assertThat(instrument.instrument().tickBands()).extracting(b -> b.stepTicks()).containsExactly(1L, 5L);
+                    assertThat(instrument.volatilityBandBps()).isEqualTo(300);
+                });
+        runner.withPropertyValues(with("lob.data-directory=target/test-venue-regime", "lob.instruments[0].volatility-band-bps=-1"))
                 .run(context -> assertThat(context).hasFailed());
     }
 

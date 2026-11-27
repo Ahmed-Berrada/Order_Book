@@ -1,6 +1,7 @@
 package io.github.ahmedberrada.lob.fix;
 
 import io.github.ahmedberrada.lob.core.CancelOrder;
+import io.github.ahmedberrada.lob.core.CancelReason;
 import io.github.ahmedberrada.lob.core.CancelRejected;
 import io.github.ahmedberrada.lob.core.Command;
 import io.github.ahmedberrada.lob.core.Event;
@@ -360,13 +361,11 @@ final class FixApplication implements Application, EventListener {
         return Optional.empty();
     }
 
-    /**
-     * FIX TimeInForce to the engine's, or {@code null} if unsupported. Day, FIX's default, is accepted
-     * as GTC until the venue has a trading day (Rules of Engagement, limitations).
-     */
+    /** FIX TimeInForce to the engine's, or {@code null} if unsupported. Day is FIX's default (DY-001). */
     private static io.github.ahmedberrada.lob.core.TimeInForce timeInForce(char fix) {
         return switch (fix) {
-            case TimeInForce.DAY, TimeInForce.GOOD_TILL_CANCEL -> io.github.ahmedberrada.lob.core.TimeInForce.GTC;
+            case TimeInForce.DAY -> io.github.ahmedberrada.lob.core.TimeInForce.DAY;
+            case TimeInForce.GOOD_TILL_CANCEL -> io.github.ahmedberrada.lob.core.TimeInForce.GTC;
             case TimeInForce.IMMEDIATE_OR_CANCEL -> io.github.ahmedberrada.lob.core.TimeInForce.IOC;
             case TimeInForce.FILL_OR_KILL -> io.github.ahmedberrada.lob.core.TimeInForce.FOK;
             default -> null;
@@ -447,7 +446,10 @@ final class FixApplication implements Application, EventListener {
                 case OrderCancelled e -> {
                     FixOrder cancelled = taker != null && taker.orderId == e.orderId()
                             ? taker : registry.byOrderId(symbol, e.orderId());
-                    if (cancelled != null) {
+                    if (cancelled != null && e.reason() == CancelReason.DAY_EXPIRED) {
+                        cancelled.expire();
+                        report(ExecutionReports.expired(cancelled, e.sequence(), time), cancelled.session);
+                    } else if (cancelled != null) {
                         cancelled.cancel();
                         report(ExecutionReports.cancelled(cancelled, e.sequence(), time, e.reason().name()),
                                 cancelled.session);
@@ -522,6 +524,7 @@ final class FixApplication implements Application, EventListener {
             case INVALID_DISPLAY_QUANTITY -> OrdRejReason.INCORRECT_QUANTITY;
             case INVALID_SELF_TRADE_GROUP -> OrdRejReason.OTHER;
             case NOT_ALLOWED_IN_PHASE -> OrdRejReason.EXCHANGE_CLOSED;                   // TP-004, TP-005
+            case INVALID_TICK_SIZE -> OrdRejReason.OTHER;
             case INVALID_PHASE_TRANSITION -> OrdRejReason.OTHER;
             case INVALID_PRICE, NO_LIQUIDITY, UNKNOWN_ORDER, POST_ONLY_WOULD_TRADE, STOP_PRICE_ALREADY_REACHED ->
                     OrdRejReason.OTHER;

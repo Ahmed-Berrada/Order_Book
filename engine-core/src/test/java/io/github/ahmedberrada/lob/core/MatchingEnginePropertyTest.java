@@ -21,7 +21,8 @@ import net.jqwik.api.constraints.IntRange;
  */
 class MatchingEnginePropertyTest {
 
-    private static final Instrument INSTRUMENT = new Instrument("PROP", 50, 110);
+    private static final Instrument INSTRUMENT = new Instrument("PROP", 50, 110,
+            List.of(new TickBand(1, 1), new TickBand(104, 2)), 300);
 
     @Provide
     Arbitrary<List<Command>> commands() {
@@ -34,9 +35,11 @@ class MatchingEnginePropertyTest {
                 Tuple.of(1, Arbitraries.of(-3L, 0L, 50L, 51L)));
 
         Arbitrary<TimeInForce> limitTif = Arbitraries.frequency(
-                Tuple.of(6, TimeInForce.GTC), Tuple.of(1, TimeInForce.IOC), Tuple.of(1, TimeInForce.FOK));
+                Tuple.of(6, TimeInForce.GTC), Tuple.of(1, TimeInForce.IOC), Tuple.of(1, TimeInForce.FOK),
+                Tuple.of(3, TimeInForce.DAY));
         Arbitrary<TimeInForce> marketTif = Arbitraries.frequency(
-                Tuple.of(6, TimeInForce.IOC), Tuple.of(2, TimeInForce.FOK), Tuple.of(1, TimeInForce.GTC));
+                Tuple.of(6, TimeInForce.IOC), Tuple.of(2, TimeInForce.FOK), Tuple.of(1, TimeInForce.GTC),
+                Tuple.of(1, TimeInForce.DAY));
         Arbitrary<Boolean> postOnly = Arbitraries.frequency(Tuple.of(4, false), Tuple.of(1, true));
         Arbitrary<Long> orderId = Arbitraries.longs().between(0, 80);
 
@@ -73,7 +76,8 @@ class MatchingEnginePropertyTest {
             "OT-008", "IC-001", "IC-002", "IC-003", "IC-004", "IC-005", "IC-006", "ST-001", "ST-002", "ST-003", "ST-004",
             "ST-005", "ST-006", "ST-007", "SP-001", "SP-002", "SP-003", "SP-004", "SP-005", "SP-006", "SP-007",
             "SP-008", "TP-001", "TP-002", "TP-003", "TP-004", "TP-005", "TP-006", "TP-007", "TP-008",
-            "AU-001", "AU-002", "AU-004", "AU-005"})
+            "AU-001", "AU-002", "AU-004", "AU-005", "TK-001", "TK-002", "TK-003", "DY-001", "DY-002",
+            "VI-001", "VI-002", "VI-003", "VI-004", "VI-005"})
     void producesExactlyTheSameEventsAsTheReferenceModel(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
         ReferenceEngine reference = new ReferenceEngine(INSTRUMENT);
@@ -143,6 +147,7 @@ class MatchingEnginePropertyTest {
                     case PhaseChanged e -> { }
                     case PhaseChangeRejected e -> { }
                     case AuctionPriceDetermined e -> { }
+                    case VolatilityInterruption e -> { }
                 }
             }
 
@@ -200,7 +205,7 @@ class MatchingEnginePropertyTest {
     }
 
     @Property
-    @Rulebook({"RS-010", "RS-005", "SP-009", "AU-006"})
+    @Rulebook({"RS-010", "RS-005", "SP-009", "AU-006", "DY-003", "VI-006"})
     void restoringASnapshotAtAnyPointChangesNothing(
             @ForAll("commands") List<Command> commands, @ForAll @IntRange(max = 150) int split) {
         int at = Math.min(split, commands.size());

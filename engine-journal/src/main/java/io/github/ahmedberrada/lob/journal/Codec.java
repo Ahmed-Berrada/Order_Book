@@ -30,6 +30,8 @@ import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.StopTriggered;
+import io.github.ahmedberrada.lob.core.VolatilityInterruption;
+import io.github.ahmedberrada.lob.core.TickBand;
 import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.core.TradingPhase;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
@@ -52,7 +54,7 @@ import java.util.List;
 final class Codec {
 
     static final int MAGIC = 0x4C4F424A;            // "LOBJ"
-    static final short FORMAT_VERSION = 6;
+    static final short FORMAT_VERSION = 7;
 
     enum Kind {
         COMMANDS(1), EVENTS(2), SNAPSHOT(3);
@@ -90,6 +92,12 @@ final class Codec {
         out.writeUTF(header.instrument().symbol());
         out.writeLong(header.instrument().maxOrderQuantity());
         out.writeLong(header.instrument().maxPriceTicks());
+        out.writeInt(header.instrument().tickBands().size());
+        for (TickBand band : header.instrument().tickBands()) {
+            out.writeLong(band.fromPriceTicks());
+            out.writeLong(band.stepTicks());
+        }
+        out.writeLong(header.instrument().volatilityBandBps());
     }
 
     private static Header readHeader(DataInputStream in) throws IOException {
@@ -109,7 +117,18 @@ final class Codec {
         };
         Instrument instrument;
         try {
-            instrument = new Instrument(in.readUTF(), in.readLong(), in.readLong());
+            String symbol = in.readUTF();
+            long maxQuantity = in.readLong();
+            long maxPrice = in.readLong();
+            int bandCount = in.readInt();
+            if (bandCount < 0 || bandCount > 1 << 16) {
+                throw new JournalCorruptedException("invalid tick band count " + bandCount);
+            }
+            List<TickBand> bands = new ArrayList<>(bandCount);
+            for (int i = 0; i < bandCount; i++) {
+                bands.add(new TickBand(in.readLong(), in.readLong()));
+            }
+            instrument = new Instrument(symbol, maxQuantity, maxPrice, bands, in.readLong());
         } catch (IllegalArgumentException e) {
             throw new JournalCorruptedException("invalid instrument in header: " + e.getMessage());
         }
@@ -294,6 +313,12 @@ final class Codec {
                 out.writeLong(e.sequence());
                 out.writeByte(rejectCode(e.reason()));
             }
+            case VolatilityInterruption e -> {
+                out.writeByte(15);
+                out.writeLong(e.sequence());
+                out.writeLong(e.referencePriceTicks());
+                out.writeLong(e.priceTicks());
+            }
             case AuctionPriceDetermined e -> {
                 out.writeByte(14);
                 out.writeLong(e.sequence());
@@ -336,6 +361,7 @@ final class Codec {
             case 12 -> new PhaseChanged(in.readLong(), readPhase(in), readPhase(in));
             case 13 -> new PhaseChangeRejected(in.readLong(), readRejectReason(in));
             case 14 -> new AuctionPriceDetermined(in.readLong(), in.readLong(), in.readLong());
+            case 15 -> new VolatilityInterruption(in.readLong(), in.readLong(), in.readLong());
             default -> throw new JournalCorruptedException("unknown event type " + type);
         };
     }
@@ -359,6 +385,7 @@ final class Codec {
                 out.writeLong(order.displayQuantity());
                 out.writeLong(order.displayedQuantity());
                 writeSelfTrade(out, order.selfTrade());
+                out.writeBoolean(order.day());
             }
             out.writeLong(state.lastTradePriceTicks());
             out.writeInt(state.parkedStops().size());
@@ -371,6 +398,7 @@ final class Codec {
                 writeSelfTrade(out, stop.selfTrade());
             }
             out.writeByte(phaseCode(state.phase()));
+            out.writeLong(state.referencePriceTicks());
         });
     }
 
@@ -390,7 +418,7 @@ final class Codec {
             List<RestingOrder> orders = new ArrayList<>(Math.min(count, 1 << 16));
             for (int i = 0; i < count; i++) {
                 orders.add(new RestingOrder(in.readLong(), readSide(in), in.readLong(), in.readLong(), readBoolean(in),
-                        in.readLong(), in.readLong(), readSelfTrade(in)));
+                        in.readLong(), in.readLong(), readSelfTrade(in), readBoolean(in)));
             }
             long lastTradePrice = in.readLong();
             int stopCount = in.readInt();
@@ -403,8 +431,9 @@ final class Codec {
                         readSelfTrade(in)));
             }
             TradingPhase phase = readPhase(in);
+            long referencePrice = in.readLong();
             return new StoredSnapshot(lastCommandSequence, new EngineSnapshot(header.instrument(), nextOrderId,
-                    nextSequence, orders, lastTradePrice, stops, phase));
+                    nextSequence, orders, lastTradePrice, stops, phase, referencePrice));
         });
     }
 
@@ -459,6 +488,7 @@ final class Codec {
             case INVALID_SELF_TRADE_GROUP -> 11;
             case NOT_ALLOWED_IN_PHASE -> 12;
             case INVALID_PHASE_TRANSITION -> 13;
+            case INVALID_TICK_SIZE -> 14;
         };
     }
 
@@ -478,6 +508,7 @@ final class Codec {
             case 11 -> RejectReason.INVALID_SELF_TRADE_GROUP;
             case 12 -> RejectReason.NOT_ALLOWED_IN_PHASE;
             case 13 -> RejectReason.INVALID_PHASE_TRANSITION;
+            case 14 -> RejectReason.INVALID_TICK_SIZE;
             default -> throw new JournalCorruptedException("unknown reject reason " + code);
         };
     }
@@ -489,6 +520,8 @@ final class Codec {
             case IMMEDIATE_OR_CANCEL -> 3;
             case FILL_OR_KILL -> 4;
             case SELF_TRADE_PREVENTION -> 5;
+            case DAY_EXPIRED -> 6;
+            case VOLATILITY_INTERRUPTION -> 7;
         };
     }
 
@@ -500,6 +533,8 @@ final class Codec {
             case 3 -> CancelReason.IMMEDIATE_OR_CANCEL;
             case 4 -> CancelReason.FILL_OR_KILL;
             case 5 -> CancelReason.SELF_TRADE_PREVENTION;
+            case 6 -> CancelReason.DAY_EXPIRED;
+            case 7 -> CancelReason.VOLATILITY_INTERRUPTION;
             default -> throw new JournalCorruptedException("unknown cancel reason " + code);
         };
     }
@@ -509,6 +544,7 @@ final class Codec {
             case GTC -> 1;
             case IOC -> 2;
             case FOK -> 3;
+            case DAY -> 4;
         };
     }
 
@@ -518,6 +554,7 @@ final class Codec {
             case 1 -> TimeInForce.GTC;
             case 2 -> TimeInForce.IOC;
             case 3 -> TimeInForce.FOK;
+            case 4 -> TimeInForce.DAY;
             default -> throw new JournalCorruptedException("unknown time in force " + code);
         };
     }

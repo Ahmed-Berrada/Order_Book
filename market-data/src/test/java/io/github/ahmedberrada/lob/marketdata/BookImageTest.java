@@ -17,6 +17,7 @@ import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.core.SetPhase;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.StopOrder;
+import io.github.ahmedberrada.lob.core.TickBand;
 import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
 import io.github.ahmedberrada.lob.core.TradingPhase;
@@ -37,7 +38,8 @@ import org.junit.jupiter.api.Test;
 
 class BookImageTest {
 
-    private static final Instrument INSTRUMENT = new Instrument("MD", 50, 200);
+    private static final Instrument INSTRUMENT = new Instrument("MD", 50, 200,
+            List.of(new TickBand(1, 1), new TickBand(104, 2)), 300);
 
     @Provide
     Arbitrary<List<Command>> commands() {
@@ -76,7 +78,7 @@ class BookImageTest {
     }
 
     @Property(tries = 300)
-    @Rulebook({"MD-002", "MD-003", "MD-004", "MD-005", "MD-006", "MD-007", "OT-008", "IC-002", "IC-006", "ST-003", "SP-003", "AU-002", "TP-008"})
+    @Rulebook({"MD-002", "MD-003", "MD-004", "MD-005", "MD-006", "MD-007", "OT-008", "IC-002", "IC-006", "ST-003", "SP-003", "AU-002", "TP-008", "VI-003", "DY-002"})
     void imageAndSubscribersMatchTheEngineAfterEveryCommand(@ForAll("commands") List<Command> commands,
             @ForAll @IntRange(max = 120) int history, @ForAll @IntRange(max = 120) int subscribeAt) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);

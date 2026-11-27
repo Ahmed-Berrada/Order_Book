@@ -31,7 +31,7 @@ Unsupported application messages get a `BusinessMessageReject` (`35=j`).
 | 44 | Price | Required for Limit and Stop limit, forbidden otherwise. Multiple of the tick size (OE-002) |
 | 99 | StopPx | Required for Stop and Stop limit, forbidden otherwise. Multiple of the tick size |
 | 38 | OrderQty | Whole lots |
-| 59 | TimeInForce | Optional, not allowed on stop orders. Limit: `0` Day (default) and `1` GTC rest until cancelled, `3` IOC, `4` FOK. Market: `0` Day (default) and `3` mean IOC, `4` FOK; `1` GTC is rejected (OT-001). Other values are refused |
+| 59 | TimeInForce | Optional, not allowed on stop orders. Limit: `0` Day (default) rests until the instrument closes ([day orders](../rulebook/day-orders.md)), `1` GTC until cancelled, `3` IOC, `4` FOK. Market: `0` Day (default) and `3` mean IOC, `4` FOK; `1` GTC is rejected (OT-001). Other values are refused |
 | 18 | ExecInst | Optional, limit orders only: `6` Participate don't initiate, i.e. post-only (OT-004). Other values are refused |
 | 111 | MaxFloor | Optional, limit GTC orders only: the peak of an [iceberg](../rulebook/iceberg-orders.md) order, in whole lots, at most `OrderQty` (IC-001) |
 | 60 | TransactTime | Required by FIX; the venue's own timestamp is authoritative |
@@ -170,8 +170,11 @@ answered with a `BusinessMessageReject`, reason `6` (Not authorized) (DC-002).
   entered before it still rest and trade, but their fills cannot be reported over FIX, and their
   ClOrdIDs are forgotten. Phase 5 records the member with each command in the journal, which removes
   this limitation.
-- `TimeInForce=0` (Day), FIX's default, is accepted and behaves as GTC: the venue has no trading day
-  yet. Orders will expire at the end of the day once the venue has a trading calendar (phase 4f).
+- A Day order that expires is reported as `ExecType=C` (Expired), `OrdStatus=C`, `Text=DAY_EXPIRED`, when the
+  venue sets the instrument to closed. There is no trading calendar: an operator closes the instrument (REST).
+- A volatility interruption (a fill that would execute outside the band) is not announced over FIX; the
+  affected order's remainder is cancelled with `Text=VOLATILITY_INTERRUPTION`, or rests, and later orders are
+  collected as in any call phase.
 - Trading phases ([trading phases](../rulebook/trading-phases.md)) are set by an operator over REST, not
   announced over FIX: the gateway sends no `TradingSessionStatus`. In a call phase the venue accepts
   limit GTC orders and stops, and rejects the rest with `OrdRejReason=2` (Exchange closed) and text

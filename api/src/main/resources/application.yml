@@ -44,6 +44,12 @@ lob:
       tick-size: "0.01"
       max-order-quantity: 1000000
       max-price: "100000.00"
+      # Optional controls (docs/rulebook/tick-size-regime.md, volatility-interruptions.md). Changing them
+      # for an instrument that already has a journal is refused: they are part of its definition.
+      # tick-regime:
+      #   - {from-price: "0.01", step: "0.01"}
+      #   - {from-price: "50.00", step: "0.05"}
+      # volatility-band-bps: 500
     - symbol: MSFT
       tick-size: "0.01"
       max-order-quantity: 1000000

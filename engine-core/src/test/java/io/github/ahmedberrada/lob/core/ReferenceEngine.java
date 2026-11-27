@@ -21,6 +21,7 @@ final class ReferenceEngine {
         final boolean postOnly;
         final long display;            // 0: fully visible
         final SelfTradeInstruction stp;
+        boolean day;
         long remaining;
         long visible;
 
@@ -49,6 +50,10 @@ final class ReferenceEngine {
     private long lastSequence;
     private boolean stoppedBySelfTrade;
     private TradingPhase phase = TradingPhase.CONTINUOUS;
+    private long reference;
+    private boolean breached;
+    private long breachPrice;
+    private boolean pending;
 
     ReferenceEngine(Instrument instrument) {
         this.instrument = instrument;
@@ -67,8 +72,13 @@ final class ReferenceEngine {
             case StopOrder stop -> stop(stop, events);
             case SetPhase setPhase -> setPhase(setPhase.phase(), events);
         }
-        if (phase == TradingPhase.CONTINUOUS) {
+        if (phase == TradingPhase.CONTINUOUS && !pending) {
             release(events);
+        }
+        if (pending) {
+            pending = false;
+            events.add(new VolatilityInterruption(++lastSequence, reference, breachPrice));
+            changePhase(TradingPhase.CALL, events);
         }
         return events;
     }
@@ -104,7 +114,7 @@ final class ReferenceEngine {
     }
 
     private void release(List<Event> events) {
-        while (true) {
+        while (!pending) {
             Stop next = null;
             for (Stop stop : stops) {                            // arrival order is order ID order
                 if (commandTrades.stream().anyMatch(price -> triggers(stop, price))) {
@@ -141,6 +151,8 @@ final class ReferenceEngine {
             return RejectReason.INVALID_PRICE;
         } else if (isLimit && price > instrument.maxPriceTicks()) {
             return RejectReason.PRICE_ABOVE_MAXIMUM;
+        } else if (isLimit && price % instrument.stepAt(price) != 0) {
+            return RejectReason.INVALID_TICK_SIZE;
         }
         return null;
     }
@@ -173,16 +185,24 @@ final class ReferenceEngine {
         }
         resting.remove(order);
         if (phase == TradingPhase.CALL) {
-            enterCall(new Resting(order.id, order.side, replace.priceTicks(), replace.quantity(), order.postOnly,
-                    order.display, order.stp), events);
+            Resting entering = new Resting(order.id, order.side, replace.priceTicks(), replace.quantity(),
+                    order.postOnly, order.display, order.stp);
+            entering.day = order.day;
+            enterCall(entering, events);
             return;
         }
         long left = fill(order.id, order.side, replace.priceTicks(), true, replace.quantity(), order.stp, events);
         if (stoppedBySelfTrade) {
             events.add(new OrderCancelled(++lastSequence, order.id, left, CancelReason.SELF_TRADE_PREVENTION));
         } else if (left > 0) {
-            rest(new Resting(order.id, order.side, replace.priceTicks(), left, order.postOnly, order.display,
-                    order.stp), events);
+            Resting remainder = new Resting(order.id, order.side, replace.priceTicks(), left, order.postOnly,
+                    order.display, order.stp);
+            remainder.day = order.day;
+            if (breached) {
+                enterCall(remainder, events);
+            } else {
+                rest(remainder, events);
+            }
         }
     }
 
@@ -236,8 +256,36 @@ final class ReferenceEngine {
         if (from == TradingPhase.CALL) {
             uncross(events);
         }
+        changePhase(target, events);
+    }
+
+    private boolean bandOn() {
+        return phase == TradingPhase.CONTINUOUS && instrument.volatilityBandBps() > 0 && reference != 0;
+    }
+
+    private boolean outside(long price) {
+        return bandOn() && Math.abs(price - reference) > reference * instrument.volatilityBandBps() / 10_000;
+    }
+
+    private long clamp(Side side, long price, boolean isLimit) {
+        long limit = isLimit ? price : side == Side.BUY ? Long.MAX_VALUE : Long.MIN_VALUE;
+        if (!bandOn()) {
+            return limit;
+        }
+        long offset = reference * instrument.volatilityBandBps() / 10_000;
+        return side == Side.BUY ? Math.min(limit, reference + offset) : Math.max(limit, reference - offset);
+    }
+
+    private void changePhase(TradingPhase target, List<Event> events) {
+        TradingPhase from = phase;
         phase = target;
         events.add(new PhaseChanged(++lastSequence, from, target));
+        if (target == TradingPhase.CLOSED) {
+            resting.stream().filter(o -> o.day).sorted(Comparator.comparingLong(o -> o.id)).toList().forEach(o -> {
+                resting.remove(o);
+                events.add(new OrderCancelled(++lastSequence, o.id, o.remaining, CancelReason.DAY_EXPIRED));
+            });
+        }
         if (target == TradingPhase.CALL || from == TradingPhase.CALL) {
             resting.stream().filter(o -> o.display != 0).sorted(Comparator.comparingLong(o -> o.id)).toList()
                     .forEach(o -> {
@@ -311,6 +359,7 @@ final class ReferenceEngine {
             }
         }
         lastTrade = price;
+        reference = price;
         commandTrades.add(price);
     }
 
@@ -324,7 +373,7 @@ final class ReferenceEngine {
         long id = ++lastOrderId;
         RejectReason reason = null;
         if (phase == TradingPhase.CLOSED
-                || (phase == TradingPhase.CALL && (!isLimit || tif != TimeInForce.GTC || postOnly))) {
+                || (phase == TradingPhase.CALL && (!isLimit || !tif.rests() || postOnly))) {
             reason = RejectReason.NOT_ALLOWED_IN_PHASE;
         }
         if (reason == null) {
@@ -334,7 +383,7 @@ final class ReferenceEngine {
         if (reason == null) {
             reason = attributeFailure(side, isLimit, tif, postOnly, anyCross, stp);
         }
-        if (reason == null && isLimit && (display < 0 || display > quantity || (display != 0 && tif != TimeInForce.GTC))) {
+        if (reason == null && isLimit && (display < 0 || display > quantity || (display != 0 && !tif.rests()))) {
             reason = RejectReason.INVALID_DISPLAY_QUANTITY;
         }
         if (reason == null && isLimit && stp.group() < 0) {
@@ -346,7 +395,9 @@ final class ReferenceEngine {
         }
         events.add(new OrderAccepted(++lastSequence, id));
         if (phase == TradingPhase.CALL) {
-            enterCall(new Resting(id, side, price, quantity, false, display == quantity ? 0 : display, stp), events);
+            Resting entering = new Resting(id, side, price, quantity, false, display == quantity ? 0 : display, stp);
+            entering.day = tif == TimeInForce.DAY;
+            enterCall(entering, events);
             return;
         }
         complete(id, side, price, isLimit, quantity, tif, postOnly, display == quantity ? 0 : display, stp, events);
@@ -355,11 +406,11 @@ final class ReferenceEngine {
     private RejectReason attributeFailure(Side side, boolean isLimit, TimeInForce tif, boolean postOnly,
             boolean anyCross, SelfTradeInstruction stp) {
         RejectReason reason = null;
-        if (isLimit && postOnly && tif != TimeInForce.GTC) {
+        if (isLimit && postOnly && !tif.rests()) {
             reason = RejectReason.INVALID_TIME_IN_FORCE;
         } else if (isLimit && postOnly && anyCross) {
             reason = RejectReason.POST_ONLY_WOULD_TRADE;
-        } else if (!isLimit && tif == TimeInForce.GTC) {
+        } else if (!isLimit && tif.rests()) {
             reason = RejectReason.INVALID_TIME_IN_FORCE;
         } else if (!isLimit && stp.group() < 0) {
             reason = RejectReason.INVALID_SELF_TRADE_GROUP;
@@ -387,7 +438,7 @@ final class ReferenceEngine {
 
     private void complete(long id, Side side, long price, boolean isLimit, long quantity, TimeInForce tif,
             boolean postOnly, long display, SelfTradeInstruction stp, List<Event> events) {
-        if (tif == TimeInForce.FOK && fillableByFok(side, price, isLimit, stp) < quantity) {
+        if (tif == TimeInForce.FOK && fillableByFok(side, clamp(side, price, isLimit), true, stp) < quantity) {
             events.add(new OrderCancelled(++lastSequence, id, quantity, CancelReason.FILL_OR_KILL));
             return;
         }
@@ -398,11 +449,19 @@ final class ReferenceEngine {
         if (stoppedBySelfTrade) {
             events.add(new OrderCancelled(++lastSequence, id, left, CancelReason.SELF_TRADE_PREVENTION));
         } else if (!isLimit) {
-            events.add(new OrderCancelled(++lastSequence, id, left, CancelReason.UNFILLED_MARKET_REMAINDER));
-        } else if (tif == TimeInForce.GTC) {
-            rest(new Resting(id, side, price, left, postOnly, display, stp), events);
+            events.add(new OrderCancelled(++lastSequence, id, left,
+                    breached ? CancelReason.VOLATILITY_INTERRUPTION : CancelReason.UNFILLED_MARKET_REMAINDER));
+        } else if (tif.rests()) {
+            Resting remainder = new Resting(id, side, price, left, postOnly, display, stp);
+            remainder.day = tif == TimeInForce.DAY;
+            if (breached) {
+                enterCall(remainder, events);
+            } else {
+                rest(remainder, events);
+            }
         } else {
-            events.add(new OrderCancelled(++lastSequence, id, left, CancelReason.IMMEDIATE_OR_CANCEL));
+            events.add(new OrderCancelled(++lastSequence, id, left,
+                    breached ? CancelReason.VOLATILITY_INTERRUPTION : CancelReason.IMMEDIATE_OR_CANCEL));
         }
     }
 
@@ -410,6 +469,7 @@ final class ReferenceEngine {
             List<Event> events) {
         long left = quantity;
         stoppedBySelfTrade = false;
+        breached = false;
         while (left > 0) {
             Resting best = null;
             for (Resting candidate : resting) {
@@ -434,6 +494,12 @@ final class ReferenceEngine {
                 }
                 continue;
             }
+            if (outside(best.price)) {
+                breached = true;
+                breachPrice = best.price;
+                pending = true;
+                break;
+            }
             long fill = Math.min(left, best.visible);
             left -= fill;
             best.remaining -= fill;
@@ -443,6 +509,9 @@ final class ReferenceEngine {
             }
             events.add(new TradeExecuted(++lastSequence, id, best.id, side, best.price, fill, left, best.remaining));
             lastTrade = best.price;
+            if (reference == 0) {
+                reference = lastTrade;
+            }
             commandTrades.add(best.price);
             if (best.remaining > 0 && best.visible == 0) {
                 // a new peak, behind everything else: last in arrival order
