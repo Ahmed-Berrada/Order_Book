@@ -29,5 +29,21 @@ public enum RejectReason {
     /** A phase change asked for the phase the instrument is already in (TP-002). */
     INVALID_PHASE_TRANSITION,
     /** The price is not a multiple of the step of its band (TK-002). */
-    INVALID_TICK_SIZE
+    INVALID_TICK_SIZE,
+    /** The member is suspended (RK-002, RK-004). */
+    MEMBER_SUSPENDED,
+    /** The quantity exceeds the member's limit (RK-002). */
+    RISK_ORDER_QUANTITY,
+    /** Price × quantity exceeds the member's limit (RK-002). */
+    RISK_ORDER_NOTIONAL,
+    /** The price is too far from the last trade price (RK-002). */
+    RISK_PRICE_COLLAR,
+    /** The member has too many open orders (RK-002). */
+    RISK_OPEN_ORDERS,
+    /** The order could take the member's position past its limit (RK-002). */
+    RISK_POSITION,
+    /** A member limit is negative, or the command names member 0 (RK-001). */
+    INVALID_MEMBER_LIMITS,
+    /** Suspending member 0 or a suspended member, or resuming one that is not suspended (RK-004, RK-005). */
+    INVALID_MEMBER
 }

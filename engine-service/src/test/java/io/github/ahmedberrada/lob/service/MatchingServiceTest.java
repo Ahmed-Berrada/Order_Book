@@ -10,11 +10,17 @@ import io.github.ahmedberrada.lob.core.Command;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
+import io.github.ahmedberrada.lob.core.MemberLimits;
+import io.github.ahmedberrada.lob.core.MemberSuspended;
+import io.github.ahmedberrada.lob.core.OrderAccepted;
 import io.github.ahmedberrada.lob.core.OrderBook;
+import io.github.ahmedberrada.lob.core.OrderRejected;
 import io.github.ahmedberrada.lob.core.RestingOrder;
 import io.github.ahmedberrada.lob.core.Rulebook;
+import io.github.ahmedberrada.lob.core.SetMemberLimits;
 import io.github.ahmedberrada.lob.core.SetPhase;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.SuspendMember;
 import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.core.TradingPhase;
 import io.github.ahmedberrada.lob.journal.EventBatch;
@@ -169,6 +175,27 @@ class MatchingServiceTest {
             assertThat(service.book("AAPL", 5).join().asks()).containsExactly(new OrderBook.Level(18_500, 5, 1));
             service.submit("AAPL", new SetPhase(TradingPhase.CONTINUOUS)).join();
             assertThat(service.book("AAPL", 5).join().bids()).isEmpty();
+        }
+    }
+
+    @Test
+    @Rulebook({"MB-001", "RK-002", "RK-004"})
+    void commandsRunForTheirMemberUnderItsLimitsAndTheKillSwitchWorks() throws IOException {
+        try (MatchingService service = start()) {
+            service.submit("AAPL", new SetMemberLimits(1, new MemberLimits(10, 0, 0, 0, 0))).join();
+
+            assertThat(service.submit("AAPL", new LimitOrder(Side.BUY, 18_500, 11), 1, null).join().events())
+                    .first().isInstanceOf(OrderRejected.class);
+            assertThat(service.submit("AAPL", new LimitOrder(Side.BUY, 18_500, 11), null).join().events())
+                    .first().isInstanceOf(OrderAccepted.class);                          // the operator: no limits
+            EventBatch batch = service.submit("AAPL", new LimitOrder(Side.BUY, 18_500, 10), 1, null).join();
+            assertThat(batch.memberId()).isEqualTo(1);
+
+            assertThat(service.submit("AAPL", new SuspendMember(1)).join().events()).first()
+                    .isEqualTo(new MemberSuspended(batch.events().getLast().sequence() + 1, 1, 1));
+            assertThatIllegalArgumentException().isThrownBy(
+                    () -> service.submit("AAPL", new SuspendMember(1), -1, null));
+            assertThat(service.restingQuantity("AAPL", 3).join()).isZero();
         }
     }
 

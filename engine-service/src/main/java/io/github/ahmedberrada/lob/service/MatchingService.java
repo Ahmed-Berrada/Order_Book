@@ -91,8 +91,19 @@ public final class MatchingService implements AutoCloseable {
      * the command's events, for example which session sent it.
      */
     public CompletableFuture<EventBatch> submit(String symbol, Command command, Object context) {
+        return submit(symbol, command, 0, context);
+    }
+
+    /**
+     * Like {@link #submit(String, Command, Object)}, on behalf of a member: the member's limits apply, and
+     * the journal records who sent the command (MB-001, RK-002).
+     */
+    public CompletableFuture<EventBatch> submit(String symbol, Command command, long memberId, Object context) {
         Objects.requireNonNull(command, "command");
-        return withWorker(symbol, worker -> worker.submit(command, context));
+        if (memberId < 0) {
+            throw new IllegalArgumentException("member ID must not be negative: " + memberId);
+        }
+        return withWorker(symbol, worker -> worker.submit(command, memberId, context));
     }
 
     /** Registers a listener for the events of every instrument, from the next command on. */

@@ -24,6 +24,11 @@ class MatchingEnginePropertyTest {
     private static final Instrument INSTRUMENT = new Instrument("PROP", 50, 110,
             List.of(new TickBand(1, 1), new TickBand(104, 2)), 300);
 
+    /** Who sends the command at a position: the operator and three members, in a fixed rotation. */
+    private static long member(int step) {
+        return (step * 7 + step / 3) % 4;
+    }
+
     @Provide
     Arbitrary<List<Command>> commands() {
         Arbitrary<Side> side = Arbitraries.of(Side.class);
@@ -65,7 +70,15 @@ class MatchingEnginePropertyTest {
         Arbitrary<Command> phase = Arbitraries.frequency(
                 Tuple.of(3, TradingPhase.CALL), Tuple.of(3, TradingPhase.CONTINUOUS), Tuple.of(1, TradingPhase.CLOSED))
                 .map(SetPhase::new);
-        return Arbitraries.frequencyOf(Tuple.of(6, limit), Tuple.of(1, market), Tuple.of(2, cancel),
+        Arbitrary<Long> limitValue = Arbitraries.frequency(Tuple.of(3, 0L), Tuple.of(2, 5L), Tuple.of(2, 12L),
+                Tuple.of(1, 400L), Tuple.of(1, -1L));
+        Arbitrary<Command> setLimits = Combinators.combine(Arbitraries.longs().between(0, 3), limitValue, limitValue,
+                Arbitraries.of(0L, 200L, 500L), Arbitraries.of(0L, 2L, 4L), limitValue)
+                .as((m, q, n, c, o, p) -> new SetMemberLimits(m, new MemberLimits(q, n, c, o, p)));
+        Arbitrary<Command> suspend = Arbitraries.longs().between(0, 3).map(SuspendMember::new);
+        Arbitrary<Command> resume = Arbitraries.longs().between(0, 3).map(ResumeMember::new);
+        return Arbitraries.frequencyOf(Tuple.of(2, setLimits), Tuple.of(1, suspend), Tuple.of(1, resume),
+                        Tuple.of(6, limit), Tuple.of(1, market), Tuple.of(2, cancel),
                         Tuple.of(2, replace), Tuple.of(2, stop), Tuple.of(1, phase))
                 .list().ofMaxSize(150);
     }
@@ -77,14 +90,20 @@ class MatchingEnginePropertyTest {
             "ST-005", "ST-006", "ST-007", "SP-001", "SP-002", "SP-003", "SP-004", "SP-005", "SP-006", "SP-007",
             "SP-008", "TP-001", "TP-002", "TP-003", "TP-004", "TP-005", "TP-006", "TP-007", "TP-008",
             "AU-001", "AU-002", "AU-004", "AU-005", "TK-001", "TK-002", "TK-003", "DY-001", "DY-002",
-            "VI-001", "VI-002", "VI-003", "VI-004", "VI-005"})
+            "VI-001", "VI-002", "VI-003", "VI-004", "VI-005", "MB-001", "MB-002", "MB-003", "RK-001", "RK-002",
+            "RK-003", "RK-004", "RK-005"})
     void producesExactlyTheSameEventsAsTheReferenceModel(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
         ReferenceEngine reference = new ReferenceEngine(INSTRUMENT);
 
-        for (Command command : commands) {
-            assertThat(engine.process(command)).as("events for %s", command)
-                    .isEqualTo(reference.process(command));
+        for (int step = 0; step < commands.size(); step++) {
+            Command command = commands.get(step);
+            assertThat(engine.process(command, member(step))).as("events for %s", command)
+                    .isEqualTo(reference.process(command, member(step)));
+            for (long member = 0; member < 4; member++) {
+                assertThat(engine.netPosition(member)).as("position of %d", member)
+                        .isEqualTo(reference.netPosition(member));
+            }
         }
     }
 
@@ -93,8 +112,9 @@ class MatchingEnginePropertyTest {
     void bookIsNeverCrossedAndHoldsOnlyPositiveQuantities(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
 
-        for (Command command : commands) {
-            engine.process(command);
+        for (int step = 0; step < commands.size(); step++) {
+            Command command = commands.get(step);
+            engine.process(command, member(step));
             OrderBook book = engine.book();
             if (engine.phase() != TradingPhase.CALL && book.bestBid().isPresent() && book.bestAsk().isPresent()) {
                 assertThat(book.bestBid().getAsLong()).isLessThan(book.bestAsk().getAsLong());
@@ -126,8 +146,9 @@ class MatchingEnginePropertyTest {
         Map<Long, Long> filled = new HashMap<>();
         Map<Long, Long> cancelled = new HashMap<>();
 
-        for (Command command : commands) {
-            for (Event event : engine.process(command)) {
+        for (int step = 0; step < commands.size(); step++) {
+            Command command = commands.get(step);
+            for (Event event : engine.process(command, member(step))) {
                 switch (event) {
                     case OrderAccepted e -> accepted.put(e.orderId(), quantityOf(command));
                     case TradeExecuted e -> {
@@ -148,6 +169,10 @@ class MatchingEnginePropertyTest {
                     case PhaseChangeRejected e -> { }
                     case AuctionPriceDetermined e -> { }
                     case VolatilityInterruption e -> { }
+                    case MemberLimitsChanged e -> { }
+                    case MemberSuspended e -> { }
+                    case MemberResumed e -> { }
+                    case MemberCommandRejected e -> { }
                 }
             }
 
@@ -176,8 +201,9 @@ class MatchingEnginePropertyTest {
         long expectedSequence = 1;
         long expectedOrderId = 1;
 
-        for (Command command : commands) {
-            List<Event> events = engine.process(command);
+        for (int step = 0; step < commands.size(); step++) {
+            Command command = commands.get(step);
+            List<Event> events = engine.process(command, member(step));
             for (Event event : events) {
                 assertThat(event.sequence()).isEqualTo(expectedSequence++);
             }
@@ -198,27 +224,32 @@ class MatchingEnginePropertyTest {
         MatchingEngine first = new MatchingEngine(INSTRUMENT);
         MatchingEngine second = new MatchingEngine(INSTRUMENT);
 
-        List<Event> firstRun = commands.stream().flatMap(c -> first.process(c).stream()).toList();
-        List<Event> secondRun = commands.stream().flatMap(c -> second.process(c).stream()).toList();
+        List<Event> firstRun = new java.util.ArrayList<>();
+        List<Event> secondRun = new java.util.ArrayList<>();
+        for (int step = 0; step < commands.size(); step++) {
+            firstRun.addAll(first.process(commands.get(step), member(step)));
+            secondRun.addAll(second.process(commands.get(step), member(step)));
+        }
 
         assertThat(secondRun).isEqualTo(firstRun);
     }
 
     @Property
-    @Rulebook({"RS-010", "RS-005", "SP-009", "AU-006", "DY-003", "VI-006"})
+    @Rulebook({"RS-010", "RS-005", "SP-009", "AU-006", "DY-003", "VI-006", "MB-004"})
     void restoringASnapshotAtAnyPointChangesNothing(
             @ForAll("commands") List<Command> commands, @ForAll @IntRange(max = 150) int split) {
         int at = Math.min(split, commands.size());
         MatchingEngine uninterrupted = new MatchingEngine(INSTRUMENT);
         MatchingEngine beforeSnapshot = new MatchingEngine(INSTRUMENT);
-        commands.subList(0, at).forEach(command -> {
-            uninterrupted.process(command);
-            beforeSnapshot.process(command);
-        });
+        for (int step = 0; step < at; step++) {
+            uninterrupted.process(commands.get(step), member(step));
+            beforeSnapshot.process(commands.get(step), member(step));
+        }
 
         MatchingEngine restored = MatchingEngine.restore(beforeSnapshot.snapshot());
-        for (Command command : commands.subList(at, commands.size())) {
-            assertThat(restored.process(command)).isEqualTo(uninterrupted.process(command));
+        for (int step = at; step < commands.size(); step++) {
+            assertThat(restored.process(commands.get(step), member(step)))
+                    .isEqualTo(uninterrupted.process(commands.get(step), member(step)));
         }
         assertThat(restored.snapshot()).isEqualTo(uninterrupted.snapshot());
     }
@@ -231,6 +262,9 @@ class MatchingEnginePropertyTest {
             case ReplaceOrder replace -> throw new AssertionError("a replace is never accepted");
             case StopOrder stop -> stop.quantity();
             case SetPhase setPhase -> throw new AssertionError("a phase change is never accepted");
+            case SetMemberLimits set -> throw new AssertionError("a member command is never accepted");
+            case SuspendMember suspend -> throw new AssertionError("a member command is never accepted");
+            case ResumeMember resume -> throw new AssertionError("a member command is never accepted");
         };
     }
 }

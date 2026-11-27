@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -18,12 +19,23 @@ import java.util.Set;
  * @param memberCompIds   one TargetCompID per member session, provisioned in advance
  * @param dropCopyCompIds read-only sessions that receive a copy of every execution report (DC-001)
  * @param storeDirectory  where sequence numbers and sent messages are persisted
+ * @param memberIds       the member ID of sessions that have a configured one; any other member session
+ *                        takes {@link #selfTradeGroup(String)}. The member ID is also the session's self-trade
+ *                        group (MB-002)
  * @param selfTradeMode   what the venue does when a member's order meets its own resting order (SP-002 to
  *                        SP-004); every member session is its own self-trade prevention group
  */
 public record FixGatewayConfig(
         String bindAddress, int port, String senderCompId, List<String> memberCompIds, List<String> dropCopyCompIds,
-        Path storeDirectory, SelfTradeMode selfTradeMode) {
+        Path storeDirectory, SelfTradeMode selfTradeMode, Map<String, Long> memberIds) {
+
+    /** Members take the member ID derived from their CompID. */
+    public FixGatewayConfig(
+            String bindAddress, int port, String senderCompId, List<String> memberCompIds,
+            List<String> dropCopyCompIds, Path storeDirectory, SelfTradeMode selfTradeMode) {
+        this(bindAddress, port, senderCompId, memberCompIds, dropCopyCompIds, storeDirectory, selfTradeMode,
+                Map.of());
+    }
 
     /** Cancels the incoming order when it meets one of its own member's orders. */
     public FixGatewayConfig(
@@ -47,8 +59,15 @@ public record FixGatewayConfig(
         return compId.hashCode() & 0x7fff_ffffL;
     }
 
+    /** The member a session acts for: its configured member ID, or one derived from its CompID. */
+    public long memberId(String compId) {
+        Long configured = memberIds.get(compId);
+        return configured != null ? configured : selfTradeGroup(compId);
+    }
+
     public FixGatewayConfig {
         Objects.requireNonNull(bindAddress, "bindAddress");
+        memberIds = Map.copyOf(memberIds);
         Objects.requireNonNull(senderCompId, "senderCompId");
         Objects.requireNonNull(storeDirectory, "storeDirectory");
         Objects.requireNonNull(selfTradeMode, "selfTradeMode");
@@ -68,7 +87,8 @@ public record FixGatewayConfig(
         // two members in one group would be prevented from trading with each other: refuse to start instead
         Set<Long> groups = new HashSet<>();
         for (String member : memberCompIds) {
-            if (selfTradeGroup(member) == 0 || !groups.add(selfTradeGroup(member))) {
+            long id = memberIds.getOrDefault(member, selfTradeGroup(member));    // the fields are not set yet
+            if (id <= 0 || !groups.add(id)) {
                 throw new IllegalArgumentException("self-trade group collision for member " + member);
             }
         }

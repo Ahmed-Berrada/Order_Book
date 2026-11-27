@@ -25,6 +25,8 @@ public final class OrderBook {
     private final NavigableMap<Long, PriceLevel> bids = new TreeMap<>(Comparator.reverseOrder());
     private final NavigableMap<Long, PriceLevel> asks = new TreeMap<>();
     private final Map<Long, Order> ordersById = new HashMap<>();
+    /** Open resting orders and their quantities by member (RK-002). */
+    private final Map<Long, Exposure> exposures = new HashMap<>();
 
     OrderBook() {
     }
@@ -74,7 +76,7 @@ public final class OrderBook {
                 for (Order order : level.orders()) {
                     orders.add(new RestingOrder(order.orderId, order.side, order.priceTicks,
                             order.remainingQuantity, order.postOnly, order.displayQuantity, order.displayed,
-                            order.selfTrade, order.day));
+                            order.selfTrade, order.day, order.memberId));
                 }
             }
         }
@@ -90,6 +92,7 @@ public final class OrderBook {
     void rest(Order order) {
         levels(order.side).computeIfAbsent(order.priceTicks, PriceLevel::new).add(order);
         ordersById.put(order.orderId, order);
+        exposures.computeIfAbsent(order.memberId, m -> new Exposure()).add(order.side, order.remainingQuantity);
     }
 
     /**
@@ -100,8 +103,11 @@ public final class OrderBook {
     boolean fillFirst(PriceLevel level, long quantity) {
         Order maker = level.first();
         boolean replenished = level.fillFirst(quantity);
+        Exposure exposure = exposures.get(maker.memberId);
+        exposure.change(maker.side, -quantity);
         if (maker.remainingQuantity == 0) {
             ordersById.remove(maker.orderId);
+            exposure.orders--;
         }
         if (level.isEmpty()) {
             levels(maker.side).remove(level.priceTicks());
@@ -116,6 +122,7 @@ public final class OrderBook {
 
     /** Reduces a resting order's quantity in place, keeping its place in the queue (OT-006). */
     void reduce(Order order, long newQuantity) {
+        exposures.get(order.memberId).change(order.side, newQuantity - order.remainingQuantity);
         levels(order.side).get(order.priceTicks).reduce(order, newQuantity);
     }
 
@@ -141,6 +148,23 @@ public final class OrderBook {
     /** Shows an order's quantity as {@code displayed} (TP-003, TP-008). */
     void show(Order order, long displayed) {
         levels(order.side).get(order.priceTicks).show(order, displayed);
+    }
+
+    /** What a member has resting, or {@code null} if nothing has ever rested (RK-002). */
+    Exposure exposureOf(long memberId) {
+        return exposures.get(memberId);
+    }
+
+    /** Every resting order of a member, by order ID (RK-004). */
+    List<Order> ordersOf(long memberId) {
+        List<Order> found = new ArrayList<>();
+        for (Order order : ordersById.values()) {
+            if (order.memberId == memberId) {
+                found.add(order);
+            }
+        }
+        found.sort(Comparator.comparingLong(order -> order.orderId));
+        return found;
     }
 
     /** Every resting DAY order, by order ID (DY-002). */
@@ -196,6 +220,7 @@ public final class OrderBook {
         if (order == null) {
             return null;
         }
+        exposures.get(order.memberId).remove(order.side, order.remainingQuantity);
         NavigableMap<Long, PriceLevel> side = levels(order.side);
         PriceLevel level = side.get(order.priceTicks);
         level.remove(order);

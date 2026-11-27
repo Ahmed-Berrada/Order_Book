@@ -14,7 +14,7 @@ import java.util.TreeSet;
  */
 final class ReferenceEngine {
 
-    private static final class Resting {
+    private final class Resting {
         final long id;
         final Side side;
         final long price;
@@ -22,6 +22,7 @@ final class ReferenceEngine {
         final long display;            // 0: fully visible
         final SelfTradeInstruction stp;
         boolean day;
+        final long member = takerMember;
         long remaining;
         long visible;
 
@@ -38,7 +39,8 @@ final class ReferenceEngine {
         }
     }
 
-    private record Stop(long id, Side side, long stop, long limit, long quantity, SelfTradeInstruction stp) {
+    private record Stop(long id, Side side, long stop, long limit, long quantity, SelfTradeInstruction stp,
+            long member) {
     }
 
     private final Instrument instrument;
@@ -54,12 +56,27 @@ final class ReferenceEngine {
     private boolean breached;
     private long breachPrice;
     private boolean pending;
+    private long actor;                // who sent the command
+    private long takerMember;          // whose order is entering, which differs for a released stop
+    private final java.util.Map<Long, MemberLimits> limits = new java.util.HashMap<>();
+    private final java.util.Set<Long> suspended = new java.util.HashSet<>();
+    private final java.util.Map<Long, Long> net = new java.util.HashMap<>();
+
+    long netPosition(long member) {
+        return net.getOrDefault(member, 0L);
+    }
 
     ReferenceEngine(Instrument instrument) {
         this.instrument = instrument;
     }
 
     List<Event> process(Command command) {
+        return process(command, 0);
+    }
+
+    List<Event> process(Command command, long member) {
+        actor = member;
+        takerMember = member;
         List<Event> events = new ArrayList<>();
         commandTrades.clear();
         switch (command) {
@@ -71,6 +88,9 @@ final class ReferenceEngine {
             case ReplaceOrder replace -> replace(replace, events);
             case StopOrder stop -> stop(stop, events);
             case SetPhase setPhase -> setPhase(setPhase.phase(), events);
+            case SetMemberLimits set -> setLimits(set, events);
+            case SuspendMember suspend -> suspend(suspend.memberId(), events);
+            case ResumeMember resume -> resume(resume.memberId(), events);
         }
         if (phase == TradingPhase.CONTINUOUS && !pending) {
             release(events);
@@ -100,9 +120,14 @@ final class ReferenceEngine {
             reason = RejectReason.INVALID_SELF_TRADE_GROUP;
         }
         Stop stop = new Stop(id, order.side(), order.stopPriceTicks(), order.limitPriceTicks(), order.quantity(),
-                order.selfTrade());
+                order.selfTrade(), actor);
         if (reason == null && lastTrade != 0 && triggers(stop, lastTrade)) {
             reason = RejectReason.STOP_PRICE_ALREADY_REACHED;
+        }
+        if (reason == null) {
+            boolean isLimit = order.limitPriceTicks() != 0;
+            reason = risk(order.side(), isLimit ? order.limitPriceTicks() : order.stopPriceTicks(),
+                    isLimit ? order.limitPriceTicks() : 0, order.quantity(), 0, false);
         }
         if (reason != null) {
             events.add(new OrderRejected(++lastSequence, id, reason));
@@ -126,6 +151,7 @@ final class ReferenceEngine {
                 return;
             }
             stops.remove(next);
+            takerMember = next.member();
             events.add(new StopTriggered(++lastSequence, next.id()));
             boolean isLimit = next.limit() != 0;
             complete(next.id(), next.side(), next.limit(), isLimit, next.quantity(),
@@ -162,13 +188,17 @@ final class ReferenceEngine {
         RejectReason reason;
         if (phase == TradingPhase.CLOSED) {
             reason = RejectReason.NOT_ALLOWED_IN_PHASE;
-        } else if (order == null) {
+        } else if (order == null || (actor != 0 && order.member != actor)) {
             reason = RejectReason.UNKNOWN_ORDER;
         } else {
             reason = validate(replace.priceTicks(), true, replace.quantity());
             if (reason == null && order.postOnly
                     && resting.stream().anyMatch(o -> crosses(o, order.side, replace.priceTicks(), true))) {
                 reason = RejectReason.POST_ONLY_WOULD_TRADE;
+            }
+            if (reason == null) {
+                reason = risk(order.side, replace.priceTicks(), replace.priceTicks(), replace.quantity(),
+                        order.remaining, true);
             }
         }
         if (reason != null) {
@@ -184,6 +214,7 @@ final class ReferenceEngine {
             return;
         }
         resting.remove(order);
+        takerMember = order.member;
         if (phase == TradingPhase.CALL) {
             Resting entering = new Resting(order.id, order.side, replace.priceTicks(), replace.quantity(),
                     order.postOnly, order.display, order.stp);
@@ -208,20 +239,98 @@ final class ReferenceEngine {
 
     private void cancel(long orderId, List<Event> events) {
         for (Stop stop : stops) {
-            if (stop.id() == orderId) {
+            if (stop.id() == orderId && (actor == 0 || stop.member() == actor)) {
                 stops.remove(stop);
                 events.add(new OrderCancelled(++lastSequence, orderId, stop.quantity(), CancelReason.CLIENT_REQUEST));
                 return;
             }
         }
         for (Resting order : resting) {
-            if (order.id == orderId) {
+            if (order.id == orderId && (actor == 0 || order.member == actor)) {
                 resting.remove(order);
                 events.add(new OrderCancelled(++lastSequence, orderId, order.remaining, CancelReason.CLIENT_REQUEST));
                 return;
             }
         }
         events.add(new CancelRejected(++lastSequence, orderId, RejectReason.UNKNOWN_ORDER));
+    }
+
+    private RejectReason risk(Side side, long notionalPrice, long collarPrice, long quantity, long replaced,
+            boolean replacing) {
+        if (actor == 0 || !(limits.containsKey(actor) || suspended.contains(actor))) {
+            return null;
+        }
+        if (suspended.contains(actor)) {
+            return RejectReason.MEMBER_SUSPENDED;
+        }
+        MemberLimits l = limits.getOrDefault(actor, MemberLimits.NONE);
+        if (l.maxOrderQuantity() > 0 && quantity > l.maxOrderQuantity()) {
+            return RejectReason.RISK_ORDER_QUANTITY;
+        }
+        long price = notionalPrice != 0 ? notionalPrice : lastTrade;
+        if (l.maxOrderNotional() > 0 && price != 0 && price * quantity > l.maxOrderNotional()) {
+            return RejectReason.RISK_ORDER_NOTIONAL;
+        }
+        if (l.priceCollarBps() > 0 && collarPrice != 0 && lastTrade != 0
+                && java.math.BigInteger.valueOf(Math.abs(collarPrice - lastTrade)).multiply(
+                        java.math.BigInteger.valueOf(10_000)).compareTo(java.math.BigInteger.valueOf(lastTrade)
+                        .multiply(java.math.BigInteger.valueOf(l.priceCollarBps()))) > 0) {
+            return RejectReason.RISK_PRICE_COLLAR;
+        }
+        long open = resting.stream().filter(o -> o.member == actor).count()
+                + stops.stream().filter(s -> s.member() == actor).count();
+        if (!replacing && l.maxOpenOrders() > 0 && open >= l.maxOpenOrders()) {
+            return RejectReason.RISK_OPEN_ORDERS;
+        }
+        if (l.maxNetPosition() > 0) {
+            long openSide = resting.stream().filter(o -> o.member == actor && o.side == side)
+                    .mapToLong(o -> o.remaining).sum()
+                    + stops.stream().filter(s -> s.member() == actor && s.side() == side)
+                    .mapToLong(Stop::quantity).sum() - replaced;
+            long position = netPosition(actor);
+            long worst = (side == Side.BUY ? position : -position) + openSide + quantity;
+            if (worst > l.maxNetPosition()) {
+                return RejectReason.RISK_POSITION;
+            }
+        }
+        return null;
+    }
+
+    private void setLimits(SetMemberLimits set, List<Event> events) {
+        if (set.memberId() <= 0 || !set.limits().isValid()) {
+            events.add(new MemberCommandRejected(++lastSequence, set.memberId(), RejectReason.INVALID_MEMBER_LIMITS));
+            return;
+        }
+        limits.put(set.memberId(), set.limits());
+        events.add(new MemberLimitsChanged(++lastSequence, set.memberId(), set.limits()));
+    }
+
+    private void suspend(long member, List<Event> events) {
+        if (member <= 0 || suspended.contains(member)) {
+            events.add(new MemberCommandRejected(++lastSequence, member, RejectReason.INVALID_MEMBER));
+            return;
+        }
+        suspended.add(member);
+        List<Resting> orders = resting.stream().filter(o -> o.member == member).toList();
+        List<Stop> parked = stops.stream().filter(s -> s.member() == member).toList();
+        events.add(new MemberSuspended(++lastSequence, member, orders.size() + parked.size()));
+        java.util.TreeMap<Long, Event> cancels = new java.util.TreeMap<>();
+        orders.forEach(o -> cancels.put(o.id, new OrderCancelled(0, o.id, o.remaining, CancelReason.KILL_SWITCH)));
+        parked.forEach(s -> cancels.put(s.id(), new OrderCancelled(0, s.id(), s.quantity(), CancelReason.KILL_SWITCH)));
+        resting.removeAll(orders);
+        stops.removeAll(parked);
+        cancels.values().forEach(c -> {
+            OrderCancelled e = (OrderCancelled) c;
+            events.add(new OrderCancelled(++lastSequence, e.orderId(), e.cancelledQuantity(), e.reason()));
+        });
+    }
+
+    private void resume(long member, List<Event> events) {
+        if (!suspended.remove(member)) {
+            events.add(new MemberCommandRejected(++lastSequence, member, RejectReason.INVALID_MEMBER));
+            return;
+        }
+        events.add(new MemberResumed(++lastSequence, member));
     }
 
     private void enterCall(Resting order, List<Event> events) {
@@ -348,7 +457,10 @@ final class ReferenceEngine {
             Resting taker = buy.id > sell.id ? buy : sell;
             Resting maker = taker == buy ? sell : buy;
             events.add(new TradeExecuted(++lastSequence, taker.id, maker.id, taker.side, price, fill,
-                    taker.remaining, maker.remaining));
+                    taker.remaining, maker.remaining, taker.member, maker.member));
+            long signed = taker.side == Side.BUY ? fill : -fill;
+            net.merge(taker.member, signed, Long::sum);
+            net.merge(maker.member, -signed, Long::sum);
             if (buy.remaining == 0) {
                 resting.remove(buy);
                 b++;
@@ -388,6 +500,9 @@ final class ReferenceEngine {
         }
         if (reason == null && isLimit && stp.group() < 0) {
             reason = RejectReason.INVALID_SELF_TRADE_GROUP;
+        }
+        if (reason == null) {
+            reason = risk(side, isLimit ? price : 0, isLimit ? price : 0, quantity, 0, false);
         }
         if (reason != null) {
             events.add(new OrderRejected(++lastSequence, id, reason));
@@ -507,7 +622,11 @@ final class ReferenceEngine {
             if (best.remaining == 0) {
                 resting.remove(best);
             }
-            events.add(new TradeExecuted(++lastSequence, id, best.id, side, best.price, fill, left, best.remaining));
+            events.add(new TradeExecuted(++lastSequence, id, best.id, side, best.price, fill, left, best.remaining,
+                    takerMember, best.member));
+            long signed = side == Side.BUY ? fill : -fill;
+            net.merge(takerMember, signed, Long::sum);
+            net.merge(best.member, -signed, Long::sum);
             lastTrade = best.price;
             if (reference == 0) {
                 reference = lastTrade;

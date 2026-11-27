@@ -7,6 +7,8 @@ package io.github.ahmedberrada.lob.core;
  * @param aggressorSide         side of the taker; the buyer and seller follow from it
  * @param takerRemainingQuantity quantity of the taker still unfilled after this trade
  * @param makerRemainingQuantity quantity of the maker still resting after this trade
+ * @param takerMemberId          the member of the taker (MB-002)
+ * @param makerMemberId          the member of the maker (MB-002)
  */
 public record TradeExecuted(
         long sequence,
@@ -16,5 +18,14 @@ public record TradeExecuted(
         long priceTicks,
         long quantity,
         long takerRemainingQuantity,
-        long makerRemainingQuantity) implements Event {
+        long makerRemainingQuantity,
+        long takerMemberId,
+        long makerMemberId) implements Event {
+
+    /** A trade between members 0, as when the engine is used without members. */
+    public TradeExecuted(long sequence, long takerOrderId, long makerOrderId, Side aggressorSide, long priceTicks,
+            long quantity, long takerRemainingQuantity, long makerRemainingQuantity) {
+        this(sequence, takerOrderId, makerOrderId, aggressorSide, priceTicks, quantity, takerRemainingQuantity,
+                makerRemainingQuantity, 0, 0);
+    }
 }

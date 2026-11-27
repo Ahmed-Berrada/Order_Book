@@ -56,6 +56,11 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     @ExceptionHandler
+    ResponseEntity<ProblemDetail> memberCommandRejected(MemberCommandRejectedException e) {
+        return problem(HttpStatus.CONFLICT, "Member command refused", e.getMessage(), e.reason().name());
+    }
+
+    @ExceptionHandler
     ResponseEntity<ProblemDetail> phaseUnchanged(PhaseChangeRejectedException e) {
         return problem(HttpStatus.CONFLICT, "Phase unchanged", e.getMessage(),
                 RejectReason.INVALID_PHASE_TRANSITION.name());

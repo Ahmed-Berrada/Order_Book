@@ -1,5 +1,6 @@
 package io.github.ahmedberrada.lob.journal;
 
+import io.github.ahmedberrada.lob.core.AuctionPriceDetermined;
 import io.github.ahmedberrada.lob.core.CancelOrder;
 import io.github.ahmedberrada.lob.core.CancelReason;
 import io.github.ahmedberrada.lob.core.CancelRejected;
@@ -9,32 +10,40 @@ import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.Instrument;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
-import io.github.ahmedberrada.lob.core.AuctionPriceDetermined;
+import io.github.ahmedberrada.lob.core.MemberCommandRejected;
+import io.github.ahmedberrada.lob.core.MemberLimits;
+import io.github.ahmedberrada.lob.core.MemberLimitsChanged;
+import io.github.ahmedberrada.lob.core.MemberResumed;
+import io.github.ahmedberrada.lob.core.MemberState;
+import io.github.ahmedberrada.lob.core.MemberSuspended;
 import io.github.ahmedberrada.lob.core.OrderAccepted;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
 import io.github.ahmedberrada.lob.core.OrderParked;
-import io.github.ahmedberrada.lob.core.PhaseChangeRejected;
-import io.github.ahmedberrada.lob.core.PhaseChanged;
 import io.github.ahmedberrada.lob.core.OrderRejected;
 import io.github.ahmedberrada.lob.core.OrderReplaced;
 import io.github.ahmedberrada.lob.core.OrderReplenished;
 import io.github.ahmedberrada.lob.core.OrderRested;
 import io.github.ahmedberrada.lob.core.ParkedStop;
+import io.github.ahmedberrada.lob.core.PhaseChangeRejected;
+import io.github.ahmedberrada.lob.core.PhaseChanged;
 import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.ReplaceRejected;
 import io.github.ahmedberrada.lob.core.RestingOrder;
+import io.github.ahmedberrada.lob.core.ResumeMember;
 import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
-import io.github.ahmedberrada.lob.core.SetPhase;
 import io.github.ahmedberrada.lob.core.SelfTradeMode;
+import io.github.ahmedberrada.lob.core.SetMemberLimits;
+import io.github.ahmedberrada.lob.core.SetPhase;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.StopTriggered;
-import io.github.ahmedberrada.lob.core.VolatilityInterruption;
+import io.github.ahmedberrada.lob.core.SuspendMember;
 import io.github.ahmedberrada.lob.core.TickBand;
 import io.github.ahmedberrada.lob.core.TimeInForce;
-import io.github.ahmedberrada.lob.core.TradingPhase;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
+import io.github.ahmedberrada.lob.core.TradingPhase;
+import io.github.ahmedberrada.lob.core.VolatilityInterruption;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -54,7 +63,7 @@ import java.util.List;
 final class Codec {
 
     static final int MAGIC = 0x4C4F424A;            // "LOBJ"
-    static final short FORMAT_VERSION = 7;
+    static final short FORMAT_VERSION = 8;
 
     enum Kind {
         COMMANDS(1), EVENTS(2), SNAPSHOT(3);
@@ -141,6 +150,7 @@ final class Codec {
         return encode(out -> {
             out.writeLong(entry.sequence());
             out.writeLong(entry.timestampMicros());
+            out.writeLong(entry.memberId());
             switch (entry.command()) {
                 case LimitOrder order -> {
                     out.writeByte(1);
@@ -181,6 +191,23 @@ final class Codec {
                     out.writeByte(6);
                     out.writeByte(phaseCode(setPhase.phase()));
                 }
+                case SetMemberLimits set -> {
+                    out.writeByte(7);
+                    out.writeLong(set.memberId());
+                    out.writeLong(set.limits().maxOrderQuantity());
+                    out.writeLong(set.limits().maxOrderNotional());
+                    out.writeLong(set.limits().priceCollarBps());
+                    out.writeLong(set.limits().maxOpenOrders());
+                    out.writeLong(set.limits().maxNetPosition());
+                }
+                case SuspendMember suspend -> {
+                    out.writeByte(8);
+                    out.writeLong(suspend.memberId());
+                }
+                case ResumeMember resume -> {
+                    out.writeByte(9);
+                    out.writeLong(resume.memberId());
+                }
             }
         });
     }
@@ -189,6 +216,7 @@ final class Codec {
         return decode(payload, in -> {
             long sequence = in.readLong();
             long timestamp = in.readLong();
+            long memberId = in.readLong();
             byte type = in.readByte();
             Command command = switch (type) {
                 case 1 -> new LimitOrder(readSide(in), in.readLong(), in.readLong(), readTif(in), readBoolean(in),
@@ -198,9 +226,16 @@ final class Codec {
                 case 4 -> new ReplaceOrder(in.readLong(), in.readLong(), in.readLong());
                 case 5 -> new StopOrder(readSide(in), in.readLong(), in.readLong(), in.readLong(), readSelfTrade(in));
                 case 6 -> new SetPhase(readPhase(in));
+                case 7 -> new SetMemberLimits(in.readLong(), new MemberLimits(
+                        in.readLong(), in.readLong(), in.readLong(), in.readLong(), in.readLong()));
+                case 8 -> new SuspendMember(in.readLong());
+                case 9 -> new ResumeMember(in.readLong());
                 default -> throw new JournalCorruptedException("unknown command type " + type);
             };
-            return new JournalEntry(sequence, timestamp, command);
+            if (memberId < 0) {
+                throw new JournalCorruptedException("negative member ID " + memberId);
+            }
+            return new JournalEntry(sequence, timestamp, command, memberId);
         });
     }
 
@@ -210,6 +245,7 @@ final class Codec {
         return encode(out -> {
             out.writeLong(batch.commandSequence());
             out.writeLong(batch.timestampMicros());
+            out.writeLong(batch.memberId());
             out.writeInt(batch.events().size());
             for (Event event : batch.events()) {
                 writeEvent(out, event);
@@ -221,6 +257,7 @@ final class Codec {
         return decode(payload, in -> {
             long commandSequence = in.readLong();
             long timestamp = in.readLong();
+            long memberId = in.readLong();
             int count = in.readInt();
             if (count < 0) {
                 throw new JournalCorruptedException("negative event count " + count);
@@ -229,7 +266,7 @@ final class Codec {
             for (int i = 0; i < count; i++) {
                 events.add(readEvent(in));
             }
-            return new EventBatch(commandSequence, timestamp, events);
+            return new EventBatch(commandSequence, timestamp, events, memberId);
         });
     }
 
@@ -256,6 +293,8 @@ final class Codec {
                 out.writeLong(e.quantity());
                 out.writeLong(e.takerRemainingQuantity());
                 out.writeLong(e.makerRemainingQuantity());
+                out.writeLong(e.takerMemberId());
+                out.writeLong(e.makerMemberId());
             }
             case OrderRested e -> {
                 out.writeByte(4);
@@ -313,6 +352,33 @@ final class Codec {
                 out.writeLong(e.sequence());
                 out.writeByte(rejectCode(e.reason()));
             }
+            case MemberLimitsChanged e -> {
+                out.writeByte(16);
+                out.writeLong(e.sequence());
+                out.writeLong(e.memberId());
+                out.writeLong(e.limits().maxOrderQuantity());
+                out.writeLong(e.limits().maxOrderNotional());
+                out.writeLong(e.limits().priceCollarBps());
+                out.writeLong(e.limits().maxOpenOrders());
+                out.writeLong(e.limits().maxNetPosition());
+            }
+            case MemberSuspended e -> {
+                out.writeByte(17);
+                out.writeLong(e.sequence());
+                out.writeLong(e.memberId());
+                out.writeLong(e.cancelledOrders());
+            }
+            case MemberResumed e -> {
+                out.writeByte(18);
+                out.writeLong(e.sequence());
+                out.writeLong(e.memberId());
+            }
+            case MemberCommandRejected e -> {
+                out.writeByte(19);
+                out.writeLong(e.sequence());
+                out.writeLong(e.memberId());
+                out.writeByte(rejectCode(e.reason()));
+            }
             case VolatilityInterruption e -> {
                 out.writeByte(15);
                 out.writeLong(e.sequence());
@@ -347,7 +413,7 @@ final class Codec {
             case 1 -> new OrderAccepted(in.readLong(), in.readLong());
             case 2 -> new OrderRejected(in.readLong(), in.readLong(), readRejectReason(in));
             case 3 -> new TradeExecuted(in.readLong(), in.readLong(), in.readLong(), readSide(in),
-                    in.readLong(), in.readLong(), in.readLong(), in.readLong());
+                    in.readLong(), in.readLong(), in.readLong(), in.readLong(), in.readLong(), in.readLong());
             case 4 -> new OrderRested(in.readLong(), in.readLong(), readSide(in), in.readLong(), in.readLong(),
                     in.readLong());
             case 5 -> new OrderCancelled(in.readLong(), in.readLong(), in.readLong(), readCancelReason(in));
@@ -362,6 +428,11 @@ final class Codec {
             case 13 -> new PhaseChangeRejected(in.readLong(), readRejectReason(in));
             case 14 -> new AuctionPriceDetermined(in.readLong(), in.readLong(), in.readLong());
             case 15 -> new VolatilityInterruption(in.readLong(), in.readLong(), in.readLong());
+            case 16 -> new MemberLimitsChanged(in.readLong(), in.readLong(), new MemberLimits(
+                    in.readLong(), in.readLong(), in.readLong(), in.readLong(), in.readLong()));
+            case 17 -> new MemberSuspended(in.readLong(), in.readLong(), in.readLong());
+            case 18 -> new MemberResumed(in.readLong(), in.readLong());
+            case 19 -> new MemberCommandRejected(in.readLong(), in.readLong(), readRejectReason(in));
             default -> throw new JournalCorruptedException("unknown event type " + type);
         };
     }
@@ -386,6 +457,7 @@ final class Codec {
                 out.writeLong(order.displayedQuantity());
                 writeSelfTrade(out, order.selfTrade());
                 out.writeBoolean(order.day());
+                out.writeLong(order.memberId());
             }
             out.writeLong(state.lastTradePriceTicks());
             out.writeInt(state.parkedStops().size());
@@ -396,9 +468,21 @@ final class Codec {
                 out.writeLong(stop.limitPriceTicks());
                 out.writeLong(stop.quantity());
                 writeSelfTrade(out, stop.selfTrade());
+                out.writeLong(stop.memberId());
             }
             out.writeByte(phaseCode(state.phase()));
             out.writeLong(state.referencePriceTicks());
+            out.writeInt(state.members().size());
+            for (MemberState member : state.members()) {
+                out.writeLong(member.memberId());
+                out.writeLong(member.limits().maxOrderQuantity());
+                out.writeLong(member.limits().maxOrderNotional());
+                out.writeLong(member.limits().priceCollarBps());
+                out.writeLong(member.limits().maxOpenOrders());
+                out.writeLong(member.limits().maxNetPosition());
+                out.writeBoolean(member.suspended());
+                out.writeLong(member.netPosition());
+            }
         });
     }
 
@@ -418,7 +502,7 @@ final class Codec {
             List<RestingOrder> orders = new ArrayList<>(Math.min(count, 1 << 16));
             for (int i = 0; i < count; i++) {
                 orders.add(new RestingOrder(in.readLong(), readSide(in), in.readLong(), in.readLong(), readBoolean(in),
-                        in.readLong(), in.readLong(), readSelfTrade(in), readBoolean(in)));
+                        in.readLong(), in.readLong(), readSelfTrade(in), readBoolean(in), in.readLong()));
             }
             long lastTradePrice = in.readLong();
             int stopCount = in.readInt();
@@ -428,12 +512,22 @@ final class Codec {
             List<ParkedStop> stops = new ArrayList<>(Math.min(stopCount, 1 << 16));
             for (int i = 0; i < stopCount; i++) {
                 stops.add(new ParkedStop(in.readLong(), readSide(in), in.readLong(), in.readLong(), in.readLong(),
-                        readSelfTrade(in)));
+                        readSelfTrade(in), in.readLong()));
             }
             TradingPhase phase = readPhase(in);
             long referencePrice = in.readLong();
+            int memberCount = in.readInt();
+            if (memberCount < 0) {
+                throw new JournalCorruptedException("negative member count " + memberCount);
+            }
+            List<MemberState> members = new ArrayList<>(Math.min(memberCount, 1 << 16));
+            for (int i = 0; i < memberCount; i++) {
+                members.add(new MemberState(in.readLong(), new MemberLimits(
+                        in.readLong(), in.readLong(), in.readLong(), in.readLong(), in.readLong()),
+                        readBoolean(in), in.readLong()));
+            }
             return new StoredSnapshot(lastCommandSequence, new EngineSnapshot(header.instrument(), nextOrderId,
-                    nextSequence, orders, lastTradePrice, stops, phase, referencePrice));
+                    nextSequence, orders, lastTradePrice, stops, phase, referencePrice, members));
         });
     }
 
@@ -489,6 +583,14 @@ final class Codec {
             case NOT_ALLOWED_IN_PHASE -> 12;
             case INVALID_PHASE_TRANSITION -> 13;
             case INVALID_TICK_SIZE -> 14;
+            case MEMBER_SUSPENDED -> 15;
+            case RISK_ORDER_QUANTITY -> 16;
+            case RISK_ORDER_NOTIONAL -> 17;
+            case RISK_PRICE_COLLAR -> 18;
+            case RISK_OPEN_ORDERS -> 19;
+            case RISK_POSITION -> 20;
+            case INVALID_MEMBER_LIMITS -> 21;
+            case INVALID_MEMBER -> 22;
         };
     }
 
@@ -509,6 +611,14 @@ final class Codec {
             case 12 -> RejectReason.NOT_ALLOWED_IN_PHASE;
             case 13 -> RejectReason.INVALID_PHASE_TRANSITION;
             case 14 -> RejectReason.INVALID_TICK_SIZE;
+            case 15 -> RejectReason.MEMBER_SUSPENDED;
+            case 16 -> RejectReason.RISK_ORDER_QUANTITY;
+            case 17 -> RejectReason.RISK_ORDER_NOTIONAL;
+            case 18 -> RejectReason.RISK_PRICE_COLLAR;
+            case 19 -> RejectReason.RISK_OPEN_ORDERS;
+            case 20 -> RejectReason.RISK_POSITION;
+            case 21 -> RejectReason.INVALID_MEMBER_LIMITS;
+            case 22 -> RejectReason.INVALID_MEMBER;
             default -> throw new JournalCorruptedException("unknown reject reason " + code);
         };
     }
@@ -522,6 +632,7 @@ final class Codec {
             case SELF_TRADE_PREVENTION -> 5;
             case DAY_EXPIRED -> 6;
             case VOLATILITY_INTERRUPTION -> 7;
+            case KILL_SWITCH -> 8;
         };
     }
 
@@ -535,6 +646,7 @@ final class Codec {
             case 5 -> CancelReason.SELF_TRADE_PREVENTION;
             case 6 -> CancelReason.DAY_EXPIRED;
             case 7 -> CancelReason.VOLATILITY_INTERRUPTION;
+            case 8 -> CancelReason.KILL_SWITCH;
             default -> throw new JournalCorruptedException("unknown cancel reason " + code);
         };
     }

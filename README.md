@@ -25,8 +25,8 @@ backed by **invariant tests**, and **measured before it is optimised**.
 > [stop orders](docs/rulebook/stop-orders.md) and
 > [self-trade prevention](docs/rulebook/self-trade-prevention.md) [trading phases and call auctions](docs/rulebook/trading-phases.md),
 > [tick sizes](docs/rulebook/tick-size-regime.md), [day orders](docs/rulebook/day-orders.md) and
-> [volatility interruptions](docs/rulebook/volatility-interruptions.md) are in force; per-member limits come
-> with members (phase 5) (see [Roadmap](#roadmap)).
+> [volatility interruptions](docs/rulebook/volatility-interruptions.md) are in force. **Phase 5:** members,
+> [pre-trade limits and the kill switch](docs/rulebook/members-and-risk.md) are in force (see [Roadmap](#roadmap)).
 
 ---
 
@@ -307,7 +307,8 @@ The full rationale is in [ADR-0001](docs/adr/0001-foundations.md), [ADR-0002](do
 [ADR-0006](docs/adr/0006-fix-gateway.md), [ADR-0007](docs/adr/0007-market-data.md),
 [ADR-0008](docs/adr/0008-binary-feed-and-drop-copy.md), [ADR-0009](docs/adr/0009-order-types-and-replace.md),
 [ADR-0010](docs/adr/0010-iceberg-orders.md), [ADR-0011](docs/adr/0011-stop-orders.md) and
-[ADR-0012](docs/adr/0012-self-trade-prevention.md) [ADR-0013](docs/adr/0013-trading-phases-and-auctions.md) and [ADR-0014](docs/adr/0014-venue-controls.md).
+[ADR-0012](docs/adr/0012-self-trade-prevention.md) [ADR-0013](docs/adr/0013-trading-phases-and-auctions.md), [ADR-0014](docs/adr/0014-venue-controls.md) and
+[ADR-0015](docs/adr/0015-members-and-risk.md).
 The matching behaviour itself is specified in the [rulebook](docs/rulebook/continuous-trading.md).
 
 | Decision | Choice | Reason |

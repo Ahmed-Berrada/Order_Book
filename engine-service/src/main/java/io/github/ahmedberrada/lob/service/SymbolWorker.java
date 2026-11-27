@@ -69,6 +69,10 @@ final class SymbolWorker implements AutoCloseable {
     }
 
     CompletableFuture<EventBatch> submit(Command command, Object context) {
+        return submit(command, 0, context);
+    }
+
+    CompletableFuture<EventBatch> submit(Command command, long memberId, Object context) {
         if (halted) {
             return CompletableFuture.failedFuture(new RequestRefusedException(Reason.HALTED, symbol));
         }
@@ -77,7 +81,7 @@ final class SymbolWorker implements AutoCloseable {
                 throw new RequestRefusedException(Reason.HALTED, symbol);
             }
             try {
-                EventBatch batch = engine.process(command);
+                EventBatch batch = engine.process(command, memberId);
                 halted = engine.isStopped();    // a later write failed: this command counts, the next ones do not
                 notifyListeners(batch, context);
                 return batch;

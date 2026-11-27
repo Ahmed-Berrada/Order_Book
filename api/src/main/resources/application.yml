@@ -54,3 +54,15 @@ lob:
       tick-size: "0.01"
       max-order-quantity: 1000000
       max-price: "100000.00"
+  # Members and their pre-trade limits per instrument (docs/rulebook/members-and-risk.md). A limit of 0 means
+  # none. A FIX session in no member takes a member ID derived from its CompID.
+  # members:
+  #   - id: 1
+  #     name: Alpha Capital
+  #     fix-comp-ids: [MEMBER1]
+  #     limits:
+  #       max-order-quantity: 10000
+  #       max-order-notional: "2000000.00"
+  #       price-collar-bps: 500
+  #       max-open-orders: 500
+  #       max-net-position: 50000
