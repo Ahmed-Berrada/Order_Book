@@ -14,7 +14,6 @@ import org.springframework.security.authentication.event.AbstractAuthenticationF
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -102,7 +101,11 @@ class SecurityConfiguration {
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, LobProperties properties) throws Exception {
-        http.csrf(AbstractHttpConfigurer::disable)                       // no cookie carries authority (ADR-0017 §2)
+        // A browser that has answered a Basic challenge resends the credentials on its own, so a page on
+        // another site could make it act for the user. The CSRF filter therefore applies to every write a
+        // browser marks as cross-site; such a request cannot carry a token (no session hands one out) and is
+        // refused. Machine clients send no Fetch Metadata and are not affected (AC-008, ADR-0017 §2).
+        http.csrf(c -> c.requireCsrfProtectionMatcher(CrossSiteWrites.MATCHER))
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
         if (!properties.security().enabled()) {
             LOG.warn("lob.security.enabled is false: every caller who reaches this port is trusted as the operator");

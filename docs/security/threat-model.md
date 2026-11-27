@@ -31,6 +31,7 @@ below the edges assumes the edges did their job.
 |---|---|---|---|---|---|
 | 1 | A caller acts as another member or as the operator | Spoofing | REST, FIX | HTTP Basic or FIX Logon password; hashed secrets; member bound to the user; header naming another member refused (AC-001 to AC-005, AC-007) | Mitigated, over TLS only (see 5) |
 | 2 | Guessing credentials | Spoofing | REST, FIX | Bcrypt hashes make each guess expensive; failures are logged (AC-006) | Partial: no throttling or lock-out (ingress, phase 9) |
+| 2a | A page on another site makes a logged-in browser enter or cancel orders (cross-site request forgery with cached Basic credentials) | Spoofing, Tampering | REST | Writes a browser marks as cross-site (`Sec-Fetch-Site`, or `Origin` from old browsers) are refused (AC-008) | Mitigated for current browsers; a browser that sends neither header is not detected |
 | 3 | Cancel or replace another member's order | Tampering | engine | Ownership of cancels and replaces; the answer is `UNKNOWN_ORDER` (MB-003) | Mitigated |
 | 4 | A member's runaway algorithm floods or distorts the book | Tampering, DoS | engine | Pre-trade limits, collar, kill switch (RK-001 to RK-005); the bounded queue refuses overload (OE-005) | Partial: no message-rate limit; operator-triggered kill only |
 | 5 | Credentials or orders read or altered on the network | Information disclosure, Tampering | REST, FIX, feeds | The ports listen on loopback by default | Partial: no TLS in the application; terminate TLS in front of it (phase 9); no mutual TLS for FIX yet |
