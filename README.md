@@ -472,6 +472,16 @@ AAPL-4,2026-11-26,2026-11-26T09:00:00.000001Z,AAPL,2,2,BUY,TAKER,18550,185.50,10
 AAPL-4,2026-11-26,2026-11-26T09:00:00.000001Z,AAPL,1,1,SELL,MAKER,18550,185.50,100,18550.00,-0.2,-0.37
 ```
 
+### Market analytics
+
+`analytics/` reads the trade file and the order records and reports the day: VWAP, open, high, low and
+close, auction share, the venue's fee revenue, trade-size percentiles, realized volatility, price impact
+(Kyle's lambda) and each member's order-to-trade ratio (RTS 9). Definitions: [analytics](docs/analytics.md).
+
+```bash
+cd analytics && python3 -m lob_analytics --trades AAPL-trades.csv --records AAPL-records.csv
+```
+
 ### Running it in production
 
 The venue is packaged as a container image (`Dockerfile`) and a Helm chart (`deploy/helm/lob-engine`): one
@@ -544,7 +554,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; RTS 22 reports, surveillance | ⏳ |
 | 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅; TLS and mTLS (phase 9), OIDC | ⏳ |
 | 9 | **Operations & resilience**: [Prometheus metrics, probes and alerts](docs/operations/observability.md) ✅, [runbook](docs/operations/runbook.md) ✅, one writer per journal ✅, soak test ✅, container image, compose stack and Helm chart ✅, [HA design](docs/adr/0018-operations-and-high-availability.md) ✅; replication and failover, chaos tests | ⏳ |
-| 10 | **Post-trade & analytics** *(optional)*: [clearing trade file and maker/taker/auction fees](docs/interfaces/trade-file.md) ✅; Python microstructure analytics | ⏳ |
+| 10 | **Post-trade & analytics** *(optional)*: [clearing trade file and maker/taker/auction fees](docs/interfaces/trade-file.md) ✅, [Python microstructure analytics](docs/analytics.md) ✅ | ✅ |
 
 ---
 
@@ -558,6 +568,7 @@ Order_Book/
 ├── fix-gateway/        FIX 4.4 order entry (QuickFIX/J)
 ├── market-data/        level-2 feed built from the event stream
 ├── post-trade/         clearing trade file and fees, computed from the journals
+├── analytics/          Python market report from the post-trade files (standard library only)
 ├── api/                Spring Boot REST adapter, OpenAPI
 ├── docs/adr/           architecture decision records
 ├── docs/rulebook/      venue rules, cited by tests
