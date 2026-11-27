@@ -9,9 +9,12 @@ import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.Instrument;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
+import io.github.ahmedberrada.lob.core.AuctionPriceDetermined;
 import io.github.ahmedberrada.lob.core.OrderAccepted;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
 import io.github.ahmedberrada.lob.core.OrderParked;
+import io.github.ahmedberrada.lob.core.PhaseChangeRejected;
+import io.github.ahmedberrada.lob.core.PhaseChanged;
 import io.github.ahmedberrada.lob.core.OrderRejected;
 import io.github.ahmedberrada.lob.core.OrderReplaced;
 import io.github.ahmedberrada.lob.core.OrderReplenished;
@@ -22,11 +25,13 @@ import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.ReplaceRejected;
 import io.github.ahmedberrada.lob.core.RestingOrder;
 import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
+import io.github.ahmedberrada.lob.core.SetPhase;
 import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.StopTriggered;
 import io.github.ahmedberrada.lob.core.TimeInForce;
+import io.github.ahmedberrada.lob.core.TradingPhase;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -47,7 +52,7 @@ import java.util.List;
 final class Codec {
 
     static final int MAGIC = 0x4C4F424A;            // "LOBJ"
-    static final short FORMAT_VERSION = 5;
+    static final short FORMAT_VERSION = 6;
 
     enum Kind {
         COMMANDS(1), EVENTS(2), SNAPSHOT(3);
@@ -153,6 +158,10 @@ final class Codec {
                     out.writeLong(stop.quantity());
                     writeSelfTrade(out, stop.selfTrade());
                 }
+                case SetPhase setPhase -> {
+                    out.writeByte(6);
+                    out.writeByte(phaseCode(setPhase.phase()));
+                }
             }
         });
     }
@@ -169,6 +178,7 @@ final class Codec {
                 case 3 -> new CancelOrder(in.readLong());
                 case 4 -> new ReplaceOrder(in.readLong(), in.readLong(), in.readLong());
                 case 5 -> new StopOrder(readSide(in), in.readLong(), in.readLong(), in.readLong(), readSelfTrade(in));
+                case 6 -> new SetPhase(readPhase(in));
                 default -> throw new JournalCorruptedException("unknown command type " + type);
             };
             return new JournalEntry(sequence, timestamp, command);
@@ -273,6 +283,23 @@ final class Codec {
                 out.writeLong(e.stopPriceTicks());
                 out.writeLong(e.quantity());
             }
+            case PhaseChanged e -> {
+                out.writeByte(12);
+                out.writeLong(e.sequence());
+                out.writeByte(phaseCode(e.from()));
+                out.writeByte(phaseCode(e.to()));
+            }
+            case PhaseChangeRejected e -> {
+                out.writeByte(13);
+                out.writeLong(e.sequence());
+                out.writeByte(rejectCode(e.reason()));
+            }
+            case AuctionPriceDetermined e -> {
+                out.writeByte(14);
+                out.writeLong(e.sequence());
+                out.writeLong(e.priceTicks());
+                out.writeLong(e.volume());
+            }
             case StopTriggered e -> {
                 out.writeByte(11);
                 out.writeLong(e.sequence());
@@ -306,6 +333,9 @@ final class Codec {
             case 9 -> new OrderReplenished(in.readLong(), in.readLong(), readSide(in), in.readLong(), in.readLong());
             case 10 -> new OrderParked(in.readLong(), in.readLong(), readSide(in), in.readLong(), in.readLong());
             case 11 -> new StopTriggered(in.readLong(), in.readLong());
+            case 12 -> new PhaseChanged(in.readLong(), readPhase(in), readPhase(in));
+            case 13 -> new PhaseChangeRejected(in.readLong(), readRejectReason(in));
+            case 14 -> new AuctionPriceDetermined(in.readLong(), in.readLong(), in.readLong());
             default -> throw new JournalCorruptedException("unknown event type " + type);
         };
     }
@@ -340,6 +370,7 @@ final class Codec {
                 out.writeLong(stop.quantity());
                 writeSelfTrade(out, stop.selfTrade());
             }
+            out.writeByte(phaseCode(state.phase()));
         });
     }
 
@@ -371,8 +402,9 @@ final class Codec {
                 stops.add(new ParkedStop(in.readLong(), readSide(in), in.readLong(), in.readLong(), in.readLong(),
                         readSelfTrade(in)));
             }
+            TradingPhase phase = readPhase(in);
             return new StoredSnapshot(lastCommandSequence, new EngineSnapshot(header.instrument(), nextOrderId,
-                    nextSequence, orders, lastTradePrice, stops));
+                    nextSequence, orders, lastTradePrice, stops, phase));
         });
     }
 
@@ -394,6 +426,24 @@ final class Codec {
         };
     }
 
+    private static int phaseCode(TradingPhase phase) {
+        return switch (phase) {
+            case CONTINUOUS -> 1;
+            case CALL -> 2;
+            case CLOSED -> 3;
+        };
+    }
+
+    private static TradingPhase readPhase(DataInputStream in) throws IOException {
+        byte code = in.readByte();
+        return switch (code) {
+            case 1 -> TradingPhase.CONTINUOUS;
+            case 2 -> TradingPhase.CALL;
+            case 3 -> TradingPhase.CLOSED;
+            default -> throw new JournalCorruptedException("unknown trading phase " + code);
+        };
+    }
+
     private static int rejectCode(RejectReason reason) {
         return switch (reason) {
             case INVALID_QUANTITY -> 1;
@@ -407,6 +457,8 @@ final class Codec {
             case INVALID_DISPLAY_QUANTITY -> 9;
             case STOP_PRICE_ALREADY_REACHED -> 10;
             case INVALID_SELF_TRADE_GROUP -> 11;
+            case NOT_ALLOWED_IN_PHASE -> 12;
+            case INVALID_PHASE_TRANSITION -> 13;
         };
     }
 
@@ -424,6 +476,8 @@ final class Codec {
             case 9 -> RejectReason.INVALID_DISPLAY_QUANTITY;
             case 10 -> RejectReason.STOP_PRICE_ALREADY_REACHED;
             case 11 -> RejectReason.INVALID_SELF_TRADE_GROUP;
+            case 12 -> RejectReason.NOT_ALLOWED_IN_PHASE;
+            case 13 -> RejectReason.INVALID_PHASE_TRANSITION;
             default -> throw new JournalCorruptedException("unknown reject reason " + code);
         };
     }

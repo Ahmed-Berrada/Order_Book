@@ -1,4 +1,4 @@
-# Journal file formats (version 5)
+# Journal file formats (version 6)
 
 Binary formats of the files written by `engine-journal`. Rules and rationale are in the rulebook
 chapter [`resilience.md`](../rulebook/resilience.md) and [ADR-0003](../adr/0003-journal-and-recovery.md).
@@ -57,6 +57,7 @@ Then, by type:
 | 3 CANCEL | order ID (8) |
 | 4 REPLACE | order ID (8), new price ticks (8), new quantity (8) |
 | 5 STOP | side (1), stop price ticks (8), limit price ticks (8; `0` for stop-market), quantity (8), self-trade instruction (9) |
+| 6 SET_PHASE | trading phase (1) |
 
 A **self-trade instruction** is a group (8; `0` for none) followed by a mode (1, see below).
 
@@ -85,6 +86,9 @@ Each event starts with its type (1 byte) and its event sequence number (8 bytes)
 | 9 | `OrderReplenished` | order ID (8), side (1), price (8), displayed quantity (8) |
 | 10 | `OrderParked` | order ID (8), side (1), stop price (8), quantity (8) |
 | 11 | `StopTriggered` | order ID (8) |
+| 12 | `PhaseChanged` | from phase (1), to phase (1) |
+| 13 | `PhaseChangeRejected` | reject reason (1) |
+| 14 | `AuctionPriceDetermined` | price (8), volume (8) |
 
 ## Snapshot (`snapshot-*.snap`: a single frame)
 
@@ -102,7 +106,7 @@ a price): order ID (8), side (1), price (8), remaining quantity (8), post-only (
 
 After the resting orders: the last trade price (8; `0` before the first trade), the number of parked
 stops (4), then each stop in order of order ID: order ID (8), side (1), stop price (8), limit price (8),
-quantity (8), self-trade instruction (9).
+quantity (8), self-trade instruction (9). The snapshot ends with the trading phase (1).
 
 ## Enumeration codes
 
@@ -126,6 +130,14 @@ Codes are fixed here and never derived from Java enum order, so old journals kee
 | INVALID_DISPLAY_QUANTITY | 9 |
 | STOP_PRICE_ALREADY_REACHED | 10 |
 | INVALID_SELF_TRADE_GROUP | 11 |
+| NOT_ALLOWED_IN_PHASE | 12 |
+| INVALID_PHASE_TRANSITION | 13 |
+
+| Trading phase | Code |
+|---|---|
+| CONTINUOUS | 1 |
+| CALL | 2 |
+| CLOSED | 3 |
 
 | Cancel reason | Code |
 |---|---|
@@ -159,3 +171,4 @@ does not know.
 | 3 | Iceberg orders: display quantity on limit orders and in snapshots, displayed quantity on `OrderRested`, `OrderReplenished` event (ADR-0010). Earlier versions are refused |
 | 4 | Stop orders: stop command, `OrderParked` and `StopTriggered` events, last trade price and parked stops in snapshots (ADR-0011). Earlier versions are refused |
 | 5 | Self-trade prevention: group and mode on limit, market and stop commands, on resting orders and on parked stops in snapshots; `INVALID_SELF_TRADE_GROUP` and `SELF_TRADE_PREVENTION` codes (ADR-0012). Earlier versions are refused |
+| 6 | Trading phases: `SetPhase` command, `PhaseChanged`, `PhaseChangeRejected` and `AuctionPriceDetermined` events, the phase in snapshots, `NOT_ALLOWED_IN_PHASE` and `INVALID_PHASE_TRANSITION` codes (ADR-0013). Earlier versions are refused |
