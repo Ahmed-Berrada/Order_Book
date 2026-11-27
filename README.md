@@ -36,6 +36,7 @@ backed by **invariant tests**, and **measured before it is optimised**.
 5. [Build & run](#build--run)
 6. [Testing strategy](#testing-strategy)
 7. [Roadmap](#roadmap)
+8. [Origins: the C++ prototype](#origins-the-c-prototype)
 
 ---
 
@@ -478,6 +479,20 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 8 | **Security & supply chain**: mTLS, OIDC, SBOM, signed releases | |
 | 9 | **Operations & resilience**: observability, failover, runbooks, chaos tests | |
 | 10 | **Post-trade & analytics** *(optional)* | |
+
+---
+
+## Origins: the C++ prototype
+
+This project started as [lob-engine](https://github.com/Ahmed-Berrada/lob-engine), a single-threaded matching engine
+in C++17 (`std::map` price levels, intrusive FIFO lists, a pool allocator). It answered one question, how fast a book
+can match, and its benchmark is documented there: a median of 149 to 163 ns per operation depending on the machine.
+
+Order_Book is the same idea rebuilt as a venue core: determinism, durability, interfaces and rules first, then speed.
+lob-engine is archived. Its latency figures are for the C++ code and say nothing about this Java engine, which will
+publish its own numbers, with methodology, in phase 6.
+
+Write-up of both: [ahmedberrada.com/work/order-book](https://www.ahmedberrada.com/work/order-book).
 
 ---
 
