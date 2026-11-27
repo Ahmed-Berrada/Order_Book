@@ -12,6 +12,7 @@ import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.SetPhase;
 import io.github.ahmedberrada.lob.core.StopOrder;
+import io.github.ahmedberrada.lob.core.TickBand;
 import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.core.TradingPhase;
 import java.util.ArrayList;
@@ -21,7 +22,8 @@ import java.util.SplittableRandom;
 /** Reproducible stream of realistic commands: the same seed always gives the same commands. */
 final class CommandStream {
 
-    static final Instrument INSTRUMENT = new Instrument("JRNL", 100, 1_000);
+    static final Instrument INSTRUMENT = new Instrument("JRNL", 100, 1_000,
+            List.of(new TickBand(1, 1), new TickBand(100, 1)), 300);
 
     private CommandStream() {
     }

@@ -10,6 +10,7 @@ import io.github.ahmedberrada.lob.core.CancelRejected;
 import io.github.ahmedberrada.lob.core.Command;
 import io.github.ahmedberrada.lob.core.EngineSnapshot;
 import io.github.ahmedberrada.lob.core.Event;
+import io.github.ahmedberrada.lob.core.Instrument;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MatchingEngine;
@@ -32,8 +33,10 @@ import io.github.ahmedberrada.lob.core.SetPhase;
 import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.StopTriggered;
+import io.github.ahmedberrada.lob.core.TickBand;
 import io.github.ahmedberrada.lob.core.TimeInForce;
 import io.github.ahmedberrada.lob.core.TradingPhase;
+import io.github.ahmedberrada.lob.core.VolatilityInterruption;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -87,6 +90,7 @@ class CodecTest {
             }
         }
         events.add(new AuctionPriceDetermined(1, 101, 40));
+        events.add(new VolatilityInterruption(1, 100, 106));
         EventBatch batch = new EventBatch(1, 0, events);
 
         assertThat(Codec.decodeBatch(Codec.encodeBatch(batch))).isEqualTo(batch);
@@ -115,7 +119,9 @@ class CodecTest {
         for (TradingPhase phase : TradingPhase.values()) {
             JournalEntry entry = new JournalEntry(1, 1, new SetPhase(phase));
             assertThat(Codec.decodeEntry(Codec.encodeEntry(entry))).isEqualTo(entry);
-            EngineSnapshot state = new EngineSnapshot(CommandStream.INSTRUMENT, 2, 3, List.of(), 0, List.of(), phase);
+            EngineSnapshot state = new EngineSnapshot(CommandStream.INSTRUMENT, 2, 3,
+                    List.of(new RestingOrder(1, Side.BUY, 5, 3, false, 0, 3, SelfTradeInstruction.NONE, true)), 7,
+                    List.of(), phase, 42);
             Codec.StoredSnapshot snapshot = new Codec.StoredSnapshot(1, state);
             assertThat(Codec.decodeSnapshot(Codec.encodeSnapshot(snapshot))).isEqualTo(snapshot);
         }
@@ -167,7 +173,7 @@ class CodecTest {
         byte[] limit = Codec.encodeEntry(new JournalEntry(1, 1, new LimitOrder(Side.BUY, 1, 1)));
         assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 34, 0)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("time in force");
-        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 34, 4)))
+        assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 34, 5)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("time in force");
         assertThatThrownBy(() -> Codec.decodeEntry(withByte(limit, 35, 2)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("boolean");
@@ -178,7 +184,8 @@ class CodecTest {
     @Test
     void earlierFormatVersionsAreRefused() {
         byte[] valid = Codec.encodeHeader(new Codec.Header(Codec.Kind.COMMANDS, CommandStream.INSTRUMENT));
-        assertThat(Codec.FORMAT_VERSION).isEqualTo((short) 6);
+        assertThat(Codec.FORMAT_VERSION).isEqualTo((short) 7);
+        assertCorrupt(withByte(valid, 5, 6), "version 6");
         assertCorrupt(withByte(valid, 5, 4), "version 4");
         assertCorrupt(withByte(valid, 5, 3), "version 3");
         assertCorrupt(withByte(valid, 5, 1), "version 1");
@@ -209,7 +216,29 @@ class CodecTest {
             out.writeUTF("X");
             out.writeLong(0);
             out.writeLong(1);
+            out.writeInt(1);
+            out.writeLong(1);
+            out.writeLong(1);
+            out.writeLong(0);
         }), "instrument");
+        assertCorrupt(header(out -> {
+            out.writeUTF("X");
+            out.writeLong(5);
+            out.writeLong(5);
+            out.writeInt(-1);
+        }), "tick band count");
+        assertCorrupt(header(out -> {
+            out.writeUTF("X");
+            out.writeLong(5);
+            out.writeLong(5);
+            out.writeInt(1);
+            out.writeLong(0);
+            out.writeLong(1);
+            out.writeLong(0);
+        }), "instrument");
+        Codec.Header banded = new Codec.Header(Codec.Kind.EVENTS, new Instrument("B", 5, 500,
+                List.of(new TickBand(1, 1), new TickBand(100, 5)), 250));
+        assertThat(Codec.decodeHeader(Codec.encodeHeader(banded))).isEqualTo(banded);
     }
 
     @Test
@@ -251,11 +280,11 @@ class CodecTest {
 
         assertThatThrownBy(() -> Codec.decodeSnapshot(notSnapshot))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("not a snapshot");
-        byte[] negativeStops = withByte(snapshot, snapshot.length - 5, 0xFF);
+        byte[] negativeStops = withByte(snapshot, snapshot.length - 13, 0xFF);
         assertThatThrownBy(() -> Codec.decodeSnapshot(negativeStops))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("negative stop count");
-        // the order count sits before the last trade price (8), the stop count (4) and the phase (1)
-        byte[] negativeCount = withByte(snapshot, snapshot.length - 17, 0xFF);
+        // the order count sits before the last trade price (8), the stop count (4), the phase (1) and the reference price (8)
+        byte[] negativeCount = withByte(snapshot, snapshot.length - 25, 0xFF);
         assertThatThrownBy(() -> Codec.decodeSnapshot(negativeCount))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("negative");
     }
