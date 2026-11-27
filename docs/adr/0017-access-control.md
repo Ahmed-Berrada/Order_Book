@@ -6,7 +6,7 @@
 ## Context
 
 Phase 8 closes the gap that every earlier phase documented: any caller who reaches a port is trusted. Rules:
-[`access-control.md`](../rulebook/access-control.md) (AC-001 to AC-007).
+[`access-control.md`](../rulebook/access-control.md) (AC-001 to AC-008).
 
 ## Decisions
 
@@ -28,8 +28,12 @@ cookie carries authority. That was wrong, and CodeQL flagged it: a browser that 
 caches the credentials and sends them again, on its own, to the same origin, so another site can make it act.
 The token-based defence does not fit a stateless API for machine clients, so the CSRF filter is kept but only
 for writes that the browser itself marks as cross-site (Fetch Metadata `Sec-Fetch-Site`, or `Origin` from older
-browsers, AC-008). Such a request cannot carry a token, because nothing hands one out, and is refused. Machine
-clients send neither header and are not affected.
+browsers, AC-008), and for any write with a body an HTML form can send (`application/x-www-form-urlencoded`,
+`multipart/form-data`, `text/plain`), since the API reads only JSON and some old browsers send a cross-site form
+with neither header. A cross-site write with a JSON body needs a CORS preflight, which the venue never grants.
+Such a request cannot carry a token and is refused: the token repository never stores or hands one out, so
+the refusal creates no session and the chain stays stateless. Machine clients send neither header and a JSON
+body, and are not affected.
 
 ### 3. Roles are few and coarse
 

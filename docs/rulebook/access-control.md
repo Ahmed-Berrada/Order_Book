@@ -48,6 +48,9 @@ reason of a refusal is not revealed to the peer. Drop-copy sessions authenticate
 on its own, so a page on another site could make it enter or cancel orders for its user (cross-site request
 forgery). A request that changes something (any method but `GET`, `HEAD`, `OPTIONS` and `TRACE`) is refused
 with `403` when the browser marks it as coming from elsewhere: a `Sec-Fetch-Site` other than `same-origin` or
-`none`, or, from a browser too old for Fetch Metadata, an `Origin` header without `Sec-Fetch-Site`. This holds
-with security on or off. Clients that are not browsers send neither header and are not affected.
+`none`, or, from a browser too old for Fetch Metadata, an `Origin` header without `Sec-Fetch-Site`. A request
+that changes something with a body an HTML form can send (`application/x-www-form-urlencoded`,
+`multipart/form-data`, `text/plain`) is refused whatever its headers: the API reads only JSON, and some old
+browsers send neither header. Refusing creates no session. This holds with security on or off. Clients that
+are not browsers send neither header and a JSON body, and are not affected.
 
