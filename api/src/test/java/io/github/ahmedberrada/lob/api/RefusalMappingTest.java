@@ -2,6 +2,7 @@ package io.github.ahmedberrada.lob.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
@@ -44,7 +45,7 @@ class RefusalMappingTest {
     }
 
     private MvcTestResult placeOrderFailingWith(Throwable failure) {
-        when(service.submit(anyString(), any())).thenReturn(CompletableFuture.failedFuture(failure));
+        when(service.submit(anyString(), any(), anyLong(), any())).thenReturn(CompletableFuture.failedFuture(failure));
         return mvc.post().uri("/api/v1/instruments/AAPL/orders").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":1}").exchange();
     }

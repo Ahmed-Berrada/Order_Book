@@ -1,5 +1,6 @@
 package io.github.ahmedberrada.lob.api;
 
+import io.github.ahmedberrada.lob.core.MemberLimits;
 import io.github.ahmedberrada.lob.core.SelfTradeMode;
 import io.github.ahmedberrada.lob.journal.FsyncPolicy;
 import io.github.ahmedberrada.lob.service.InstrumentConfig;
@@ -40,7 +41,37 @@ public record LobProperties(
         @NotEmpty List<@Valid InstrumentProperties> instruments,
         @DefaultValue @Valid FixProperties fix,
         @DefaultValue @Valid MarketDataProperties marketData,
-        @DefaultValue @Valid BinaryFeedProperties binaryFeed) {
+        @DefaultValue @Valid BinaryFeedProperties binaryFeed,
+        @DefaultValue List<@Valid MemberProperties> members) {
+
+    /**
+     * A member: who it is, which FIX sessions act for it and its limits per instrument (RK-001).
+     *
+     * @param id         the member ID, positive; 0 is the operator
+     * @param fixCompIds TargetCompIDs of its FIX sessions; a session in no member takes an ID derived from
+     *                   its CompID
+     */
+    public record MemberProperties(
+            @Positive long id, @NotBlank String name, @DefaultValue List<String> fixCompIds,
+            @Valid LimitProperties limits) {
+    }
+
+    /**
+     * Pre-trade limits in venue units; {@code 0} means no limit. {@code maxOrderNotional} is a price times a
+     * quantity, in the instrument's currency.
+     */
+    public record LimitProperties(
+            @PositiveOrZero long maxOrderQuantity, @DefaultValue("0") @NotNull @PositiveOrZero BigDecimal maxOrderNotional,
+            @PositiveOrZero long priceCollarBps, @PositiveOrZero long maxOpenOrders,
+            @PositiveOrZero long maxNetPosition) {
+
+        /** The limits as the engine of one instrument takes them. */
+        MemberLimits toLimits(InstrumentConfig instrument) {
+            return new MemberLimits(maxOrderQuantity,
+                    maxOrderNotional.divide(instrument.tickSize(), java.math.RoundingMode.FLOOR).longValue(),
+                    priceCollarBps, maxOpenOrders, maxNetPosition);
+        }
+    }
 
     /**
      * The binary feed (docs/interfaces/market-data-binary.md).
@@ -106,6 +137,19 @@ public record LobProperties(
 
     /** One band of an instrument's tick-size regime. */
     public record TickBandProperties(@NotNull @Positive BigDecimal fromPrice, @NotNull @Positive BigDecimal step) {
+    }
+
+    /** The member ID of each FIX session that a configured member owns. */
+    java.util.Map<String, Long> fixMemberIds() {
+        java.util.Map<String, Long> ids = new java.util.HashMap<>();
+        for (MemberProperties member : members) {
+            for (String compId : member.fixCompIds()) {
+                if (ids.put(compId, member.id()) != null) {
+                    throw new IllegalArgumentException("FIX session " + compId + " belongs to two members");
+                }
+            }
+        }
+        return ids;
     }
 
     List<InstrumentConfig> instrumentConfigs() {
