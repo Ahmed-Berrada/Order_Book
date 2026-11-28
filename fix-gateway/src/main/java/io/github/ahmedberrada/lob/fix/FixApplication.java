@@ -14,6 +14,7 @@ import io.github.ahmedberrada.lob.core.OrderCancelled;
 import io.github.ahmedberrada.lob.core.OrderRejected;
 import io.github.ahmedberrada.lob.core.OrderReplaced;
 import io.github.ahmedberrada.lob.core.OrderRested;
+import io.github.ahmedberrada.lob.core.PhaseChanged;
 import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.ReplaceRejected;
@@ -21,6 +22,8 @@ import io.github.ahmedberrada.lob.core.SelfTradeInstruction;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.StopTriggered;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
+import io.github.ahmedberrada.lob.core.TradingPhase;
+import io.github.ahmedberrada.lob.core.VolatilityInterruption;
 import io.github.ahmedberrada.lob.fix.OrderRegistry.FixOrder;
 import io.github.ahmedberrada.lob.journal.EventBatch;
 import io.github.ahmedberrada.lob.service.EventListener;
@@ -35,20 +38,22 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import quickfix.Application;
 import quickfix.FieldNotFound;
 import quickfix.Message;
 import quickfix.RejectLogon;
-import quickfix.Session;
 import quickfix.Responder;
+import quickfix.Session;
 import quickfix.SessionID;
-import quickfix.UtcTimestampPrecision;
 import quickfix.SessionNotFound;
 import quickfix.UnsupportedMessageType;
+import quickfix.UtcTimestampPrecision;
 import quickfix.field.BusinessRejectReason;
 import quickfix.field.ClOrdID;
 import quickfix.field.CopyMsgIndicator;
@@ -79,9 +84,15 @@ import quickfix.field.Symbol;
 import quickfix.field.Text;
 import quickfix.field.TimeInForce;
 import quickfix.field.TotalAffectedOrders;
+import quickfix.field.TradSesReqID;
+import quickfix.field.TradSesStatus;
+import quickfix.field.TradSesStatusRejReason;
+import quickfix.field.TradingSessionID;
 import quickfix.field.TransactTime;
+import quickfix.field.UnsolicitedIndicator;
 import quickfix.fix44.BusinessMessageReject;
 import quickfix.fix44.OrderMassCancelReport;
+import quickfix.fix44.TradingSessionStatus;
 
 /**
  * Application layer of the gateway: application messages become commands, events become execution
@@ -106,6 +117,8 @@ final class FixApplication implements Application, EventListener {
 
     private final MatchingService service;
     private final Sender sender;
+    /** Sessions logged on now: told of phase changes (FS-001). */
+    private final Set<SessionID> loggedOn = ConcurrentHashMap.newKeySet();
     private final List<SessionID> dropCopies;
     /** The self-trade instruction of each member session; a session not listed has none (SP-001). */
     private final Map<SessionID, SelfTradeInstruction> selfTrade;
@@ -164,6 +177,7 @@ final class FixApplication implements Application, EventListener {
             case MsgType.ORDER_CANCEL_REPLACE_REQUEST -> onReplace(message, session);
             case MsgType.ORDER_STATUS_REQUEST -> onStatus(message, session);
             case MsgType.ORDER_MASS_CANCEL_REQUEST -> onMassCancel(message, session);
+            case MsgType.TRADING_SESSION_STATUS_REQUEST -> onTradingStatusRequest(message, session);
             default -> throw new UnsupportedMessageType();
         }
     }
@@ -567,8 +581,12 @@ final class FixApplication implements Application, EventListener {
     public void onEvents(String symbol, EventBatch batch, Object context) {
         long time = batch.timestampMicros();
         FixOrder taker = null;
+        TradingPhase newPhase = null;
+        boolean interrupted = false;
         for (Event event : batch.events()) {
             switch (event) {
+                case PhaseChanged e -> newPhase = e.to();
+                case VolatilityInterruption e -> interrupted = true;
                 case OrderRejected e when context instanceof NewOrderContext c -> {
                     taker = new FixOrder(c.session(), c.clOrdId(), c.instrument(), c.side(), e.orderId(), c.lots(),
                             OrdStatus.REJECTED);
@@ -652,6 +670,75 @@ final class FixApplication implements Application, EventListener {
                 }
             }
         }
+        if (newPhase != null) {                            // FS-001: after the command's own reports
+            for (SessionID session : loggedOn) {
+                sender.send(tradingStatus(symbol, status(newPhase), true, null,
+                        interrupted ? "VOLATILITY_INTERRUPTION" : null), session);
+            }
+        }
+    }
+
+    // ---- TradingSessionStatus ---------------------------------------------------------------------
+
+    /** FS-002: the status of the instrument named in 336, or of every instrument. */
+    private void onTradingStatusRequest(Message request, SessionID session) throws FieldNotFound {
+        String reqId = request.getString(TradSesReqID.FIELD);
+        if (request.isSetField(TradingSessionID.FIELD)) {
+            String symbol = request.getString(TradingSessionID.FIELD);
+            if (service.instrument(symbol).isEmpty()) {
+                TradingSessionStatus rejected = tradingStatus(symbol, TradSesStatus.REQUEST_REJECTED, false, reqId,
+                        "UNKNOWN_INSTRUMENT");
+                rejected.setInt(TradSesStatusRejReason.FIELD, TradSesStatusRejReason.UNKNOWN_OR_INVALID_TRADINGSESSIONID);
+                sender.send(rejected, session);
+                return;
+            }
+            sendStatus(symbol, session, reqId);
+        } else {
+            for (InstrumentConfig instrument : service.instruments()) {
+                sendStatus(instrument.symbol(), session, reqId);
+            }
+        }
+    }
+
+    /**
+     * Sends an instrument's current status. The phase is read on the instrument's thread, in turn with its commands,
+     * and sent from there: a later phase change is announced after it, never before.
+     */
+    private void sendStatus(String symbol, SessionID session, String reqId) {
+        if (service.isHalted(symbol)) {
+            sender.send(tradingStatus(symbol, TradSesStatus.HALTED, reqId == null, reqId, "HALTED"), session);
+            return;
+        }
+        service.phase(symbol).whenComplete((phase, failure) -> {
+            if (failure != null) {
+                sender.send(tradingStatus(symbol, TradSesStatus.HALTED, reqId == null, reqId, "HALTED"), session);
+            } else {
+                sender.send(tradingStatus(symbol, status(phase), reqId == null, reqId, null), session);
+            }
+        });
+    }
+
+    private static int status(TradingPhase phase) {
+        return switch (phase) {
+            case CONTINUOUS -> TradSesStatus.OPEN;
+            case CALL -> TradSesStatus.PRE_OPEN;
+            case CLOSED -> TradSesStatus.CLOSED;
+        };
+    }
+
+    private static TradingSessionStatus tradingStatus(String symbol, int status, boolean unsolicited, String reqId,
+            String text) {
+        TradingSessionStatus message = new TradingSessionStatus();
+        message.setString(TradingSessionID.FIELD, symbol);
+        message.setInt(TradSesStatus.FIELD, status);
+        message.setBoolean(UnsolicitedIndicator.FIELD, unsolicited);
+        if (reqId != null) {
+            message.setString(TradSesReqID.FIELD, reqId);
+        }
+        if (text != null) {
+            message.setString(Text.FIELD, text);
+        }
+        return message;
     }
 
     /** The command never produced events: refused before the engine, or its outcome is unknown. */
@@ -742,11 +829,16 @@ final class FixApplication implements Application, EventListener {
     @Override
     public void onLogon(SessionID session) {
         LOG.info("FIX session logged on: {}", session);
+        loggedOn.add(session);
+        for (InstrumentConfig instrument : service.instruments()) {      // FS-002
+            sendStatus(instrument.symbol(), session, null);
+        }
     }
 
     @Override
     public void onLogout(SessionID session) {
         LOG.info("FIX session logged out: {}", session);
+        loggedOn.remove(session);
     }
 
     @Override

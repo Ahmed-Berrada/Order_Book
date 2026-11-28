@@ -231,4 +231,37 @@ class FailureMappingTest {
         assertThat(none.getInt(quickfix.field.TotalAffectedOrders.FIELD)).isZero();
         assertThat(none.isSetField(Text.FIELD)).isFalse();
     }
+
+    @Test
+    @Rulebook({"FS-001", "FS-002"})
+    void aHaltedInstrumentIsHaltedAndAnInterruptionIsNamed() throws Exception {
+        when(service.instruments()).thenReturn(List.of(FixVenue.AAPL));
+        when(service.isHalted("AAPL")).thenReturn(true);
+        sent.clear();
+        application.onLogon(SESSION);
+        assertThat(sent).hasSize(1);
+        assertThat(sent.getFirst().getInt(quickfix.field.TradSesStatus.FIELD)).isEqualTo(quickfix.field.TradSesStatus.HALTED);
+
+        when(service.isHalted("AAPL")).thenReturn(false);
+        when(service.phase("AAPL")).thenReturn(CompletableFuture.failedFuture(
+                new RequestRefusedException(Reason.HALTED, "AAPL")));
+        sent.clear();
+        application.onLogon(SESSION);
+        assertThat(sent.getFirst().getString(Text.FIELD)).isEqualTo("HALTED");
+
+        sent.clear();
+        application.onEvents("AAPL", new EventBatch(5, 1, List.of(
+                new io.github.ahmedberrada.lob.core.VolatilityInterruption(1, 10_000, 10_600),
+                new io.github.ahmedberrada.lob.core.PhaseChanged(2, io.github.ahmedberrada.lob.core.TradingPhase.CONTINUOUS,
+                        io.github.ahmedberrada.lob.core.TradingPhase.CALL))), null);
+        assertThat(sent).hasSize(1);
+        assertThat(sent.getFirst().getInt(quickfix.field.TradSesStatus.FIELD)).isEqualTo(quickfix.field.TradSesStatus.PRE_OPEN);
+        assertThat(sent.getFirst().getString(Text.FIELD)).isEqualTo("VOLATILITY_INTERRUPTION");
+
+        application.onLogout(SESSION);
+        sent.clear();
+        application.onEvents("AAPL", new EventBatch(6, 1, List.of(new io.github.ahmedberrada.lob.core.PhaseChanged(3,
+                io.github.ahmedberrada.lob.core.TradingPhase.CALL, io.github.ahmedberrada.lob.core.TradingPhase.CONTINUOUS))), null);
+        assertThat(sent).as("only sessions logged on").isEmpty();
+    }
 }
