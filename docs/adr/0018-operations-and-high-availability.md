@@ -46,9 +46,10 @@ journal on a volume. `deploy/` holds a compose stack (venue, Prometheus, Grafana
 chart for Kubernetes, with a restricted security context, the three probes, and a `ServiceMonitor`. Neither
 can be run in this repository's CI (no container runtime); the image build is a release step.
 
-TLS is terminated in front of the venue (an ingress or a sidecar), not in it: certificates are rotated by
-the platform. The FIX port is exposed by its own service; mutual TLS for FIX belongs to the same
-terminating proxy.
+TLS is terminated in front of the venue (an ingress or a sidecar), or in it since phase 8c (ADR-0017 §7): in
+front, certificates are rotated by the platform, and the venue must be told so
+(`lob.security.tls-terminated-in-front`, AC-010). The FIX port is exposed by its own service, over TLS in the
+venue or a TCP proxy that terminates it.
 
 ### 5. High availability (design, not built)
 

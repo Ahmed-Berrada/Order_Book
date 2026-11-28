@@ -17,6 +17,13 @@ resources:
 # LOB_SECURITY_USERS_0_NAME, LOB_SECURITY_USERS_0_PASSWORD (a {bcrypt} hash), LOB_SECURITY_USERS_0_ROLES_0.
 env:
   LOB_BIND_ADDRESS: "0.0.0.0"
+  # Beyond loopback a secured venue speaks TLS or does not start (AC-010). Either terminate TLS in the pod, with the
+  # key store mounted from a secret:
+  #   SERVER_SSL_KEY_STORE: /tls/venue.p12          (password in existingSecret: SERVER_SSL_KEY_STORE_PASSWORD)
+  #   LOB_FIX_TLS_ENABLED: "true"
+  #   LOB_FIX_TLS_KEY_STORE: /tls/venue.p12         (LOB_FIX_TLS_KEY_STORE_PASSWORD in existingSecret)
+  # or, when an ingress and a TCP proxy terminate it in front of the pod:
+  #   LOB_SECURITY_TLS_TERMINATED_IN_FRONT: "true"
 existingSecret: ""
 
 service:

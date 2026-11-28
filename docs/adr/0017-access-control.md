@@ -80,10 +80,21 @@ every caller, so one caller could lock a member out for everyone: the proxy must
 (`X-Forwarded-For`), and Spring Boot be told to trust it (`server.forward-headers-strategy=native` with the
 proxy's addresses as internal proxies), before the venue is exposed this way.
 
-### 7. Not here
+### 7. TLS in the venue, and a venue that will not run in clear (added in phase 8c)
 
-Mutual TLS for FIX (needs certificates provisioned,
-phase 9), secret rotation and an external identity provider.
+ADR-0018 left TLS to a proxy in front. That stays possible, but is now a stated choice: with security on, a port
+open beyond loopback must speak TLS, or the operator must declare that TLS ends in front of it, or the venue does
+not start (AC-010), as it refuses to start without users (AC-003). REST uses Spring Boot's TLS (`server.ssl`, or
+an SSL bundle that it reloads when the files change); FIX uses QuickFIX/J's, always with the venue's own key store,
+since QuickFIX/J would otherwise fall back to a demonstration key shipped in its jar. Only TLS 1.2 and 1.3 are
+offered. Mutual TLS for FIX is a setting: a member's connection must present a certificate from a CA the venue
+trusts. The certificate is not bound to the CompID: the Logon password still is (AC-007), so a member's certificate
+and its password are two separate factors, not one identity.
+
+### 8. Not here
+
+Binding a client certificate to a CompID, revocation checking (OCSP, CRLs), secret rotation and an external
+identity provider.
 
 ## Consequences
 
