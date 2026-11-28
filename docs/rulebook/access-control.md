@@ -55,8 +55,10 @@ failures and 1 minute, and `maxFailures` `0` switches it off. Lockouts are kept 
 
 ## Encryption in transit
 
-**AC-010: TLS on every exposed port.** With security enabled, the REST API and the FIX acceptor accept only TLS
-1.2 or 1.3 on an address other than loopback: the venue refuses to start if either listens beyond loopback in clear.
+**AC-010: TLS on every exposed port.** With security enabled, the REST API, a management port of its own (the
+actuator, `management.server.port`) and the FIX acceptor accept only TLS 1.2 or 1.3 on an address other than
+loopback: the venue refuses to start if any of them would listen beyond loopback in clear, and checks it before
+it opens any of them.
 Credentials (HTTP Basic, the FIX Logon password) and orders never cross a network unencrypted. A venue whose TLS is
 terminated in front of it (an ingress, a load balancer) says so explicitly (`lob.security.tls-terminated-in-front`),
 and is logged as a warning at start-up. The market data feeds carry public data and no credentials, and are not

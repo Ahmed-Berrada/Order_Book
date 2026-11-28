@@ -23,6 +23,17 @@ public final class TestCertificates {
         return store;
     }
 
+    /** An empty PKCS12 key store: a client with it presents no certificate at all. */
+    public static Path emptyKeyStore(Path directory) throws java.security.GeneralSecurityException, IOException {
+        Path store = directory.resolve("empty.p12");
+        java.security.KeyStore keyStore = java.security.KeyStore.getInstance("PKCS12");
+        keyStore.load(null, null);
+        try (var out = java.nio.file.Files.newOutputStream(store)) {
+            keyStore.store(out, PASSWORD.toCharArray());
+        }
+        return store;
+    }
+
     /** A PKCS12 trust store holding the certificates of the given key stores. */
     public static Path trustStore(Path directory, String name, Path... keyStores) throws IOException, InterruptedException {
         Path store = directory.resolve(name + ".p12");
@@ -41,10 +52,18 @@ public final class TestCertificates {
         List<String> command = new ArrayList<>();
         command.add(Path.of(System.getProperty("java.home"), "bin", "keytool").toString());
         command.addAll(List.of(args));
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-        String output = new String(process.getInputStream().readAllBytes());
-        if (!process.waitFor(60, TimeUnit.SECONDS) || process.exitValue() != 0) {
-            throw new IOException("keytool failed: " + String.join(" ", args) + "\n" + output);
+        Path log = java.nio.file.Files.createTempFile("keytool", ".log");
+        try {
+            Process process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+            boolean finished = process.waitFor(60, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+            }
+            if (!finished || process.exitValue() != 0) {
+                throw new IOException("keytool failed: " + String.join(" ", args) + "\n" + java.nio.file.Files.readString(log));
+            }
+        } finally {
+            java.nio.file.Files.deleteIfExists(log);
         }
     }
 }

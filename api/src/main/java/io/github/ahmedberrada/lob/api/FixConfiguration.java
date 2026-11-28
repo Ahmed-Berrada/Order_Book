@@ -26,7 +26,8 @@ import quickfix.ConfigError;
 class FixConfiguration {
 
     @Bean(destroyMethod = "close")
-    FixGateway fixGateway(MatchingService service, LobProperties properties, LoginThrottle logins) throws ConfigError {
+    FixGateway fixGateway(MatchingService service, LobProperties properties, LoginThrottle logins,
+            TransportSecurity.Checked transportChecked) throws ConfigError {    // AC-010 before the port opens
         LobProperties.FixProperties fix = properties.fix();
         Path store = fix.storeDirectory() != null ? fix.storeDirectory() : properties.dataDirectory().resolve("fix");
         FixGatewayConfig config = new FixGatewayConfig(fix.bindAddress(), fix.port(), fix.senderCompId(),

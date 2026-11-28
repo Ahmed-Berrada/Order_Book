@@ -14,6 +14,9 @@ import org.springframework.core.env.Environment;
  */
 final class TransportSecurity {
 
+    /** The check passed: a bean that listeners depend on, so none opens a port before it (AC-010). */
+    enum Checked { PASSED }
+
     private static final Logger LOG = LoggerFactory.getLogger(TransportSecurity.class);
 
     private TransportSecurity() {
@@ -26,8 +29,17 @@ final class TransportSecurity {
         }
         List<String> clear = new ArrayList<>();
         String restAddress = environment.getProperty("server.address");
-        if (!isLoopback(restAddress) && !restTls(environment)) {
+        if (!isLoopback(restAddress) && !restTls(environment, "server")) {
             clear.add("REST on " + (restAddress == null ? "every interface" : restAddress) + " (server.ssl)");
+        }
+        // A management port of its own (actuator) takes neither the address nor the TLS of server.*.
+        String managementPort = environment.getProperty("management.server.port");
+        if (managementPort != null && !managementPort.equals(environment.getProperty("server.port"))
+                && !"-1".equals(managementPort)) {
+            String address = environment.getProperty("management.server.address");
+            if (!isLoopback(address) && !restTls(environment, "management.server")) {
+                clear.add("management on " + (address == null ? "every interface" : address) + " (management.server.ssl)");
+            }
         }
         LobProperties.FixProperties fix = properties.fix();
         if (fix.enabled() && !isLoopback(fix.bindAddress()) && (fix.tls() == null || !fix.tls().enabled())) {
@@ -45,13 +57,14 @@ final class TransportSecurity {
                 + clear + "; configure TLS, or declare lob.security.tls-terminated-in-front=true if it ends in front");
     }
 
-    /** Whether the REST connector is configured for TLS (a bundle, a key store or a certificate). */
-    static boolean restTls(Environment environment) {
-        if (!environment.getProperty("server.ssl.enabled", Boolean.class, true)) {
+    /** Whether an HTTP connector ({@code server} or {@code management.server}) is configured for TLS. */
+    static boolean restTls(Environment environment, String prefix) {
+        if (!environment.getProperty(prefix + ".ssl.enabled", Boolean.class, true)) {
             return false;
         }
-        return environment.containsProperty("server.ssl.bundle") || environment.containsProperty("server.ssl.key-store")
-                || environment.containsProperty("server.ssl.certificate");
+        return environment.containsProperty(prefix + ".ssl.bundle")
+                || environment.containsProperty(prefix + ".ssl.key-store")
+                || environment.containsProperty(prefix + ".ssl.certificate");
     }
 
     /** Whether an address is loopback; no address at all means every interface. */

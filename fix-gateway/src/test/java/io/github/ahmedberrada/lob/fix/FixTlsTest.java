@@ -67,8 +67,9 @@ class FixTlsTest {
             }
             FixTestClient stranger = new FixTestClient("MEMBER2", venue.port, directory.resolve("stranger"))
                     .withTls(trustVenue, strangerKey);
+            // an empty key store: without one, QuickFIX/J would present the demonstration certificate in its jar
             FixTestClient anonymous = new FixTestClient("MEMBER2", venue.port, directory.resolve("anonymous"))
-                    .withTls(trustVenue, null);
+                    .withTls(trustVenue, TestCertificates.emptyKeyStore(directory));
             try {
                 assertThat(stranger.tryLogon(3_000)).as("a certificate the venue does not trust").isFalse();
                 assertThat(anonymous.tryLogon(3_000)).as("no certificate").isFalse();

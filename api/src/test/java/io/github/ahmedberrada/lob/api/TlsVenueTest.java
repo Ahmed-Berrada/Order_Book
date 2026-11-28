@@ -27,6 +27,7 @@ import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
+@org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
 /** A secured venue open beyond loopback: REST over HTTPS and FIX over TLS, from configuration (AC-010, AC-011). */
 class TlsVenueTest {
 
@@ -96,6 +97,25 @@ class TlsVenueTest {
         SSLContext context = SSLContext.getInstance("TLS");
         context.init(null, trust.getTrustManagers(), null);
         return context;
+    }
+
+    @Test
+    @Rulebook("AC-010")
+    void noFixPortOpensBeforeTheCheckRefuses(org.springframework.boot.test.system.CapturedOutput output) throws Exception {
+        int fixPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            fixPort = socket.getLocalPort();
+        }
+        String hash = "{bcrypt}" + new BCryptPasswordEncoder(4).encode("admin-pass");
+        assertThatThrownBy(() -> new SpringApplicationBuilder(LobEngineApplication.class).run(
+                "--server.port=0", "--server.address=127.0.0.1", "--lob.data-directory=" + directory.resolve("fix-clear"),
+                "--lob.security.users[0].name=admin", "--lob.security.users[0].password=" + hash,
+                "--lob.security.users[0].roles[0]=ADMIN", "--lob.binary-feed.enabled=false",
+                "--lob.fix.bind-address=0.0.0.0", "--lob.fix.port=" + fixPort,
+                "--lob.fix.passwords.MEMBER1=" + hash, "--lob.fix.passwords.MEMBER2=" + hash,
+                "--lob.fix.passwords.RISK=" + hash))
+                .rootCause().hasMessageContaining("FIX on 0.0.0.0 (lob.fix.tls)");
+        assertThat(output).doesNotContain("Listening for connections");
     }
 
     @Test

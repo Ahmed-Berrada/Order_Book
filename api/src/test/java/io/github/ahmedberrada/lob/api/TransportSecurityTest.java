@@ -52,6 +52,23 @@ class TransportSecurityTest {
     }
 
     @Test
+    void aManagementPortOfItsOwnIsCheckedToo() {
+        runner.withPropertyValues("server.address=127.0.0.1", "management.server.port=18081").run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure()).rootCause()
+                    .hasMessageContaining("management on every interface (management.server.ssl)");
+        });
+        runner.withPropertyValues("server.address=127.0.0.1", "management.server.port=18081",
+                "management.server.address=127.0.0.1").run(context -> assertThat(context).hasNotFailed());
+        runner.withPropertyValues("server.address=127.0.0.1", "management.server.port=18081",
+                "management.server.ssl.bundle=venue").run(context -> assertThat(context).hasNotFailed());
+        runner.withPropertyValues("server.address=127.0.0.1", "server.port=8080", "management.server.port=8080")
+                .run(context -> assertThat(context).as("the same port: the same connector").hasNotFailed());
+        runner.withPropertyValues("server.address=127.0.0.1", "management.server.port=-1")
+                .run(context -> assertThat(context).as("no management server").hasNotFailed());
+    }
+
+    @Test
     void securityOffIsNotChecked() {
         runner.withPropertyValues("server.address=0.0.0.0", "lob.security.enabled=false")
                 .run(context -> assertThat(context).hasNotFailed());

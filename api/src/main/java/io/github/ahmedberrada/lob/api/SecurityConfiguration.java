@@ -46,9 +46,10 @@ class SecurityConfiguration {
 
     /** Refuses to start with a port open beyond loopback in clear (AC-010). */
     @Bean
-    Object transportSecurityCheck(LobProperties properties, org.springframework.core.env.Environment environment) {
+    TransportSecurity.Checked transportSecurityCheck(LobProperties properties,
+            org.springframework.core.env.Environment environment) {
         TransportSecurity.check(properties, environment);
-        return TransportSecurity.class;
+        return TransportSecurity.Checked.PASSED;
     }
 
     /** Logs failed authentications (AC-006). */
