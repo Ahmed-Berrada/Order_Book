@@ -11,7 +11,7 @@ a REST API on Spring Boot, and [published benchmarks](docs/performance.md).
 The goal is engineering rigour rather than feature count. The engine is **deterministic**,
 backed by **invariant tests**, and **measured before it is optimised**.
 
-> **Status: phases 0 to 4 and 10 complete; phases 5 to 9 in progress** (sub-phases 5a-5c, 6a-6d, 7a-7b, 8a-8d and 9a-9c
+> **Status: phases 0 to 4 and 10 complete; phases 5 to 9 in progress** (sub-phases 5a-5c, 6a-6d, 7a-7b, 8a-8f and 9a-9e
 > shipped, synchronous replication with manual failover; see the [Roadmap](#roadmap)).
 > **Performance:** [`docs/performance.md`](docs/performance.md) publishes the JMH and HdrHistogram results, an
 > open-loop (coordinated-omission-aware) end-to-end load tests over REST and FIX, the hardware, and JMH error bars.
@@ -564,7 +564,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 5 | **Pre-trade risk & members**: members, limits and the kill switch ✅, message-rate and order-to-trade throttles ✅, mass cancel ✅; trader hierarchy, venue-wide exposure | ⏳ |
 | 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅, group commit ✅, end-to-end load tests over REST and FIX ✅; GC study | ⏳ |
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; [surveillance alerts](docs/analytics.md#surveillance) ✅; RTS 22 reports, real-time surveillance | ⏳ |
-| 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, lockout of repeated failed logins ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅, TLS and mutual TLS for FIX ✅, sealed journals ✅; OIDC | ⏳ |
+| 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, lockout of repeated failed logins ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅, TLS and mutual TLS for FIX ✅, sealed journals ✅, certificates bound to CompIDs ✅; OIDC | ⏳ |
 | 9 | **Operations & resilience**: [Prometheus metrics, probes and alerts](docs/operations/observability.md) ✅, OpenTelemetry traces ✅, [runbook](docs/operations/runbook.md) ✅, one writer per journal ✅, soak test ✅, container image, compose stack and Helm chart ✅, [HA design](docs/adr/0018-operations-and-high-availability.md) ✅; chaos tests (kill -9, full disk) ✅, synchronous replication to a standby with manual failover ✅; automatic failover | ⏳ |
 | 10 | **Post-trade & analytics** *(optional)*: [clearing trade file and maker/taker/auction fees](docs/interfaces/trade-file.md) ✅, [Python microstructure analytics](docs/analytics.md) ✅ | ✅ |
 

@@ -124,6 +124,7 @@ final class FixApplication implements Application, EventListener {
     /** The self-trade instruction of each member session; a session not listed has none (SP-001). */
     private final Map<SessionID, SelfTradeInstruction> selfTrade;
     private final LogonAuthenticator authenticator;
+    private volatile PeerCertificates certificates;       // null unless certificates are bound (AC-013)
     private final OrderRegistry registry = new OrderRegistry();
 
     /** Attached to a NewOrderSingle's command, so its events can be reported to its sender. */
@@ -155,6 +156,11 @@ final class FixApplication implements Application, EventListener {
     FixApplication(MatchingService service, Sender sender, List<SessionID> dropCopies,
             Map<SessionID, SelfTradeInstruction> selfTrade) {
         this(service, sender, dropCopies, selfTrade, LogonAuthenticator.ALLOW_ALL);
+    }
+
+    /** From now on, a Logon's connection must present a certificate naming its CompID (AC-013). */
+    void bindCertificates(PeerCertificates peers) {
+        this.certificates = peers;
     }
 
     FixApplication(MatchingService service, Sender sender, List<SessionID> dropCopies,
@@ -884,9 +890,14 @@ final class FixApplication implements Application, EventListener {
             return;
         }
         String password = message.isSetField(Password.FIELD) ? message.getString(Password.FIELD) : null;
-        if (!authenticator.authenticate(session.getTargetCompID(), password, remoteAddress(session))) {
+        String remoteAddress = remoteAddress(session);
+        if (!authenticator.authenticate(session.getTargetCompID(), password, remoteAddress)) {
             LOG.warn("FIX logon refused for {}: authentication failed", session.getTargetCompID());
             throw new RejectLogon("authentication failed");
+        }
+        if (certificates != null && !certificates.names(remoteAddress, session.getTargetCompID())) {
+            LOG.warn("FIX logon refused for {}: its TLS certificate names another member", session.getTargetCompID());
+            throw new RejectLogon("the certificate does not name this CompID");       // AC-013
         }
     }
 

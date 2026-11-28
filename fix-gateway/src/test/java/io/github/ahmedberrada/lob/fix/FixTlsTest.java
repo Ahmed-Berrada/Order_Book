@@ -52,7 +52,7 @@ class FixTlsTest {
     @Rulebook("AC-011")
     void withMutualTlsOnlyAMemberWithATrustedCertificateConnects() throws Exception {
         Path venueKey = TestCertificates.keyStore(directory, "venue");
-        Path memberKey = TestCertificates.keyStore(directory, "member1");
+        Path memberKey = TestCertificates.keyStore(directory, "MEMBER1");      // its common name: its CompID (AC-013)
         Path strangerKey = TestCertificates.keyStore(directory, "stranger");
         Path trustMembers = TestCertificates.trustStore(directory, "trust-members", memberKey);
         Path trustVenue = TestCertificates.trustStore(directory, "trust-venue", venueKey);
@@ -81,11 +81,63 @@ class FixTlsTest {
     }
 
     @Test
+    @Rulebook("AC-013")
+    void aMembersCertificateLogsOnOnlyAsTheCompIdItNames() throws Exception {
+        Path venueKey = TestCertificates.keyStore(directory, "venue");
+        Path member1 = TestCertificates.keyStore(directory, "MEMBER1");
+        Path member2 = TestCertificates.keyStore(directory, "MEMBER2");
+        Path trustMembers = TestCertificates.trustStore(directory, "trust-members", member1, member2);
+        Path trustVenue = TestCertificates.trustStore(directory, "trust-venue", venueKey);
+        try (FixVenue venue = new FixVenue(directory, FixVenue.freePort(), SelfTradeMode.CANCEL_NEWEST,
+                LogonAuthenticator.ALLOW_ALL, tls(venueKey, trustMembers, true))) {
+            FixTestClient impostor = new FixTestClient("MEMBER1", venue.port, directory.resolve("impostor"))
+                    .withTls(trustVenue, member2);                       // a trusted member, logging on as another
+            try {
+                assertThat(impostor.tryLogon(3_000)).as("MEMBER2's certificate, as MEMBER1").isFalse();
+            } finally {
+                impostor.close();
+            }
+            FixTestClient member = new FixTestClient("MEMBER2", venue.port, directory.resolve("member2"))
+                    .withTls(trustVenue, member2);
+            try {
+                assertThat(member.tryLogon(10_000)).as("MEMBER2's certificate, as MEMBER2").isTrue();
+            } finally {
+                member.close();
+            }
+        }
+        try (FixVenue unbound = new FixVenue(directory, FixVenue.freePort(), SelfTradeMode.CANCEL_NEWEST,
+                LogonAuthenticator.ALLOW_ALL, new FixTls(venueKey, TestCertificates.PASSWORD, "PKCS12", trustMembers,
+                        TestCertificates.PASSWORD, "PKCS12", true, false))) {
+            FixTestClient other = new FixTestClient("MEMBER1", unbound.port, directory.resolve("unbound"))
+                    .withTls(trustVenue, member2);
+            try {
+                assertThat(other.tryLogon(10_000)).as("binding switched off: any trusted member").isTrue();
+            } finally {
+                other.close();
+            }
+        }
+    }
+
+    @Test
+    void aCertificateNamesItsMemberByItsOneCommonName() throws Exception {
+        java.security.KeyStore store = java.security.KeyStore.getInstance("PKCS12");
+        try (var in = java.nio.file.Files.newInputStream(TestCertificates.keyStore(directory, "MEMBER9"))) {
+            store.load(in, TestCertificates.PASSWORD.toCharArray());
+        }
+        var certificate = (java.security.cert.X509Certificate) store.getCertificate(store.aliases().nextElement());
+        assertThat(PeerCertificates.commonNames(certificate)).containsExactly("MEMBER9");
+        assertThat(new PeerCertificates().names("127.0.0.1:1", "MEMBER9")).as("no such connection").isFalse();
+        assertThat(new PeerCertificates().names(null, "MEMBER9")).isFalse();
+    }
+
+    @Test
     @Rulebook("AC-011")
     void tlsNeedsTheVenuesOwnKeyStoreAndMutualTlsATrustStore() throws Exception {
         Path venueKey = TestCertificates.keyStore(directory, "venue");
         assertThatIllegalArgumentException().isThrownBy(() -> tls(directory.resolve("missing.p12"), null, false));
         assertThatIllegalArgumentException().isThrownBy(() -> tls(venueKey, null, true));
+        assertThatIllegalArgumentException().as("binding needs mutual TLS").isThrownBy(() -> new FixTls(venueKey,
+                TestCertificates.PASSWORD, "PKCS12", null, null, null, false, true));
         assertThat(tls(venueKey, null, false).toString()).doesNotContain(TestCertificates.PASSWORD);
     }
 }

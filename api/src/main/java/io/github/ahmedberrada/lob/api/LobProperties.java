@@ -240,16 +240,20 @@ public record LobProperties(
      * TLS for the FIX acceptor (AC-010, AC-011).
      *
      * @param needClientAuth mutual TLS: a connection must present a certificate from a CA in {@code trustStore}
+     * @param bindCertificateToCompId with mutual TLS, the certificate's common name must be the session's CompID
+     *                       (AC-013); switch it off only for certificates that cannot name their member
      */
     public record FixTlsProperties(
             @DefaultValue("false") boolean enabled, Path keyStore, String keyStorePassword,
             @DefaultValue("PKCS12") String keyStoreType, Path trustStore, String trustStorePassword,
-            @DefaultValue("PKCS12") String trustStoreType, @DefaultValue("false") boolean needClientAuth) {
+            @DefaultValue("PKCS12") String trustStoreType, @DefaultValue("false") boolean needClientAuth,
+            @DefaultValue("true") boolean bindCertificateToCompId) {
 
         @Override
         public String toString() {                    // never the passwords
             return "FixTlsProperties[enabled=" + enabled + ", keyStore=" + keyStore + ", trustStore=" + trustStore
-                    + ", needClientAuth=" + needClientAuth + "]";
+                    + ", needClientAuth=" + needClientAuth + ", bindCertificateToCompId=" + bindCertificateToCompId
+                    + "]";
         }
     }
 

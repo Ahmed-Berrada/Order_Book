@@ -77,6 +77,12 @@ covered.
 With `need-client-auth`, a session's connection must also present a certificate issued by a CA in the venue's trust
 store, or the handshake fails before any FIX message; the Logon password is still checked (AC-007).
 
+**AC-013: A member's certificate names its CompID.** With mutual TLS, a session logs on only if the certificate its
+connection presented has exactly one common name, and that name is the CompID it logs on as: a member's trusted
+certificate proves which member it is, not just that it is one, so one member cannot log on as another with its own
+certificate. A Logon from any other certificate is rejected after its password is checked, and logged.
+`lob.fix.tls.bind-certificate-to-comp-id=false` switches this off, for certificates that cannot name their member.
+
 ## Browsers
 
 **AC-008: No writes from another site.** A browser that has answered a Basic challenge resends the credentials
