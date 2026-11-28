@@ -2,6 +2,7 @@ package io.github.ahmedberrada.lob.api;
 
 import io.github.ahmedberrada.lob.fix.FixGateway;
 import io.github.ahmedberrada.lob.fix.FixGatewayConfig;
+import io.github.ahmedberrada.lob.fix.FixTls;
 import io.github.ahmedberrada.lob.fix.LogonAuthenticator;
 import io.github.ahmedberrada.lob.service.MatchingService;
 import java.nio.file.Path;
@@ -30,7 +31,20 @@ class FixConfiguration {
         Path store = fix.storeDirectory() != null ? fix.storeDirectory() : properties.dataDirectory().resolve("fix");
         FixGatewayConfig config = new FixGatewayConfig(fix.bindAddress(), fix.port(), fix.senderCompId(),
                 fix.members(), fix.dropCopySessions(), store, fix.selfTradeMode(), properties.fixMemberIds());
-        return FixGateway.start(service, config, throttled(authenticator(properties, config), logins));
+        return FixGateway.start(service, config, throttled(authenticator(properties, config), logins), tls(fix.tls()));
+    }
+
+    /** The acceptor's TLS, or null without it; a TLS setting without its key store stops the venue (AC-011). */
+    static FixTls tls(LobProperties.FixTlsProperties tls) {
+        if (tls == null || !tls.enabled()) {
+            return null;
+        }
+        if (tls.keyStore() == null || tls.keyStorePassword() == null) {
+            throw new IllegalStateException("lob.fix.tls.enabled needs lob.fix.tls.key-store and key-store-password: "
+                    + "the venue's own key, never a default one");
+        }
+        return new FixTls(tls.keyStore(), tls.keyStorePassword(), tls.keyStoreType(), tls.trustStore(),
+                tls.trustStorePassword(), tls.trustStoreType(), tls.needClientAuth());
     }
 
     /** Refuses a CompID locked out from the Logon's address without checking its password, and counts failures (AC-009). */

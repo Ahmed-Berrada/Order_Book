@@ -35,6 +35,7 @@ class SecurityConfigurationTest {
     private static String[] properties(String... more) {
         String[] base = {
             "lob.data-directory=target/test-venue-security",
+            "server.address=127.0.0.1",                          // as application.yml does (AC-010)
             "lob.instruments[0].symbol=AAPL",
             "lob.instruments[0].tick-size=0.01",
             "lob.instruments[0].max-order-quantity=100",
@@ -134,9 +135,9 @@ class SecurityConfigurationTest {
     private static LobProperties fixProperties(boolean secure, Map<String, String> passwords) {
         return new LobProperties(Path.of("x"), 10, io.github.ahmedberrada.lob.journal.FsyncPolicy.OS, 0, List.of(),
                 new LobProperties.FixProperties(true, "127.0.0.1", 9999, "LOB", List.of("MEMBER1"), List.of("RISK"),
-                        null, SelfTradeMode.CANCEL_NEWEST, passwords),
+                        null, SelfTradeMode.CANCEL_NEWEST, passwords, null),
                 null, null, List.of(), new LobProperties.SecurityProperties(secure, List.of(), 5,
-                        java.time.Duration.ofMinutes(1)), null);
+                        java.time.Duration.ofMinutes(1), false), null);
     }
 
     @Test
