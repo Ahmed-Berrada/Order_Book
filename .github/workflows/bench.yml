@@ -17,6 +17,13 @@ jobs:
           java-version: '21'
           cache: maven
 
+      # The wrapper downloads Maven itself on every run; a failed download stops the job before any build.
+      - name: Cache the Maven distribution
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/wrapper
+          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
+
       - name: Build the benchmarks
         run: ./mvnw -B -ntp -DskipTests package -pl engine-bench -am
 
