@@ -47,7 +47,7 @@ public record InstrumentConfig(String symbol, BigDecimal tickSize, long maxOrder
         Objects.requireNonNull(maxPrice, "maxPrice");
         Objects.requireNonNull(tickRegime, "tickRegime");
         tickRegime = List.copyOf(tickRegime);
-        if (!SYMBOL.matcher(symbol).matches() || symbol.equals(".") || symbol.equals("..")) {
+        if (!SYMBOL.matcher(symbol).matches()) {            // no ".", "..", nor any name starting with a dot
             throw new IllegalArgumentException("symbol must match " + SYMBOL + ": " + symbol);
         }
         if (tickSize.signum() <= 0) {
