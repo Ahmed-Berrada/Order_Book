@@ -53,4 +53,16 @@ class LatencyRunTest {
         assertThat(result.restarts()).isEqualTo(4);                  // 3 mid-run restarts and the final recovery
         assertThat(out.toString()).contains("state matches").doesNotContain("DIFFERS");
     }
+
+    @Test
+    void theGroupCommitRunCountsEveryAcknowledgementAndTheFlushes() throws Exception {
+        GroupCommitRun.Result every = GroupCommitRun.run(FsyncPolicy.EVERY_COMMAND, 4, 50);
+        GroupCommitRun.Result group = GroupCommitRun.run(FsyncPolicy.GROUP, 4, 50);
+
+        assertThat(every.commands()).isEqualTo(200);
+        assertThat(every.latency().getTotalCount()).isEqualTo(200);
+        assertThat(every.flushes()).as("one flush per command").isEqualTo(200);
+        assertThat(group.flushes()).as("never more than one per command").isBetween(1L, 200L);
+        assertThat(group.row()).startsWith("| GROUP | 4 |");
+    }
 }

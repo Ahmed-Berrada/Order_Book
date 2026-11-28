@@ -23,12 +23,15 @@ suffixed).
 
 | Metric | Type | Meaning |
 |---|---|---|
-| `lob_command_duration_seconds` | histogram | Time the instrument's thread takes for one command: journal write (and `fsync`), matching and event record. Queueing time is not included. Buckets from 500 ns to 500 ms |
+| `lob_command_duration_seconds` | histogram | Time the instrument's thread takes for one command: journal write and matching, and the device flush with `fsync: EVERY_COMMAND`. Queueing time and, with `GROUP`, the group's flush are not included. Buckets from 500 ns to 500 ms |
 | `lob_trades_total` | counter | Trades executed |
 | `lob_rejections_total` | counter | Orders and replaces the engine rejected (`OrderRejected`, `ReplaceRejected`): a member's risk limit, a price off the tick grid, a phase that does not allow the order |
 | `lob_volatility_interruptions_total` | counter | Interruptions by the volatility band (VI-003) |
 | `lob_queue_depth` | gauge | Commands waiting for the instrument's thread |
 | `lob_queue_capacity` | gauge | Commands the queue holds before it refuses with `OVERLOADED` (OE-005) |
+| `lob_journal_flushes_total` | counter | Device flushes of the command journal: one per command with `fsync: EVERY_COMMAND`, one per group of waiting commands with `GROUP` (ADR-0020), none with `OS`. Commands per flush is the group size |
+| `lob_journal_flush_duration_seconds` | histogram | Time of one device flush of a group of commands (`GROUP`): the device's latency, which bounds the instrument's throughput |
+| `lob_journal_group_size` | summary | Commands covered by one flush (`GROUP`): about 1 at low load, growing with the load |
 | `lob_instrument_halted` | gauge | `1` if the instrument stopped after a journal failure (OE-006), else `0` |
 
 The JVM, process and HTTP server metrics that Spring Boot provides (`jvm_*`, `process_*`,

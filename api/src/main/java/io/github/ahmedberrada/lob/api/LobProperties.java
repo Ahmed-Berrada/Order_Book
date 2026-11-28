@@ -36,7 +36,7 @@ import org.springframework.validation.annotation.Validated;
 public record LobProperties(
         @NotNull Path dataDirectory,
         @DefaultValue("10000") @Positive int queueCapacity,
-        @DefaultValue("EVERY_COMMAND") @NotNull FsyncPolicy fsync,
+        @DefaultValue("GROUP") @NotNull FsyncPolicy fsync,
         @DefaultValue("10000") @PositiveOrZero int snapshotInterval,
         @NotEmpty List<@Valid InstrumentProperties> instruments,
         @DefaultValue @Valid FixProperties fix,

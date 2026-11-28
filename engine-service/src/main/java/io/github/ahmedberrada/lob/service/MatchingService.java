@@ -167,6 +167,12 @@ public final class MatchingService implements AutoCloseable {
         return worker == null ? 0 : worker.queueCapacity();
     }
 
+    /** Device flushes of an instrument's command journal so far, 0 for an unknown symbol (ADR-0020). */
+    public long flushes(String symbol) {
+        SymbolWorker worker = workers.get(symbol);
+        return worker == null ? 0 : worker.flushes();
+    }
+
     /** Whether an instrument stopped after a journal failure (OE-006). */
     public boolean isHalted(String symbol) {
         SymbolWorker worker = workers.get(symbol);

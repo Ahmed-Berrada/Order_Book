@@ -21,7 +21,8 @@ spring:
 lob:
   data-directory: ${LOB_DATA_DIR:./data}
   queue-capacity: 10000
-  fsync: EVERY_COMMAND
+  # GROUP: every acknowledged command is on the device, one flush per group of waiting commands (ADR-0020).
+  fsync: GROUP
   snapshot-interval: 10000
   # FIX 4.4 order entry (docs/interfaces/fix-rules-of-engagement.md). Sessions are provisioned here.
   fix:

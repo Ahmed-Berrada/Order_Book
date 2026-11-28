@@ -66,7 +66,8 @@ either.
 that already dominates (about 160 µs, [performance](../performance.md)). The instrument's thread would
 write the commands that are waiting, flush and replicate them once, and then acknowledge them all. Matching
 order is unchanged (the journal order is the processing order); only acknowledgements are batched. This is
-the lever phase 6 found (ADR-0016 §3).
+the lever phase 6 found (ADR-0016 §3). It is built for the local flush already (ADR-0020); replication would
+send each group to the standby with the same single round trip.
 
 **Who is primary.** The two nodes cannot decide it alone without risking two primaries after a network
 split. A lease in a consensus store (etcd, or the Kubernetes Lease API) names the primary; the primary
@@ -100,5 +101,5 @@ in seconds, and an operator can verify every journal (RS-009).
   (a per-file size limit, which fails writes exactly as a full disk does), only that instrument halts, readiness
   goes down, and a restart recovers it. In-process fault tests cover a journal directory deleted under a running
   engine, a write interrupted mid-command (OE-006), and damaged or zero-filled tails (RS-003).
-- Group commit, replication and tracing remain on the roadmap; a network partition can only be tested once
-  there is a standby to partition from.
+- Group commit is built (ADR-0020). Replication and tracing remain on the roadmap; a network partition can only
+  be tested once there is a standby to partition from.
