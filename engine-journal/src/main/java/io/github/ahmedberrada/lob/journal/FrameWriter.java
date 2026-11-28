@@ -16,6 +16,7 @@ final class FrameWriter implements Closeable {
     }
 
     private final FileChannel channel;
+    private long length;
     private Listener listener;
 
     /**
@@ -29,6 +30,12 @@ final class FrameWriter implements Closeable {
             channel.force(true);
         }
         channel.position(validLength);
+        this.length = validLength;
+    }
+
+    /** The bytes of whole frames written so far: a torn append leaves the file longer, never this. */
+    long length() {
+        return length;
     }
 
     void listener(Listener listener) {
@@ -41,6 +48,7 @@ final class FrameWriter implements Closeable {
         while (frame.hasRemaining()) {
             channel.write(frame);
         }
+        length += frame.limit();
         if (listener != null) {
             listener.appended(frame.array());
         }

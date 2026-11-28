@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
  * Definition of a listed instrument in venue units: decimal prices and a tick size. Converts prices
  * to and from the integer ticks of the core, exactly (rulebook OE-002, ADR-0004 §5).
  *
- * @param symbol           identifier, {@code [A-Z0-9._-]{1,16}}; it also names the journal directory
+ * @param symbol           identifier, {@code [A-Z0-9][A-Z0-9._-]{0,15}}; it also names the journal directory
  * @param tickSize         smallest price increment, e.g. {@code 0.01}
  * @param maxOrderQuantity largest accepted order, in lots
  * @param maxPrice         largest accepted price; a multiple of the tick size
@@ -39,7 +39,10 @@ public record InstrumentConfig(String symbol, BigDecimal tickSize, long maxOrder
         this(symbol, tickSize, maxOrderQuantity, maxPrice, List.of(), 0);
     }
 
-    private static final Pattern SYMBOL = Pattern.compile("[A-Z0-9._-]{1,16}");
+    /** Files of the data directory itself, which an instrument's directory must not collide with. */
+    private static final java.util.Set<String> RESERVED = java.util.Set.of("REPLICATION.TERM", "JOURNAL.LOCK");
+
+    private static final Pattern SYMBOL = Pattern.compile("[A-Z0-9][A-Z0-9._-]{0,15}");
 
     public InstrumentConfig {
         Objects.requireNonNull(symbol, "symbol");
@@ -47,7 +50,8 @@ public record InstrumentConfig(String symbol, BigDecimal tickSize, long maxOrder
         Objects.requireNonNull(maxPrice, "maxPrice");
         Objects.requireNonNull(tickRegime, "tickRegime");
         tickRegime = List.copyOf(tickRegime);
-        if (!SYMBOL.matcher(symbol).matches() || symbol.equals(".") || symbol.equals("..")) {
+        if (!SYMBOL.matcher(symbol).matches()                // no ".", "..", nor any name starting with a dot
+                || RESERVED.contains(symbol.toUpperCase(java.util.Locale.ROOT))) {
             throw new IllegalArgumentException("symbol must match " + SYMBOL + ": " + symbol);
         }
         if (tickSize.signum() <= 0) {

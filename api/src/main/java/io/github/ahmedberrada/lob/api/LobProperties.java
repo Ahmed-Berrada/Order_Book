@@ -47,7 +47,34 @@ public record LobProperties(
         @DefaultValue List<@Valid MemberProperties> members,
         @DefaultValue @Valid SecurityProperties security,
         @DefaultValue @Valid ThrottleProperties throttle,
-        @DefaultValue @Valid JournalSealProperties journalSeal) {
+        @DefaultValue @Valid JournalSealProperties journalSeal,
+        @DefaultValue @Valid ReplicationProperties replication) {
+
+    /**
+     * The standby every command journal is replicated to before any acknowledgement (RS-014); without a host, none.
+     *
+     * @param secretFile the secret the standby and this venue share to authenticate the link (32 bytes or more)
+     * @param timeout    how long to wait for the standby to confirm before the instrument halts (RS-015)
+     */
+    public record ReplicationProperties(String standbyHost, @DefaultValue("9879") int standbyPort, Path secretFile,
+            @DefaultValue("2s") @NotNull Duration timeout) {
+
+        /** The target these properties configure, or null without a standby. */
+        public io.github.ahmedberrada.lob.journal.ReplicationTarget target() {
+            if (standbyHost == null || standbyHost.isBlank()) {
+                return null;
+            }
+            if (secretFile == null) {
+                throw new IllegalStateException("lob.replication.standby-host needs lob.replication.secret-file");
+            }
+            try {
+                return new io.github.ahmedberrada.lob.journal.ReplicationTarget(standbyHost, standbyPort,
+                        java.nio.file.Files.readAllBytes(secretFile), timeout);
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException("cannot read the replication secret: " + e.getMessage(), e);
+            }
+        }
+    }
 
     /**
      * Seals of the command journals (RS-013): the venue's Ed25519 keys as PEM files; without a private key, no seals.

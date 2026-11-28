@@ -46,6 +46,7 @@ below the edges assumes the edges did their job.
 | 14 | A tampered build or release | Tampering | pipeline | Releases are built by one workflow with signed provenance and an SBOM (supply-chain.md) | Partial: the repository itself is the root of trust |
 | 15 | Secrets in the repository or in logs | Information disclosure | repo, logs | Secrets are configured as hashes; logs never carry a secret (AC-006) | Partial: no automated secret scanning beyond what GitHub provides |
 | 16 | The operator's own mistakes: a wrong phase, a wrong kill | — | REST | Every action is a journaled command and shows in the records | Accepted: no four-eyes control |
+| 17 | A rogue process writes to the standby or raises its term | Tampering, Spoofing | replication | The link starts with an HMAC-SHA256 challenge over a shared secret; the standby appends only after what it holds; a primary of a lower term is refused (RS-014, RS-016) | Partial: the link is not encrypted (orders are readable on the wire): a private network or a tunnel is required |
 
 ## What this does not cover
 

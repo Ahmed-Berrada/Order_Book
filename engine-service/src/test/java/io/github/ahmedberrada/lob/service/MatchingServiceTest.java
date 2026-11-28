@@ -118,6 +118,7 @@ class MatchingServiceTest {
             assertRefused(service.restingQuantity("TSLA", 1), Reason.UNKNOWN_INSTRUMENT);
             assertThat(service.instrument("TSLA")).isEmpty();
             assertThat(service.isHalted("TSLA")).isFalse();
+            assertThat(service.flushes("TSLA")).isZero();
         }
         assertThat(directory.resolve("TSLA")).doesNotExist();
     }

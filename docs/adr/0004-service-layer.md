@@ -51,7 +51,7 @@ in-memory book matches what was journaled. Only that instrument is affected.
 
 `InstrumentConfig` holds the decimal tick size and converts prices exactly, with `BigDecimal`, refusing
 off-tick prices (OE-002). Conversion is done once, before the queue, so the worker thread never handles
-decimals. The symbol must match `[A-Z0-9._-]{1,16}`, because it also names the instrument's journal
+decimals. The symbol must match `[A-Z0-9][A-Z0-9._-]{0,15}` (1 to 16 characters, not starting with `.`, `_` or `-`), because it also names the instrument's journal
 directory and must never be able to point outside it.
 
 ### 6. Orderly shutdown
