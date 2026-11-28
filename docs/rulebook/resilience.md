@@ -59,3 +59,15 @@ next event sequence number.
 directory that another engine, in this process or another, holds fails with an error and changes nothing:
 two writers would interleave frames and corrupt the journal. The lock is released when the engine is
 closed, or by the operating system if the process dies, so a crash leaves no stale lock.
+
+**RS-012: The venue's acknowledgement.** An order the venue has acknowledged to a member (`201 Created` over
+REST, an `ExecutionReport` over FIX, both answered from the same journaled command) is in its instrument's
+command journal. If the venue's process is killed at any moment (`kill -9`), the order is there after the
+restart, with the same order ID, and order IDs continue after it. If an instrument's journal can no longer be
+written, for example because its storage is full, that instrument halts (OE-006) and the others keep trading:
+- if the command journal cannot be written, that command is reported with an unknown outcome;
+- if a later write fails (the event journal or a snapshot), the command is journaled, so it is acknowledged,
+  and the commands after it are refused with `HALTED`; recovery completes the event journal (RS-007).
+
+The orders acknowledged before the failure are kept, and the log names the I/O error. A restart once the cause
+is fixed recovers the instrument.

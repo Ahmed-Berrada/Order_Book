@@ -95,6 +95,10 @@ in seconds, and an operator can verify every journal (RS-009).
   operator's.
 - The soak test (`SoakRun`) checks recovery over many restarts and reports memory per restart; a 24 hour
   run is a release step ([runbook](../operations/runbook.md#soak-test)).
-- Group commit, replication, tracing and chaos tests (killing the process during writes, filling the disk)
-  remain on the roadmap. The fault tests that exist are in-process: a journal directory deleted under a running
+- Chaos tests run the whole venue in a second JVM (`VenueCrashTest`, RS-012): killed with SIGKILL while four
+  clients enter orders, it restarts with every order a client saw acknowledged; with a journal's storage full
+  (a per-file size limit, which fails writes exactly as a full disk does), only that instrument halts, readiness
+  goes down, and a restart recovers it. In-process fault tests cover a journal directory deleted under a running
   engine, a write interrupted mid-command (OE-006), and damaged or zero-filled tails (RS-003).
+- Group commit, replication and tracing remain on the roadmap; a network partition can only be tested once
+  there is a standby to partition from.
