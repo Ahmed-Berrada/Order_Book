@@ -14,9 +14,15 @@ Terms used below:
 ## Durability
 
 **RS-001: Write-ahead.** A command is written to the command journal *before* it is processed, and is
-acknowledged only after that write. With the `EVERY_COMMAND` sync policy the write is flushed to the
-storage device first, so an acknowledged command survives a power loss. With the `OS` policy it
-survives a crash of the process, but not of the machine.
+acknowledged only after that write. With the `EVERY_COMMAND` sync policy each write is flushed to the
+storage device before its command is acknowledged, so an acknowledged command survives a power loss. The
+`GROUP` policy makes the same promise for less: the commands waiting together are written, processed in
+order, flushed to the device with one flush, and only then acknowledged; nothing about a command of the
+group (its acknowledgement, its fills, its market data, a read that sees it) leaves the venue before that
+flush, and its events are written to the event journal only after it, so the event journal is never ahead of
+the command journal on the device. If the flush fails, no command of the group is acknowledged, each has an
+unknown outcome, and the instrument halts (OE-006). With the `OS` policy an
+acknowledged command survives a crash of the process, but not of the machine.
 
 **RS-002: Recovery.** After a restart, the engine is in exactly the state obtained by applying the
 commands of the command journal, in order, to a new engine. No acknowledged command is lost, and
