@@ -42,6 +42,7 @@ public final class JournaledEngine implements AutoCloseable {
     private long lastTimestampMicros;
     private long commandsSinceSnapshot;
     private boolean failed;
+    private IOException failure;
     private boolean closed;
     private final DirectoryLock lock;
 
@@ -211,6 +212,7 @@ public final class JournaledEngine implements AutoCloseable {
         } catch (IOException e) {
             // The command is journaled and applied: acknowledge it, but accept nothing more.
             failed = true;
+            failure = e;
         }
         return batch;
     }
@@ -232,6 +234,11 @@ public final class JournaledEngine implements AutoCloseable {
      */
     public EngineSnapshot state() {
         return engine.snapshot();
+    }
+
+    /** The I/O failure that stopped this instance, or {@code null}: what the operator must fix (OE-006). */
+    public IOException failure() {
+        return failure;
     }
 
     /** Whether an I/O failure has stopped this instance; it then refuses every command. */
@@ -287,6 +294,7 @@ public final class JournaledEngine implements AutoCloseable {
 
     private UncheckedIOException stop(String message, IOException cause) {
         failed = true;
+        failure = cause;
         return new UncheckedIOException(message, cause);
     }
 

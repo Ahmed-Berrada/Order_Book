@@ -94,7 +94,7 @@ final class SymbolWorker implements AutoCloseable {
                 EventBatch batch = engine.process(command, memberId);
                 observe(batch, System.nanoTime() - started);
                 if (engine.isStopped()) {       // a later write failed: this command counts, the next ones do not
-                    halt(null);
+                    halt(new UncheckedIOException("event journal or snapshot write failed", engine.failure()));
                 }
                 notifyListeners(batch, context);
                 return batch;

@@ -36,6 +36,7 @@ import org.junit.jupiter.api.io.TempDir;
 class VenueCrashTest {
 
     private static final Pattern ORDER_ID = Pattern.compile("\"orderId\"\\s*:\\s*(\\d+)");
+    private static final Pattern COMMAND_SEQUENCE = Pattern.compile("\"commandSequence\"\\s*:\\s*(\\d+)");
     private static final Pattern REASON = Pattern.compile("\"reason\"\\s*:\\s*\"([A-Z_]+)\"");
     private static final Duration START_TIMEOUT = Duration.ofSeconds(90);
 
@@ -61,7 +62,7 @@ class VenueCrashTest {
     void aVenueKilledWhileClientsTradeLosesNoAcknowledgedOrder() throws Exception {
         int port = freePort();
         Process venue = start(port, "EVERY_COMMAND", 0, "first");
-        Map<Long, Long> acknowledged = new ConcurrentHashMap<>();      // order ID -> price in cents
+        Map<Long, Long> acknowledged = new ConcurrentHashMap<>();      // order ID -> its command sequence
         AtomicInteger sent = new AtomicInteger();
         ExecutorService clients = Executors.newFixedThreadPool(4);
         for (int c = 0; c < 4; c++) {
@@ -71,7 +72,7 @@ class VenueCrashTest {
                     try {
                         HttpResponse<String> response = order(port, "AAPL", "BUY", cents, 1);
                         if (response.statusCode() == 201) {
-                            acknowledged.put(orderId(response.body()), cents);
+                            acknowledged.put(orderId(response.body()), sequence(COMMAND_SEQUENCE, response.body()));
                         }
                     } catch (IOException e) {
                         return;                                                 // the venue is gone
@@ -90,18 +91,37 @@ class VenueCrashTest {
         clients.shutdownNow();
         assertThat(clients.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
         assertThat(acknowledged).as("orders acknowledged before the kill").hasSizeGreaterThanOrEqualTo(300);
-        assertThat(sent.get()).as("requests were still being sent when it died").isGreaterThan(acknowledged.size());
 
-        start(port, "EVERY_COMMAND", 0, "after-kill");
-        for (Map.Entry<Long, Long> order : acknowledged.entrySet()) {
-            HttpResponse<String> status = get(port, "/api/v1/instruments/AAPL/orders/" + order.getKey());
-            assertThat(status.body()).as("order %d after the restart", order.getKey())
-                    .contains("\"resting\":true").contains("\"restingQuantity\":1");
+        Process restarted = start(port, "EVERY_COMMAND", 0, "after-kill");
+        assertRecovered(port, acknowledged);
+
+        // The newest acknowledgement is the one most at risk: kill the venue the moment it is answered, with
+        // nothing else in flight that could flush it as a side effect. Three times.
+        for (int cycle = 0; cycle < 3; cycle++) {
+            HttpResponse<String> last = order(port, "AAPL", "BUY", 9_000 + cycle, 1);
+            assertThat(last.statusCode()).isEqualTo(201);
+            restarted.destroyForcibly();
+            assertThat(restarted.waitFor(30, TimeUnit.SECONDS)).isTrue();
+            acknowledged.put(orderId(last.body()), sequence(COMMAND_SEQUENCE, last.body()));
+            restarted = start(port, "EVERY_COMMAND", 0, "after-kill-" + cycle);
+            assertRecovered(port, acknowledged);
         }
         HttpResponse<String> next = order(port, "AAPL", "BUY", 10_000, 1);
         assertThat(next.statusCode()).isEqualTo(201);
         assertThat(orderId(next.body())).as("order IDs continue after the highest acknowledged")
                 .isGreaterThan(acknowledged.keySet().stream().mapToLong(Long::longValue).max().orElseThrow());
+    }
+
+    /** Every acknowledged order rests, and the journal reaches at least the last acknowledged command. */
+    private void assertRecovered(int port, Map<Long, Long> acknowledged) throws Exception {
+        for (Map.Entry<Long, Long> order : acknowledged.entrySet()) {
+            HttpResponse<String> status = get(port, "/api/v1/instruments/AAPL/orders/" + order.getKey());
+            assertThat(status.body()).as("order %d after the restart", order.getKey())
+                    .contains("\"resting\":true").contains("\"restingQuantity\":1");
+        }
+        long last = sequence(COMMAND_SEQUENCE, get(port, "/api/v1/instruments/AAPL/book").body());     // the last applied
+        assertThat(last).as("the journal holds every acknowledged command")
+                .isGreaterThanOrEqualTo(acknowledged.values().stream().mapToLong(Long::longValue).max().orElseThrow());
     }
 
     @Test
@@ -123,9 +143,12 @@ class VenueCrashTest {
                 refusal = response.statusCode() + " " + reason(response.body());
             }
         }
-        assertThat(refusal).as("the journal filled up").isNotNull();
-        assertThat(refusal).isIn("500 OUTCOME_UNKNOWN", "503 HALTED");
+        // Each order writes more to the event journal than to the command journal, so the event journal fills
+        // first: the command is journaled, hence acknowledged, and the instrument halts (RS-012).
+        assertThat(refusal).as("the journal filled up").isEqualTo("503 HALTED");
         assertThat(acknowledged).hasSizeGreaterThan(100);
+        assertThat(Files.size(data.resolve("AAPL").resolve("events.journal"))).isEqualTo(64 * 1024);
+        assertThat(Files.size(data.resolve("AAPL").resolve("commands.journal"))).isLessThan(64 * 1024);
 
         HttpResponse<String> after = order(port, "AAPL", "BUY", 10_000, 1);
         assertThat(after.statusCode()).isEqualTo(503);
@@ -134,7 +157,8 @@ class VenueCrashTest {
         assertThat(get(port, "/actuator/health/readiness").statusCode()).as("readiness is down").isEqualTo(503);
         assertThat(get(port, "/actuator/prometheus").body())
                 .containsPattern("lob_instrument_halted\\{[^}]*symbol=\"AAPL\"[^}]*\\} 1\\.0");
-        assertThat(Files.readString(logs.resolve("full-disk.log"))).contains("Instrument AAPL halted");
+        assertThat(Files.readString(logs.resolve("full-disk.log"))).contains("Instrument AAPL halted")
+                .as("the log names the I/O error the operator must fix").contains("File too large");
 
         venues.getLast().destroy();                                     // the operator restarts it, with room
         assertThat(venues.getLast().waitFor(60, TimeUnit.SECONDS)).isTrue();
@@ -200,6 +224,12 @@ class VenueCrashTest {
     private static long orderId(String body) {
         Matcher m = ORDER_ID.matcher(body);
         assertThat(m.find()).as("an order ID in %s", body).isTrue();
+        return Long.parseLong(m.group(1));
+    }
+
+    private static long sequence(Pattern pattern, String body) {
+        Matcher m = pattern.matcher(body);
+        assertThat(m.find()).as("%s in %s", pattern, body).isTrue();
         return Long.parseLong(m.group(1));
     }
 
