@@ -119,7 +119,7 @@ the stop's owner, as its own, even though another member's order caused the trig
 | Unsupported field value (Side other than buy/sell, TimeInForce, ExecInst, OrdType), price or ExecInst on a market order, price missing on a limit order | `11` Unsupported order characteristic | `UNSUPPORTED_SIDE`, `UNSUPPORTED_TIME_IN_FORCE`, `UNSUPPORTED_EXEC_INST`, `UNSUPPORTED_ORD_TYPE`, `PRICE_NOT_ALLOWED_FOR_MARKET`, `POST_ONLY_NOT_ALLOWED_FOR_MARKET`, `MAX_FLOOR_NOT_ALLOWED_FOR_MARKET`, `PRICE_REQUIRED_FOR_LIMIT`, `STOP_PRICE_REQUIRED`, `STOP_PRICE_NOT_ALLOWED`, `STOP_ORDER_ATTRIBUTES` (TimeInForce, ExecInst or MaxFloor on a stop order) |
 | Time in force not allowed for the order (GTC market order, post-only IOC or FOK) | `11` Unsupported order characteristic | `INVALID_TIME_IN_FORCE` |
 | Zero, negative or fractional quantity or MaxFloor; MaxFloor above the quantity or on an IOC or FOK order | `13` Incorrect quantity | `INVALID_QUANTITY`, `FRACTIONAL_QUANTITY`, `INVALID_DISPLAY_QUANTITY` |
-| Off-tick or non-positive price, no liquidity, post-only order that would trade, stop price already reached, overload, halt | `99` Other | `OFF_TICK_PRICE`, `INVALID_PRICE`, `NO_LIQUIDITY`, `POST_ONLY_WOULD_TRADE`, `STOP_PRICE_ALREADY_REACHED`, `OVERLOADED`, `HALTED` |
+| Off-tick or non-positive price, no liquidity, post-only order that would trade, stop price already reached, overload, halt, the member's message rate (OE-008) or order-to-trade ratio (OE-009) | `99` Other | `OFF_TICK_PRICE`, `INVALID_PRICE`, `NO_LIQUIDITY`, `POST_ONLY_WOULD_TRADE`, `STOP_PRICE_ALREADY_REACHED`, `OVERLOADED`, `HALTED`, `THROTTLED`, `ORDER_TO_TRADE_LIMIT` |
 
 Rejections by the engine carry the `OrderID` they consumed (CT-010); refusals before the engine carry
 `OrderID=NONE` and were not journaled.
@@ -136,6 +136,7 @@ Rejections by the engine carry the `OrderID` they consumed (CT-010); refusals be
 | `3` Pending status | The order's acknowledgement has not been sent yet | `PENDING` |
 | `6` Duplicate ClOrdID | The cancel request reuses a ClOrdID | `DUPLICATE_CLORDID` |
 | `99` Other | Refused by the venue (overload, halt, shutdown) | `OVERLOADED`, `HALTED`, `STOPPED` |
+| `99` Other | Replace only: the member's message rate or order-to-trade ratio (OE-008, OE-009); cancels are never refused this way | `THROTTLED`, `ORDER_TO_TRADE_LIMIT` |
 | `99` Other | Replace only: invalid new values, or refused by the engine (OT-005); the order is unchanged | `QUANTITY_NOT_ABOVE_FILLED`, `FRACTIONAL_QUANTITY`, `OFF_TICK_PRICE`, `ONLY_LIMIT_PRICE_AND_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `POST_ONLY_WOULD_TRADE` |
 
 A ClOrdID used by a refused cancel or replace request stays used. A cancel or replace whose journal

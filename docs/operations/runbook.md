@@ -83,6 +83,17 @@ The kill switch suspends a member and cancels its open orders in every instrumen
 `DELETE /api/v1/members/{memberId}/suspension`. Its FIX sessions receive a cancel for each order
 (`Text=KILL_SWITCH`). Limits are changed with `PUT /api/v1/members/{memberId}/limits`.
 
+## A member is throttled
+
+`lob_throttled_total` grows when a member's orders or replaces are refused before the queue: `THROTTLED`, more
+than `lob.throttle.messages-per-second` (OE-008), or `ORDER_TO_TRADE_LIMIT`, too many messages per trade in an
+instrument today (OE-009). Its cancels are still accepted, so the member can always withdraw. Nothing is
+journaled for a refused command. The `member` tag says who. A rate refusal lasts a fraction of a second; a
+ratio refusal lasts until the member's trades bring the ratio back under the limit, at most until the end of
+the UTC day or a restart, which resets the counts. Contact the member before raising a limit: a sudden
+flow is often a runaway algorithm, and the kill switch is the next step. The limits are venue settings
+(`lob.throttle.*`, `0` switches one off) and need a restart to change.
+
 ## The queue is nearly full or commands are slow
 
 **Alerts:** `QueueNearlyFull`, `CommandLatencyHigh`. A full queue refuses with `OVERLOADED` and

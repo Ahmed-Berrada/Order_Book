@@ -32,6 +32,7 @@ suffixed).
 | `lob_journal_flushes_total` | counter | Device flushes of the command journal: one per command with `fsync: EVERY_COMMAND`, one per group of waiting commands with `GROUP` (ADR-0020), none with `OS`. Commands per flush is the group size |
 | `lob_journal_flush_duration_seconds` | histogram | Time of one device flush of a group of commands (`GROUP`): the device's latency, which bounds the instrument's throughput |
 | `lob_journal_group_size` | summary | Commands covered by one flush (`GROUP`): about 1 at low load, growing with the load |
+| `lob_throttled_total` | counter | Members' orders and replaces refused before the queue by a throttle, by `member` and `reason`: `THROTTLED` (message rate, OE-008) or `ORDER_TO_TRADE_LIMIT` (OE-009). Appears with the first refusal |
 | `lob_instrument_halted` | gauge | `1` if the instrument stopped after a journal failure (OE-006), else `0` |
 
 The JVM, process and HTTP server metrics that Spring Boot provides (`jvm_*`, `process_*`,
