@@ -56,8 +56,13 @@ public final class FixGateway implements AutoCloseable {
         }
         FixApplication application = new FixApplication(service, dropCopies, selfTrade, authenticator);
         service.addListener(application);
-        Acceptor acceptor = new ThreadedSocketAcceptor(application, new FileStoreFactory(settings), settings,
-                new SLF4JLogFactory(settings), new DefaultMessageFactory());
+        ThreadedSocketAcceptor acceptor = new ThreadedSocketAcceptor(application, new FileStoreFactory(settings),
+                settings, new SLF4JLogFactory(settings), new DefaultMessageFactory());
+        if (tls != null && tls.bindCertificateToCompId()) {              // AC-013
+            PeerCertificates peers = new PeerCertificates();
+            acceptor.setIoFilterChainBuilder(chain -> chain.addLast("lob-peer-certificates", peers));
+            application.bindCertificates(peers);
+        }
         acceptor.start();
         return new FixGateway(acceptor);
     }

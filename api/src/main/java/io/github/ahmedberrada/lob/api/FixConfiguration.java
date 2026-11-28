@@ -45,7 +45,8 @@ class FixConfiguration {
                     + "the venue's own key, never a default one");
         }
         return new FixTls(tls.keyStore(), tls.keyStorePassword(), tls.keyStoreType(), tls.trustStore(),
-                tls.trustStorePassword(), tls.trustStoreType(), tls.needClientAuth());
+                tls.trustStorePassword(), tls.trustStoreType(), tls.needClientAuth(),
+                tls.needClientAuth() && tls.bindCertificateToCompId());
     }
 
     /** Refuses a CompID locked out from the Logon's address without checking its password, and counts failures (AC-009). */

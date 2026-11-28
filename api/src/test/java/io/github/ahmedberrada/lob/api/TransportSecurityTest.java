@@ -87,7 +87,7 @@ class TransportSecurityTest {
                 .withMessageContaining("FIX on 0.0.0.0 (lob.fix.tls)");
         LobProperties.FixProperties tls = new LobProperties.FixProperties(true, "0.0.0.0", 9878, "LOB",
                 java.util.List.of("M1"), java.util.List.of(), null, null, java.util.Map.of(),
-                new LobProperties.FixTlsProperties(true, null, null, "PKCS12", null, null, "PKCS12", false));
+                new LobProperties.FixTlsProperties(true, null, null, "PKCS12", null, null, "PKCS12", false, true));
         TransportSecurity.check(properties(tls, security), environment);
         org.assertj.core.api.Assertions.assertThatIllegalStateException()
                 .isThrownBy(() -> FixConfiguration.tls(tls.tls())).withMessageContaining("key-store");

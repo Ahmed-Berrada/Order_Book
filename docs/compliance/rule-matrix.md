@@ -6,7 +6,7 @@ of every module's tests. Do not edit by hand: change a rule or a test, then run 
 
 Regulation to rules: [regulatory-mapping.md](regulatory-mapping.md).
 
-**147 rules, 147 in force, 0 draft.**
+**148 rules, 148 in force, 0 draft.**
 
 | Rule | Title | Chapter | Status | Verified by |
 |---|---|---|---|---|
@@ -22,6 +22,7 @@ Regulation to rules: [regulatory-mapping.md](regulatory-mapping.md).
 | `AC-010` | TLS on every exposed port | [access-control](../rulebook/access-control.md) | in force | FixTlsTest#aMemberTradesOverTlsAndAClearConnectionGetsNowhere, TlsVenueTest#noFixPortOpensBeforeTheCheckRefuses, TlsVenueTest#restAndFixSpeakTlsAndNothingElse, TlsVenueTest#theSameVenueWithoutTlsDoesNotStart and 1 more |
 | `AC-011` | FIX over TLS, optionally mutual | [access-control](../rulebook/access-control.md) | in force | FixTlsTest#aMemberTradesOverTlsAndAClearConnectionGetsNowhere, FixTlsTest#tlsNeedsTheVenuesOwnKeyStoreAndMutualTlsATrustStore, FixTlsTest#withMutualTlsOnlyAMemberWithATrustedCertificateConnects, TlsVenueTest#restAndFixSpeakTlsAndNothingElse |
 | `AC-012` | Verified credentials are remembered briefly | [access-control](../rulebook/access-control.md) | in force | VerifiedCredentialsTest |
+| `AC-013` | A member's certificate names its CompID | [access-control](../rulebook/access-control.md) | in force | FixTlsTest#aMembersCertificateLogsOnOnlyAsTheCompIdItNames |
 | `AU-001` | Auction price | [trading-phases](../rulebook/trading-phases.md) | in force | MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel, TradingPhaseApiTest#aCallPhaseCollectsOrdersAndTheUncrossReportsItsPrice, TradingPhasesTest#anUncrossLeavingForClosedKeepsTheRestingOrders, TradingPhasesTest#theAuctionPriceFollowsTheTieBreaks and 3 more |
 | `AU-002` | Execution | [trading-phases](../rulebook/trading-phases.md) | in force | BookImageTest#imageAndSubscribersMatchTheEngineAfterEveryCommand, MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel, TradingPhasesFixTest#anAuctionTradesAtOnePriceAndBothMembersAreToldOfTheirFill, TradingPhasesTest#anIcebergIsShownInFullDuringACallPhase and 2 more |
 | `AU-003` | Uncrossed | [trading-phases](../rulebook/trading-phases.md) | in force | MatchingEnginePropertyTest#bookIsNeverCrossedAndHoldsOnlyPositiveQuantities, TradingPhaseApiTest#aCallPhaseCollectsOrdersAndTheUncrossReportsItsPrice, TradingPhasesTest#theAuctionPriceFollowsTheTieBreaks, TradingPhasesTest#withoutExecutableVolumeNothingTradesAndTheBookIsKept |

@@ -11,9 +11,18 @@ import java.util.Objects;
  * @param keyStore           the venue's key and certificate (PKCS12 or JKS)
  * @param trustStore         the CAs of members' certificates; required with {@code needClientAuth}, else may be null
  * @param needClientAuth     whether a connection must present a certificate from a trusted CA (mutual TLS)
+ * @param bindCertificateToCompId with mutual TLS, whether the certificate's common name must be the CompID the
+ *                           session logs on as (AC-013)
  */
 public record FixTls(Path keyStore, String keyStorePassword, String keyStoreType, Path trustStore,
-        String trustStorePassword, String trustStoreType, boolean needClientAuth) {
+        String trustStorePassword, String trustStoreType, boolean needClientAuth, boolean bindCertificateToCompId) {
+
+    /** With mutual TLS, a certificate is bound to its CompID (AC-013). */
+    public FixTls(Path keyStore, String keyStorePassword, String keyStoreType, Path trustStore,
+            String trustStorePassword, String trustStoreType, boolean needClientAuth) {
+        this(keyStore, keyStorePassword, keyStoreType, trustStore, trustStorePassword, trustStoreType, needClientAuth,
+                needClientAuth);
+    }
 
     /** The protocols offered: nothing older than TLS 1.2. */
     static final String PROTOCOLS = "TLSv1.3,TLSv1.2";
@@ -24,6 +33,9 @@ public record FixTls(Path keyStore, String keyStorePassword, String keyStoreType
         Objects.requireNonNull(keyStoreType, "keyStoreType");
         if (!Files.isReadable(keyStore)) {
             throw new IllegalArgumentException("FIX key store not readable: " + keyStore);
+        }
+        if (bindCertificateToCompId && !needClientAuth) {
+            throw new IllegalArgumentException("binding certificates to CompIDs needs mutual TLS");
         }
         if (needClientAuth && trustStore == null) {
             throw new IllegalArgumentException("mutual TLS needs a trust store of the members' CAs");
@@ -39,6 +51,7 @@ public record FixTls(Path keyStore, String keyStorePassword, String keyStoreType
 
     @Override
     public String toString() {                        // never the passwords
-        return "FixTls[keyStore=" + keyStore + ", trustStore=" + trustStore + ", needClientAuth=" + needClientAuth + "]";
+        return "FixTls[keyStore=" + keyStore + ", trustStore=" + trustStore + ", needClientAuth=" + needClientAuth
+                + ", bindCertificateToCompId=" + bindCertificateToCompId + "]";
     }
 }
