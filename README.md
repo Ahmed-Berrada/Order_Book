@@ -321,7 +321,7 @@ The matching behaviour itself is specified in the [rulebook](docs/rulebook/conti
 | Cancel | O(1): the order unlinks itself from its level | Measured with JMH: a cancel from a 10,000-order level went from about 2 µs to 0.15 µs ([ADR-0016](docs/adr/0016-performance-and-the-queue.md)). |
 | Order IDs | Assigned by the engine, per instrument | Deterministic replay ([ADR-0002](docs/adr/0002-core-engine-model.md)). |
 | Ordering and time | Gap-free sequence numbers; one µs UTC timestamp per command, taken at ingress and journaled | Determinism and reproducible replay ([ADR-0003](docs/adr/0003-journal-and-recovery.md)). |
-| Durability | Write-ahead journal per instrument, CRC-framed, fsync per command by default | No acknowledged order is lost; journals are never rewritten (record keeping). |
+| Durability | Write-ahead journal per instrument, CRC-framed, flushed before every acknowledgement, optionally sealed with the venue's signature | No acknowledged order is lost; journals are never rewritten, and a sealed journal that was is found (record keeping, RS-013). |
 | Overload | Bounded queue per instrument; a full queue refuses at once (`OVERLOADED`) | Predictable latency instead of unbounded queuing ([ADR-0004](docs/adr/0004-service-layer.md)). |
 | Errors | Typed `OrderRejected(reason)`, no exceptions on the hot path | Rejection is a business outcome, not an error. |
 | Instruments | Declared at startup (`application.yml`) | Exchanges do not create symbols on demand. |
@@ -445,6 +445,7 @@ current code regenerates exactly the recorded events. It never modifies the file
 ./mvnw -q install -DskipTests
 CP=engine-core/target/engine-core-0.1.0-SNAPSHOT.jar:engine-journal/target/engine-journal-0.1.0-SNAPSHOT.jar
 java -cp "$CP" io.github.ahmedberrada.lob.journal.ReplayTool <instrument-dir> [--to <sequence>] [--verify]
+java -cp "$CP" io.github.ahmedberrada.lob.journal.JournalVerify <instrument-dir> seal.pub   # sealed journals (RS-013)
 ```
 
 ```
@@ -558,7 +559,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 5 | **Pre-trade risk & members**: members, limits and the kill switch ✅, message-rate and order-to-trade throttles ✅, mass cancel ✅; trader hierarchy, venue-wide exposure | ⏳ |
 | 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅, group commit ✅, end-to-end load test ✅; GC study | ⏳ |
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; [surveillance alerts](docs/analytics.md#surveillance) ✅; RTS 22 reports, real-time surveillance | ⏳ |
-| 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, lockout of repeated failed logins ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅, TLS and mutual TLS for FIX ✅; OIDC | ⏳ |
+| 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, lockout of repeated failed logins ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅, TLS and mutual TLS for FIX ✅, sealed journals ✅; OIDC | ⏳ |
 | 9 | **Operations & resilience**: [Prometheus metrics, probes and alerts](docs/operations/observability.md) ✅, OpenTelemetry traces ✅, [runbook](docs/operations/runbook.md) ✅, one writer per journal ✅, soak test ✅, container image, compose stack and Helm chart ✅, [HA design](docs/adr/0018-operations-and-high-availability.md) ✅; chaos tests (kill -9, full disk) ✅; replication and failover | ⏳ |
 | 10 | **Post-trade & analytics** *(optional)*: [clearing trade file and maker/taker/auction fees](docs/interfaces/trade-file.md) ✅, [Python microstructure analytics](docs/analytics.md) ✅ | ✅ |
 
