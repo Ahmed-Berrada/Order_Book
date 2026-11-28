@@ -119,6 +119,7 @@ final class FixApplication implements Application, EventListener {
     private final Sender sender;
     /** Sessions logged on now: told of phase changes (FS-001). */
     private final Set<SessionID> loggedOn = ConcurrentHashMap.newKeySet();
+    private final Map<Audience, Announced> announced = new ConcurrentHashMap<>();
     private final List<SessionID> dropCopies;
     /** The self-trade instruction of each member session; a session not listed has none (SP-001). */
     private final Map<SessionID, SelfTradeInstruction> selfTrade;
@@ -672,8 +673,8 @@ final class FixApplication implements Application, EventListener {
         }
         if (newPhase != null) {                            // FS-001: after the command's own reports
             for (SessionID session : loggedOn) {
-                sender.send(tradingStatus(symbol, status(newPhase), true, null,
-                        interrupted ? "VOLATILITY_INTERRUPTION" : null), session);
+                announce(session, symbol, batch.commandSequence(), status(newPhase),
+                        interrupted ? "VOLATILITY_INTERRUPTION" : null, null);
             }
         }
     }
@@ -701,20 +702,50 @@ final class FixApplication implements Application, EventListener {
     }
 
     /**
-     * Sends an instrument's current status. The phase is read on the instrument's thread, in turn with its commands,
-     * and sent from there: a later phase change is announced after it, never before.
+     * Sends an instrument's current status: its phase as of a command sequence, read in turn with its commands. The
+     * read can complete on either thread, so a phase change may be announced before the read's answer is sent;
+     * {@link #announce} then keeps the newer status (FS-001).
      */
     private void sendStatus(String symbol, SessionID session, String reqId) {
         if (service.isHalted(symbol)) {
-            sender.send(tradingStatus(symbol, TradSesStatus.HALTED, reqId == null, reqId, "HALTED"), session);
+            announce(session, symbol, Long.MAX_VALUE, TradSesStatus.HALTED, "HALTED", reqId);   // until the restart
             return;
         }
-        service.phase(symbol).whenComplete((phase, failure) -> {
-            if (failure != null) {
-                sender.send(tradingStatus(symbol, TradSesStatus.HALTED, reqId == null, reqId, "HALTED"), session);
-            } else {
-                sender.send(tradingStatus(symbol, status(phase), reqId == null, reqId, null), session);
+        service.book(symbol, 0).whenComplete((book, failure) -> {
+            Throwable cause = failure == null ? null : unwrap(failure);
+            if (cause == null) {
+                announce(session, symbol, book.lastCommandSequence(), status(book.phase()), null, reqId);
+            } else if (cause instanceof RequestRefusedException r && r.reason() == RequestRefusedException.Reason.HALTED) {
+                announce(session, symbol, Long.MAX_VALUE, TradSesStatus.HALTED, "HALTED", reqId);
+            } else {                                       // overloaded or stopping: the phase is not known now
+                sender.send(tradingStatus(symbol, TradSesStatus.UNKNOWN, reqId == null, reqId,
+                        cause instanceof RequestRefusedException r ? r.reason().name() : "UNKNOWN"), session);
             }
+        });
+    }
+
+    /** The newest status sent to a session for an instrument, by the command sequence it reflects. */
+    private record Announced(long commandSequence, int status, String text) {
+    }
+
+    private record Audience(SessionID session, String symbol) {
+    }
+
+    /**
+     * Sends a status unless the session already has a newer one for the instrument. An unsolicited status that is
+     * older is dropped; an answer to a request is sent all the same, with the newer status, so the request is
+     * answered with what is true.
+     */
+    private void announce(SessionID session, String symbol, long commandSequence, int status, String text,
+            String reqId) {
+        announced.compute(new Audience(session, symbol), (key, previous) -> {
+            boolean stale = previous != null && previous.commandSequence() > commandSequence;
+            if (stale && reqId == null) {
+                return previous;
+            }
+            Announced current = stale ? previous : new Announced(commandSequence, status, text);
+            sender.send(tradingStatus(symbol, current.status(), reqId == null, reqId, current.text()), session);
+            return current;
         });
     }
 
@@ -839,6 +870,7 @@ final class FixApplication implements Application, EventListener {
     public void onLogout(SessionID session) {
         LOG.info("FIX session logged out: {}", session);
         loggedOn.remove(session);
+        announced.keySet().removeIf(audience -> audience.session().equals(session));
     }
 
     @Override

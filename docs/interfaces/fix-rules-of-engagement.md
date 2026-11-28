@@ -96,7 +96,10 @@ instrument's phase changes (`325 UnsolicitedIndicator=Y`), after the reports of 
 change made by the volatility band carries `58 Text=VOLATILITY_INTERRUPTION` (FS-001). A member may ask with
 `35=g` (`335 TradSesReqID`, `263 SubscriptionRequestType`, and `336` for one instrument or none for all): it gets
 a snapshot with `335` echoed and `325=N`, and the changes keep coming as they do anyway, whatever `263` asks. An
-unknown `336` is answered with `340=6` and `567 TradSesStatusRejReason=1` (FS-002). A halt after a journal failure
+unknown `336` is answered with `340=6`, `567 TradSesStatusRejReason=1` and `58 Text=UNKNOWN_INSTRUMENT` (FS-002).
+A halted instrument carries `58 Text=HALTED`; a phase that cannot be read at that moment (a full queue, a venue
+stopping) is `340=0` Unknown with the reason in `58` (`OVERLOADED`, `STOPPED`). Each status gives the phase at the
+end of a command, and a session never receives one older than one it already has. A halt after a journal failure
 is not announced when it happens: it shows at the next logon or request.
 
 ### OrderStatusRequest (`35=H`)

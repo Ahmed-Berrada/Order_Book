@@ -46,11 +46,15 @@ failure (OE-006).
 
 **FS-001: Phase changes are announced.** When an instrument's trading phase changes (TP-001), every member and
 drop copy session that is logged on receives a `TradingSessionStatus` for it, with `325 UnsolicitedIndicator=Y`,
-after the reports of the command that changed it. A change caused by the volatility band (VI-003) carries
+after the reports of the command that changed it. It gives the phase at the end of the command: a command that
+changes the phase twice (an auction that reopens trading, then a volatility interruption) is announced once.
+A session never receives a status older than one it already has, whichever reaches the gateway first. A change caused by the volatility band (VI-003) carries
 `58 Text=VOLATILITY_INTERRUPTION`.
 
 **FS-002: Status at logon and on request.** A session receives the status of every instrument when it logs on.
 A `TradingSessionStatusRequest` (`35=g`) is answered with the status of the instrument named in `336`, or of
 every instrument without one, with `335 TradSesReqID` echoed and `325=N`; an unknown `336` is answered with
-`340=6` Request rejected and `567 TradSesStatusRejReason=1` (unknown or invalid TradingSessionID).
+`340=6` Request rejected and `567 TradSesStatusRejReason=1` (unknown or invalid TradingSessionID). When the phase
+cannot be read at that moment (the instrument's queue is full, or the venue is stopping), the status is `0` Unknown
+with the reason in `58`.
 

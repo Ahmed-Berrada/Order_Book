@@ -242,12 +242,22 @@ class FailureMappingTest {
         assertThat(sent).hasSize(1);
         assertThat(sent.getFirst().getInt(quickfix.field.TradSesStatus.FIELD)).isEqualTo(quickfix.field.TradSesStatus.HALTED);
 
+        application.onLogout(SESSION);
         when(service.isHalted("AAPL")).thenReturn(false);
-        when(service.phase("AAPL")).thenReturn(CompletableFuture.failedFuture(
+        when(service.book("AAPL", 0)).thenReturn(CompletableFuture.failedFuture(
                 new RequestRefusedException(Reason.HALTED, "AAPL")));
         sent.clear();
         application.onLogon(SESSION);
         assertThat(sent.getFirst().getString(Text.FIELD)).isEqualTo("HALTED");
+
+        application.onLogout(SESSION);
+        when(service.book("AAPL", 0)).thenReturn(CompletableFuture.failedFuture(
+                new RequestRefusedException(Reason.OVERLOADED, "AAPL")));
+        sent.clear();
+        application.onLogon(SESSION);
+        assertThat(sent.getFirst().getInt(quickfix.field.TradSesStatus.FIELD)).as("busy is not halted")
+                .isEqualTo(quickfix.field.TradSesStatus.UNKNOWN);
+        assertThat(sent.getFirst().getString(Text.FIELD)).isEqualTo("OVERLOADED");
 
         sent.clear();
         application.onEvents("AAPL", new EventBatch(5, 1, List.of(
@@ -263,5 +273,36 @@ class FailureMappingTest {
         application.onEvents("AAPL", new EventBatch(6, 1, List.of(new io.github.ahmedberrada.lob.core.PhaseChanged(3,
                 io.github.ahmedberrada.lob.core.TradingPhase.CALL, io.github.ahmedberrada.lob.core.TradingPhase.CONTINUOUS))), null);
         assertThat(sent).as("only sessions logged on").isEmpty();
+    }
+
+    @Test
+    @Rulebook("FS-001")
+    void aStatusReadBeforeAPhaseChangeNeverOverwritesIt() throws Exception {
+        when(service.instruments()).thenReturn(List.of(FixVenue.AAPL));
+        when(service.instrument("AAPL")).thenReturn(Optional.of(FixVenue.AAPL));
+        CompletableFuture<io.github.ahmedberrada.lob.service.BookSnapshot> read = new CompletableFuture<>();
+        when(service.book("AAPL", 0)).thenReturn(read);
+        sent.clear();
+        application.onLogon(SESSION);                                  // reads the phase: answered later
+        application.onEvents("AAPL", new EventBatch(8, 1, List.of(new io.github.ahmedberrada.lob.core.PhaseChanged(3,
+                io.github.ahmedberrada.lob.core.TradingPhase.CONTINUOUS, io.github.ahmedberrada.lob.core.TradingPhase.CALL))), null);
+        read.complete(new io.github.ahmedberrada.lob.service.BookSnapshot(7,
+                io.github.ahmedberrada.lob.core.TradingPhase.CONTINUOUS, List.of(), List.of()));
+        assertThat(sent).as("the older status read at command 7 is dropped").hasSize(1);
+        assertThat(sent.getFirst().getInt(quickfix.field.TradSesStatus.FIELD)).isEqualTo(quickfix.field.TradSesStatus.PRE_OPEN);
+
+        CompletableFuture<io.github.ahmedberrada.lob.service.BookSnapshot> stale = new CompletableFuture<>();
+        when(service.book("AAPL", 0)).thenReturn(stale);
+        quickfix.fix44.TradingSessionStatusRequest request = new quickfix.fix44.TradingSessionStatusRequest();
+        request.setString(quickfix.field.TradSesReqID.FIELD, "R-1");
+        request.setChar(quickfix.field.SubscriptionRequestType.FIELD, '0');
+        request.setString(quickfix.field.TradingSessionID.FIELD, "AAPL");
+        sent.clear();
+        application.fromApp(request, SESSION);
+        stale.complete(new io.github.ahmedberrada.lob.service.BookSnapshot(7,
+                io.github.ahmedberrada.lob.core.TradingPhase.CONTINUOUS, List.of(), List.of()));
+        assertThat(sent).as("a request is answered, with the newer status").hasSize(1);
+        assertThat(sent.getFirst().getInt(quickfix.field.TradSesStatus.FIELD)).isEqualTo(quickfix.field.TradSesStatus.PRE_OPEN);
+        assertThat(sent.getFirst().getString(quickfix.field.TradSesReqID.FIELD)).isEqualTo("R-1");
     }
 }
