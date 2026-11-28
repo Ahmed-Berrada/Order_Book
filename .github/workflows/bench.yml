@@ -36,7 +36,7 @@ jobs:
             java -cp engine-bench/target/benchmarks.jar io.github.ahmedberrada.lob.bench.LatencyRun $mode | tee -a latency.txt
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: benchmarks
           path: |
