@@ -29,6 +29,8 @@ class ArchitectureTest {
         noClasses().that().doNotHaveFullyQualifiedName(ReplayTool.class.getName())
                 .and().doNotHaveFullyQualifiedName(RecordsExport.class.getName())
                 .and().doNotHaveFullyQualifiedName(JournalVerify.class.getName())
+                .and().doNotHaveFullyQualifiedName(ReplicaServer.class.getName())
+                .and().doNotHaveFullyQualifiedName(ReplicaTool.class.getName())
                 .should().callMethod(System.class, "exit", int.class)
                 .check(CLASSES);
     }

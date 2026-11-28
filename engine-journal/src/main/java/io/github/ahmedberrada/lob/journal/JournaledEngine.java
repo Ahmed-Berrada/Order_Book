@@ -49,12 +49,14 @@ public final class JournaledEngine implements AutoCloseable {
     private final List<byte[]> unflushedBatches = new ArrayList<>();   // GROUP: event batches awaiting the flush
     private final DirectoryLock lock;
     private final JournalSealer sealer;                 // null without sealing (RS-013)
+    private final ReplicationClient replica;            // null without a standby (RS-014)
 
     private JournaledEngine(MatchingEngine engine, JournalOptions options, TimeSource timeSource,
             FrameWriter commands, FrameWriter events, SnapshotStore snapshots, RecoveryReport recovery,
-            long lastTimestampMicros, DirectoryLock lock, JournalSealer sealer) {
+            long lastTimestampMicros, DirectoryLock lock, JournalSealer sealer, ReplicationClient replica) {
         this.lock = lock;
         this.sealer = sealer;
+        this.replica = replica;
         this.engine = engine;
         this.options = options;
         this.timeSource = timeSource;
@@ -178,8 +180,10 @@ public final class JournaledEngine implements AutoCloseable {
             }
             RecoveryReport report = new RecoveryReport(
                     snapshotSequence, replayed, reader.lastSequence(), missingBatches.size(), tornBytes);
+            ReplicationClient replica = options.replication() == null ? null
+                    : new ReplicationClient(directory, instrument.symbol(), options.replication());
             return new JournaledEngine(engine, options, timeSource, commandWriter, eventWriter, snapshots,
-                    report, reader.lastTimestampMicros(), lock, sealer);
+                    report, reader.lastTimestampMicros(), lock, sealer, replica);
         }
     }
 
@@ -220,6 +224,13 @@ public final class JournaledEngine implements AutoCloseable {
             }
         } catch (IOException e) {
             throw stop("command journal write failed", e);
+        }
+        if (options.fsync() != FsyncPolicy.GROUP && replica != null) {
+            try {
+                replica.replicate(sequence);    // RS-014: on the standby's device before it is acknowledged
+            } catch (IOException e) {
+                throw stop("replication to the standby failed", e);
+            }
         }
         lastCommandSequence = sequence;
         lastTimestampMicros = timestamp;
@@ -282,6 +293,14 @@ public final class JournaledEngine implements AutoCloseable {
             unflushedBatches.clear();               // their commands' outcome is unknown: record nothing of them
             throw stop("command journal flush failed", e);
         }
+        if (replica != null) {
+            try {
+                replica.replicate(lastCommandSequence);     // RS-014: on the standby's device too, before any ack
+            } catch (IOException e) {
+                unflushedBatches.clear();           // on this device, perhaps not the standby's: outcome unknown
+                throw stop("replication to the standby failed", e);
+            }
+        }
         flushes++;
         unsynced = false;
         for (byte[] batch : unflushedBatches) {
@@ -307,6 +326,9 @@ public final class JournaledEngine implements AutoCloseable {
                 commands.force();
             }
             sealer.seal(lastCommandSequence, lastTimestampMicros);
+            if (replica != null) {
+                replica.replicate(lastCommandSequence);     // the seal too: a promoted standby checks its seals
+            }
         } catch (IOException e) {
             failed = true;
             failure = e;
@@ -390,6 +412,17 @@ public final class JournaledEngine implements AutoCloseable {
                 if (sealer != null && sealer.unsealed()) {
                     sealer.seal(lastCommandSequence, lastTimestampMicros);      // RS-013: sealed at close
                 }
+                if (replica != null) {
+                    try {
+                        replica.replicate(lastCommandSequence);
+                    } catch (IOException e) {
+                        // the standby holds every acknowledged command already; only the last seal may be missing
+                    }
+                }
+            }
+        } finally {
+            if (replica != null) {
+                replica.close();
             }
         }
     }
