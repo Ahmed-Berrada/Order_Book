@@ -135,7 +135,7 @@ class SecurityConfigurationTest {
         return new LobProperties(Path.of("x"), 10, io.github.ahmedberrada.lob.journal.FsyncPolicy.OS, 0, List.of(),
                 new LobProperties.FixProperties(true, "127.0.0.1", 9999, "LOB", List.of("MEMBER1"), List.of("RISK"),
                         null, SelfTradeMode.CANCEL_NEWEST, passwords),
-                null, null, List.of(), new LobProperties.SecurityProperties(secure, List.of()));
+                null, null, List.of(), new LobProperties.SecurityProperties(secure, List.of()), null);
     }
 
     @Test

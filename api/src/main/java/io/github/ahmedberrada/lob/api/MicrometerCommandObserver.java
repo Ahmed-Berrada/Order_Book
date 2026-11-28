@@ -7,6 +7,7 @@ import io.github.ahmedberrada.lob.core.TradeExecuted;
 import io.github.ahmedberrada.lob.core.VolatilityInterruption;
 import io.github.ahmedberrada.lob.journal.EventBatch;
 import io.github.ahmedberrada.lob.service.CommandObserver;
+import io.github.ahmedberrada.lob.service.RequestRefusedException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -31,6 +32,13 @@ final class MicrometerCommandObserver implements CommandObserver {
 
     MicrometerCommandObserver(MeterRegistry registry) {
         this.registry = registry;
+    }
+
+    @Override
+    public void throttled(String symbol, long memberId, RequestRefusedException.Reason reason) {
+        Counter.builder("lob.throttled").tag("symbol", symbol).tag("member", Long.toString(memberId))
+                .tag("reason", reason.name())
+                .description("Members' commands refused by a throttle (OE-008, OE-009)").register(registry).increment();
     }
 
     @Override

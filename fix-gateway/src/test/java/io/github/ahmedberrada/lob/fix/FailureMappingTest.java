@@ -21,6 +21,7 @@ import java.io.UncheckedIOException;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -40,6 +41,10 @@ import quickfix.field.Side;
 import quickfix.field.Symbol;
 import quickfix.field.Text;
 import quickfix.field.TransactTime;
+import quickfix.field.OrdType;
+import quickfix.field.OrderQty;
+import quickfix.field.Price;
+import quickfix.fix44.OrderCancelReplaceRequest;
 import quickfix.fix44.OrderCancelRequest;
 import quickfix.fix44.OrderStatusRequest;
 
@@ -73,6 +78,17 @@ class FailureMappingTest {
         assertThat(reportFor(new RequestRefusedException(Reason.STOPPED, "AAPL")).getString(OrdRejReason.FIELD)).isEqualTo("2");
         assertThat(reportFor(new CompletionException(new RequestRefusedException(Reason.UNKNOWN_INSTRUMENT, "AAPL")))
                 .getString(OrdRejReason.FIELD)).isEqualTo("1");
+    }
+
+    @Test
+    @Rulebook({"OE-008", "OE-009"})
+    void throttledOrdersAreRejectionsWithTheReason() throws Exception {
+        Message throttled = reportFor(new RequestRefusedException(Reason.THROTTLED, "AAPL"));
+        assertThat(throttled.getString(OrdRejReason.FIELD)).isEqualTo("99");
+        assertThat(throttled.getString(Text.FIELD)).isEqualTo("THROTTLED");
+        Message ratio = reportFor(new RequestRefusedException(Reason.ORDER_TO_TRADE_LIMIT, "AAPL"));
+        assertThat(ratio.getString(OrdRejReason.FIELD)).isEqualTo("99");
+        assertThat(ratio.getString(Text.FIELD)).isEqualTo("ORDER_TO_TRADE_LIMIT");
     }
 
     /** Places an order whose acknowledgement never arrives, and returns the context attached to it. */
@@ -141,6 +157,30 @@ class FailureMappingTest {
         assertThat(unknown.getChar(OrdStatus.FIELD)).isEqualTo(OrdStatus.PENDING_CANCEL);
         assertThat(unknown.getString(OrigClOrdID.FIELD)).isEqualTo("B-1");
         assertThat(unknown.getString(Text.FIELD)).isEqualTo("OUTCOME_UNKNOWN");
+    }
+
+    @Test
+    @Rulebook({"OE-008", "OE-009"})
+    void aThrottledReplaceIsACancelRejectWithTheReason() throws Exception {
+        acknowledgedOrder("B-1");
+        for (Reason reason : List.of(Reason.THROTTLED, Reason.ORDER_TO_TRADE_LIMIT)) {
+            when(service.submit(anyString(), any(), anyLong(), any()))
+                    .thenReturn(CompletableFuture.failedFuture(new RequestRefusedException(reason, "AAPL")));
+            OrderCancelReplaceRequest request = new OrderCancelReplaceRequest();
+            request.setString(ClOrdID.FIELD, "R-" + reason);
+            request.setString(OrigClOrdID.FIELD, "B-1");
+            request.setString(Symbol.FIELD, "AAPL");
+            request.setChar(Side.FIELD, Side.BUY);
+            request.setChar(OrdType.FIELD, OrdType.LIMIT);
+            request.setUtcTimeStamp(TransactTime.FIELD, LocalDateTime.now(ZoneOffset.UTC));
+            request.setDecimal(Price.FIELD, new BigDecimal("185.30"));
+            request.setDecimal(OrderQty.FIELD, new BigDecimal("10"));
+            sent.clear();
+            application.fromApp(request, SESSION);
+            assertThat(sent).hasSize(1);
+            assertThat(sent.getFirst().getInt(CxlRejReason.FIELD)).isEqualTo(CxlRejReason.OTHER);
+            assertThat(sent.getFirst().getString(Text.FIELD)).isEqualTo(reason.name());
+        }
     }
 
     @Test

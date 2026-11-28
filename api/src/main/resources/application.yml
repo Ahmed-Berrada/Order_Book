@@ -24,6 +24,11 @@ lob:
   # GROUP: every acknowledged command is on the device, one flush per group of waiting commands (ADR-0020).
   fsync: GROUP
   snapshot-interval: 10000
+  # Throttles on each member's messages (OE-008, OE-009, ADR-0021); 0 switches one off.
+  throttle:
+    messages-per-second: 1000
+    max-order-to-trade-ratio: 1000
+    order-to-trade-minimum: 1000
   # FIX 4.4 order entry (docs/interfaces/fix-rules-of-engagement.md). Sessions are provisioned here.
   fix:
     enabled: true

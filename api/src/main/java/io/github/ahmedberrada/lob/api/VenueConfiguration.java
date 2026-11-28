@@ -26,6 +26,7 @@ class VenueConfiguration {
         return MatchingService.start(properties.dataDirectory(), properties.instrumentConfigs(),
                 new JournalOptions(properties.fsync(), properties.snapshotInterval()),
                 TimeSource.system(), properties.queueCapacity(),
-                meters == null ? CommandObserver.NONE : new MicrometerCommandObserver(meters));
+                meters == null ? CommandObserver.NONE : new MicrometerCommandObserver(meters),
+                properties.throttle().limits());
     }
 }
