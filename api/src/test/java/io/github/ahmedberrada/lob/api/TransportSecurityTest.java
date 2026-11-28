@@ -97,6 +97,6 @@ class TransportSecurityTest {
 
     private static LobProperties properties(LobProperties.FixProperties fix, LobProperties.SecurityProperties security) {
         return new LobProperties(java.nio.file.Path.of("x"), 10, io.github.ahmedberrada.lob.journal.FsyncPolicy.OS, 0,
-                java.util.List.of(), fix, null, null, java.util.List.of(), security, null);
+                java.util.List.of(), fix, null, null, java.util.List.of(), security, null, null);
     }
 }

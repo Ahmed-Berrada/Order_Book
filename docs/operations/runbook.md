@@ -126,6 +126,22 @@ closes the journals (OE-007); commands arriving during it are refused with `STOP
 termination grace period. A `SIGKILL` loses no acknowledged command either (RS-002),
 but in-flight requests get no answer.
 
+## Checking the journals have not been changed
+
+With `lob.journal-seal.*` configured (RS-013), the venue checks every seal when an instrument starts, and refuses
+to start one whose journal does not match (`... changed after they were sealed`, `... sealed data is missing`,
+`... not signed by the key`). Treat it as an incident: the journal was edited, truncated or replaced after it was
+written. Do not delete `commands.seal` to get the venue started; restore the instrument's directory from a backup
+and compare. An auditor checks a copy of the journals with the public key alone:
+`java -cp "$CP" io.github.ahmedberrada.lob.journal.JournalVerify <instrument-dir> seal.pub [--expect <sequence>]
+[--strict]`, with `CP` as for `ReplayTool` in the README. Exit 0: every seal holds; the bytes after the last seal are
+counted but not checked, unless `--strict`. Seals cannot tell an older journal restored with its own seals from the
+latest: record the sealed sequence the tool prints (daily, in a write-once store or with the auditor) and pass the
+last one recorded as `--expect`. `... holds commands but no seal` at start-up means the seal file was removed, or
+sealing was just turned on for a venue that already traded: only in that second case, start once with
+`lob.journal-seal.seal-existing-journal=true`. Keys: `openssl genpkey -algorithm ed25519 -out seal.pem` and
+`openssl pkey -in seal.pem -pubout -out seal.pub`; keep `seal.pem` in a secret store, never with the journals.
+
 ## Backups and retention
 
 Journals grow without bound; the engine never deletes them (RS-008). Back up each instrument's directory

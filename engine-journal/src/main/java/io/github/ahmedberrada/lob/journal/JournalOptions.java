@@ -7,8 +7,14 @@ import java.util.Objects;
  *
  * @param fsync            when the command journal is flushed to the device
  * @param snapshotInterval take a snapshot every this many commands; 0 disables automatic snapshots
+ * @param sealing          how the command journal is sealed (RS-013), or {@code null} for no seals
  */
-public record JournalOptions(FsyncPolicy fsync, int snapshotInterval) {
+public record JournalOptions(FsyncPolicy fsync, int snapshotInterval, JournalSealing sealing) {
+
+    /** No seals. */
+    public JournalOptions(FsyncPolicy fsync, int snapshotInterval) {
+        this(fsync, snapshotInterval, null);
+    }
 
     public JournalOptions {
         Objects.requireNonNull(fsync, "fsync");

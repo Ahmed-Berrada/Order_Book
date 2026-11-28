@@ -14,8 +14,15 @@ One directory per instrument:
 <instrument>/
 ├── commands.journal                         every command received, in order
 ├── events.journal                           the events of every command
+├── commands.seal                            signed seals of the command journal, if sealing is configured (RS-013)
 └── snapshot-<20-digit sequence>.snap        engine state after that command (the 2 newest are kept)
 ```
+
+`commands.seal` is made of frames like the journals. The first holds `LOBSEAL1` (8 ASCII bytes) and the
+instrument's symbol (UTF-8). Each later one is a seal of 120 bytes: the journal length it covers (8), the last
+command sequence (8), the time in microseconds since the epoch (8), the SHA-256 of the command journal's first
+*length* bytes (32), and an Ed25519 signature (64) of `LOBSEAL1`, the symbol, and the 56 bytes before it. Lengths
+increase from one seal to the next.
 
 ## Frames
 
