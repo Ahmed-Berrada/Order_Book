@@ -377,8 +377,10 @@ The venue accepts FIX 4.4 on port 9878 for the sessions provisioned in `applicat
 codes. Both sides of a trade receive an ExecutionReport, and reports sent while a member is
 disconnected are delivered by FIX resend when it logs on again.
 
-Both HTTP and FIX listen on `127.0.0.1` by default. Set `LOB_BIND_ADDRESS` to expose them, and only with
-authentication on and TLS in front (see [Security](#security)).
+Both HTTP and FIX listen on `127.0.0.1` by default. Set `LOB_BIND_ADDRESS` to expose them: with authentication
+on, the venue then refuses to start unless each exposed port speaks TLS (`server.ssl.*` for REST, `lob.fix.tls.*`
+for FIX, optionally mutual) or TLS is declared terminated in front of it (`lob.security.tls-terminated-in-front`;
+AC-010, see [Security](#security)).
 
 ### Security
 
@@ -556,7 +558,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 5 | **Pre-trade risk & members**: members, limits and the kill switch ✅, message-rate and order-to-trade throttles ✅, mass cancel ✅; trader hierarchy, venue-wide exposure | ⏳ |
 | 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅, group commit ✅; load test, GC study | ⏳ |
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; [surveillance alerts](docs/analytics.md#surveillance) ✅; RTS 22 reports, real-time surveillance | ⏳ |
-| 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, lockout of repeated failed logins ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅; TLS and mTLS (phase 9), OIDC | ⏳ |
+| 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, lockout of repeated failed logins ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅, TLS and mutual TLS for FIX ✅; OIDC | ⏳ |
 | 9 | **Operations & resilience**: [Prometheus metrics, probes and alerts](docs/operations/observability.md) ✅, OpenTelemetry traces ✅, [runbook](docs/operations/runbook.md) ✅, one writer per journal ✅, soak test ✅, container image, compose stack and Helm chart ✅, [HA design](docs/adr/0018-operations-and-high-availability.md) ✅; chaos tests (kill -9, full disk) ✅; replication and failover | ⏳ |
 | 10 | **Post-trade & analytics** *(optional)*: [clearing trade file and maker/taker/auction fees](docs/interfaces/trade-file.md) ✅, [Python microstructure analytics](docs/analytics.md) ✅ | ✅ |
 

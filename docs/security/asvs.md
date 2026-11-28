@@ -14,7 +14,7 @@ does; **Not met** that it does not; **n/a** that it does not apply to this kind 
 | V6 Stored cryptography | Partial | Bcrypt for secrets. Journals are not encrypted; there is no key management |
 | V7 Error handling and logging | Partial | Problem-detail errors without stack traces; authentication failures logged. No central log protection or audit-log integrity |
 | V8 Data protection | Partial | No personal data is held; order data is not encrypted at rest |
-| V9 Communications | Not met | No TLS in the application; terminate it in front (phase 9) |
+| V9 Communications | Partial | TLS 1.2 or 1.3 on REST and FIX, mutual TLS for FIX; a secured venue will not start with a port beyond loopback in clear (AC-010, AC-011). Not met: certificate pinning to a member, OCSP or revocation checks |
 | V10 Malicious code | Meets | CodeQL, dependency review, SBOM, signed provenance ([supply chain](supply-chain.md)) |
 | V11 Business logic | Meets | The rulebook; limits, phases, kill switch; property-tested against an independent model |
 | V12 Files and resources | n/a | No uploads. Journal paths come from configuration only, and symbols are restricted to `[A-Z0-9._-]` |

@@ -21,7 +21,7 @@ REST is not the low-latency path: members trading at speed will use FIX (phase 3
 ## Authentication
 
 With security on (the default; [access control](../rulebook/access-control.md), ADR-0017) every request
-carries HTTP Basic credentials, ideally over TLS terminated in front of the venue. Roles, from lowest:
+carries HTTP Basic credentials, over TLS whenever the port is open beyond loopback (AC-010: `server.ssl.*`, or TLS terminated in front). Roles, from lowest:
 
 | Role | May |
 |---|---|

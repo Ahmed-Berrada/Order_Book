@@ -7,6 +7,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import quickfix.Application;
+import quickfix.ConfigError;
 import quickfix.DefaultMessageFactory;
 import quickfix.FieldNotFound;
 import quickfix.FileStoreFactory;
@@ -27,7 +28,6 @@ import quickfix.field.MsgType;
 public final class FixTestClient implements Application, AutoCloseable {
 
     private final SessionID session;
-    private final SocketInitiator initiator;
     private final BlockingQueue<Message> received = new LinkedBlockingQueue<>();
     /** TradingSessionStatus messages (FS-001, FS-002), kept apart so that order flow tests need not skip them. */
     private final BlockingQueue<Message> statuses = new LinkedBlockingQueue<>();
@@ -51,8 +51,36 @@ public final class FixTestClient implements Application, AutoCloseable {
         settings.setString("ScreenLogShowOutgoing", "N");
         settings.setString(session, "SenderCompID", compId);
         settings.setString(session, "TargetCompID", "LOB");
-        initiator = new SocketInitiator(this, new FileStoreFactory(settings), settings,
-                new ScreenLogFactory(settings), new DefaultMessageFactory());
+        this.settings = settings;
+    }
+
+    private final SessionSettings settings;
+    private SocketInitiator initiator;
+
+    /**
+     * Connects over TLS, trusting the certificates of {@code trustStore}, and presenting {@code keyStore}'s if not
+     * null (mutual TLS).
+     */
+    public FixTestClient withTls(Path trustStore, Path keyStore) {
+        settings.setString(session, "SocketUseSSL", "Y");
+        settings.setString(session, "SocketTrustStore", trustStore.toAbsolutePath().toString());
+        settings.setString(session, "SocketTrustStorePassword", TestCertificates.PASSWORD);
+        settings.setString(session, "TrustStoreType", "PKCS12");
+        settings.setString(session, "EnabledProtocols", "TLSv1.3,TLSv1.2");
+        if (keyStore != null) {
+            settings.setString(session, "SocketKeyStore", keyStore.toAbsolutePath().toString());
+            settings.setString(session, "SocketKeyStorePassword", TestCertificates.PASSWORD);
+            settings.setString(session, "KeyStoreType", "PKCS12");
+        }
+        return this;
+    }
+
+    private SocketInitiator initiator() throws ConfigError {
+        if (initiator == null) {
+            initiator = new SocketInitiator(this, new FileStoreFactory(settings), settings,
+                    new ScreenLogFactory(settings), new DefaultMessageFactory());
+        }
+        return initiator;
     }
 
     private volatile String password;
@@ -66,14 +94,14 @@ public final class FixTestClient implements Application, AutoCloseable {
     /** Connects; whether the venue accepted the logon within the time given. */
     public boolean tryLogon(long millis) throws Exception {
         loggedOn = new CountDownLatch(1);
-        initiator.start();
+        initiator().start();
         return loggedOn.await(millis, TimeUnit.MILLISECONDS);
     }
 
     /** Connects and waits until the venue has accepted the logon. */
     public FixTestClient logon() throws Exception {
         loggedOn = new CountDownLatch(1);
-        initiator.start();
+        initiator().start();
         if (!loggedOn.await(10, TimeUnit.SECONDS)) {
             throw new AssertionError(session + " could not log on");
         }
@@ -137,12 +165,16 @@ public final class FixTestClient implements Application, AutoCloseable {
 
     /** Disconnects, keeping the message store, so a later {@link #logon()} resumes the session. */
     public void disconnect() {
-        initiator.stop(true);
+        if (initiator != null) {
+            initiator.stop(true);
+        }
     }
 
     @Override
     public void close() {
-        initiator.stop(true);
+        if (initiator != null) {
+            initiator.stop(true);
+        }
     }
 
     @Override

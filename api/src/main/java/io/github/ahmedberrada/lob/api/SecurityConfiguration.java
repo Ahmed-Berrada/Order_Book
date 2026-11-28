@@ -44,6 +44,14 @@ class SecurityConfiguration {
         return PasswordEncoderFactories.createDelegatingPasswordEncoder();
     }
 
+    /** Refuses to start with a port open beyond loopback in clear (AC-010). */
+    @Bean
+    TransportSecurity.Checked transportSecurityCheck(LobProperties properties,
+            org.springframework.core.env.Environment environment) {
+        TransportSecurity.check(properties, environment);
+        return TransportSecurity.Checked.PASSED;
+    }
+
     /** Logs failed authentications (AC-006). */
     @Bean
     LoginAudit loginAudit() {

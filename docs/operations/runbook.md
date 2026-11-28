@@ -55,6 +55,8 @@ The venue refuses to start rather than start in an unsafe state. The log names t
 |---|---|---|
 | `lob.security.enabled is true but no user is configured` | Access control is on and has no users (AC-001) | Configure `lob.security.users` (README, "Security"), or disable security explicitly for a test venue |
 | `... is not a hash with an algorithm prefix such as {bcrypt}; plain text is refused` | A password is in plain text | Store a `{bcrypt}` hash (`HashPassword`, README) |
+| `these ports would listen beyond loopback without TLS: [...]` | A port is bound beyond loopback in clear with security on (AC-010) | Configure TLS (`server.ssl.*`, `lob.fix.tls.*`), or, if an ingress or proxy terminates it, set `lob.security.tls-terminated-in-front=true` |
+| `lob.fix.tls.enabled needs lob.fix.tls.key-store ...` / `FIX key store not readable` | FIX TLS without the venue's key store, or a path the process cannot read (AC-011) | Mount the key store and point `lob.fix.tls.key-store` at it |
 | `the journal in <dir> is in use by another engine; only one writer may open it` | Another process holds the journal directory (RS-011) | Stop the other process. Two writers would corrupt the journal. A crashed process leaves no lock: the operating system releases it |
 | `unsupported format version <n>` | The journal was written in an older format (before v8) | Replay it with the release that wrote it; formats are not migrated |
 | `<file> belongs to <instrument>, not <instrument>` | The tick size, limits, tick regime or band of an instrument that already has a journal changed in the configuration | Restore the definition. A changed definition is a new instrument with a new directory |
