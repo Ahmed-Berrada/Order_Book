@@ -470,6 +470,91 @@ class JournaledEngineTest {
     }
 
     @Test
+    @Rulebook("RS-001")
+    void theGroupPolicyFlushesOnlyWhenSyncedAndOnceForEveryCommandSinceTheLastFlush() throws IOException {
+        try (JournaledEngine engine = JournaledEngine.open(directory, INSTRUMENT, new JournalOptions(FsyncPolicy.GROUP, 0),
+                clock)) {
+            assertThat(engine.groupCommit()).isTrue();
+            engine.sync();
+            assertThat(engine.flushes()).as("nothing to flush yet").isZero();
+            for (int i = 0; i < 5; i++) {
+                engine.process(new LimitOrder(Side.BUY, 100 + i, 1));
+            }
+            assertThat(engine.flushes()).as("written, not flushed").isZero();
+            engine.sync();
+            engine.sync();
+            assertThat(engine.flushes()).isEqualTo(1);
+            engine.process(new LimitOrder(Side.BUY, 90, 1));
+            engine.sync();
+            assertThat(engine.flushes()).isEqualTo(2);
+        }
+        try (JournaledEngine reopened = JournaledEngine.open(directory, INSTRUMENT, NO_SNAPSHOTS, clock)) {
+            assertThat(reopened.lastCommandSequence()).isEqualTo(6);
+        }
+    }
+
+    @Test
+    @Rulebook("RS-001")
+    void theOtherPoliciesFlushOnTheirOwnAndSyncHasNothingToDo() throws IOException {
+        try (JournaledEngine every = JournaledEngine.open(directory.resolve("every"), INSTRUMENT, NO_SNAPSHOTS, clock)) {
+            every.process(new LimitOrder(Side.BUY, 100, 1));
+            every.process(new LimitOrder(Side.BUY, 101, 1));
+            every.sync();
+            assertThat(every.flushes()).isEqualTo(2);
+            assertThat(every.groupCommit()).isFalse();
+        }
+        try (JournaledEngine os = JournaledEngine.open(directory.resolve("os"), INSTRUMENT, new JournalOptions(FsyncPolicy.OS, 0),
+                clock)) {
+            os.process(new LimitOrder(Side.BUY, 100, 1));
+            os.sync();
+            assertThat(os.flushes()).isZero();
+            assertThat(os.groupCommit()).isFalse();
+        }
+    }
+
+    @Test
+    @Rulebook({"RS-001", "RS-002"})
+    void aPowerLossDuringAGroupLeavesJournalsThatRecover() throws IOException {
+        Path flushedState = directory.resolve("on-the-device");
+        try (JournaledEngine engine = JournaledEngine.open(directory, INSTRUMENT, new JournalOptions(FsyncPolicy.GROUP, 0),
+                clock)) {
+            long headerOnly = Files.size(directory.resolve(JournaledEngine.EVENTS_FILE));
+            engine.process(new LimitOrder(Side.BUY, 100, 1));
+            engine.process(new LimitOrder(Side.BUY, 101, 1));
+            assertThat(Files.size(directory.resolve(JournaledEngine.EVENTS_FILE))).as("events wait for the flush")
+                    .isEqualTo(headerOnly);
+            engine.sync();
+            assertThat(Files.size(directory.resolve(JournaledEngine.EVENTS_FILE))).as("and follow it")
+                    .isGreaterThan(headerOnly);
+            long commandsFlushed = Files.size(directory.resolve(JournaledEngine.COMMANDS_FILE));
+            long eventsWritten = Files.size(directory.resolve(JournaledEngine.EVENTS_FILE));
+            engine.process(new LimitOrder(Side.BUY, 102, 1));               // written, not flushed
+            assertThat(Files.size(directory.resolve(JournaledEngine.EVENTS_FILE)))
+                    .as("no event of an unflushed command is written").isEqualTo(eventsWritten);
+
+            // What the device may hold if the power goes now: the command journal as far as its last flush, and
+            // whatever of the event journal the system wrote back, which is never beyond the flushed commands.
+            Files.createDirectories(flushedState);
+            Files.copy(directory.resolve(JournaledEngine.EVENTS_FILE), flushedState.resolve(JournaledEngine.EVENTS_FILE));
+            byte[] commands = Files.readAllBytes(directory.resolve(JournaledEngine.COMMANDS_FILE));
+            Files.write(flushedState.resolve(JournaledEngine.COMMANDS_FILE),
+                    java.util.Arrays.copyOf(commands, (int) commandsFlushed));
+        }
+        try (JournaledEngine recovered = JournaledEngine.open(flushedState, INSTRUMENT, NO_SNAPSHOTS, clock)) {
+            assertThat(recovered.lastCommandSequence()).isEqualTo(2);
+            assertThat(recovered.book().restingQuantity(2)).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void aClosedEngineCannotBeSynced() throws IOException {
+        JournaledEngine engine = JournaledEngine.open(directory, INSTRUMENT, new JournalOptions(FsyncPolicy.GROUP, 0), clock);
+        engine.process(new LimitOrder(Side.BUY, 100, 1));
+        engine.close();
+        assertThatIllegalStateException().isThrownBy(engine::sync).withMessageContaining("closed");
+    }
+
+    @Test
     void validatesArguments() {
         assertThatNullPointerException().isThrownBy(() -> JournaledEngine.open(directory, null, NO_SNAPSHOTS, clock));
         assertThatNullPointerException().isThrownBy(() -> JournaledEngine.open(directory, INSTRUMENT, null, clock));

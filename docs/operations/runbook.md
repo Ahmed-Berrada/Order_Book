@@ -23,9 +23,16 @@ the REST API with an `ADMIN` user ([REST API](../interfaces/rest-api.md)).
 **Alert:** `InstrumentHalted` (`lob_instrument_halted == 1`). **Effect:** the instrument refuses every
 command with `HALTED`; its book can still be read; other instruments trade normally (OE-006).
 
-**Cause:** a write or `fsync` to the instrument's journal failed, usually a full or failing disk. The engine
-stops rather than trade without a record: the command whose write failed has an unknown outcome
-(`500 OUTCOME_UNKNOWN` over REST), and members must check their orders after the restart.
+**Cause:** a write or flush of the instrument's journal failed, usually a full or failing disk. The engine
+stops rather than trade without a record. Which commands have an unknown outcome (`500 OUTCOME_UNKNOWN` over
+REST) depends on what failed (RS-012):
+
+- **a command's write:** that command;
+- **a group's flush** (`fsync: GROUP`): every command of the group, up to 256. Reads of the instrument are also
+  refused with `HALTED` until the restart, since its memory holds those commands;
+- **the event journal or a snapshot:** none; the command was journaled and acknowledged.
+
+Members must check their orders after the restart.
 
 1. Find the cause in the log (`Instrument <symbol> halted: its journal could not be written`, with the
    I/O error) and fix it: free or extend the
@@ -79,16 +86,19 @@ The kill switch suspends a member and cancels its open orders in every instrumen
 ## The queue is nearly full or commands are slow
 
 **Alerts:** `QueueNearlyFull`, `CommandLatencyHigh`. A full queue refuses with `OVERLOADED` and
-`Retry-After: 1` (OE-005); nothing is lost. The usual cause is the journal: with `fsync: EVERY_COMMAND`
-each command waits for the disk (about 160 µs on the reference machine,
-[performance](../performance.md)). Check the disk's latency first. Changing the sync policy changes the
-durability promise and is a decision, not a fix (ADR-0018).
+`Retry-After: 1` (OE-005); nothing is lost. The usual cause is the journal's device flush (about 160 µs on the
+reference machine, [performance](../performance.md)). With the default `fsync: GROUP` one flush covers every
+command waiting, so a full queue means the device itself is slow: check
+`lob_journal_flush_duration_seconds` (the device's latency) and `lob_journal_group_size` (how many commands each
+flush carries). If the venue runs
+`fsync: EVERY_COMMAND`, switching to `GROUP` keeps the same durability promise (ADR-0020). Switching to `OS`
+changes the promise and is a decision, not a fix.
 
 ## Restart and shutdown
 
 A shutdown (`SIGTERM`, as Kubernetes sends) processes and journals every command already queued, then
 closes the journals (OE-007); commands arriving during it are refused with `STOPPED`. Allow it the pod's
-termination grace period. A `SIGKILL` loses no acknowledged command either (RS-002 with `EVERY_COMMAND`),
+termination grace period. A `SIGKILL` loses no acknowledged command either (RS-002),
 but in-flight requests get no answer.
 
 ## Backups and retention

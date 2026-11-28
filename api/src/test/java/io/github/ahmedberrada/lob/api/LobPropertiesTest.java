@@ -36,7 +36,7 @@ class LobPropertiesTest {
             assertThat(context).hasNotFailed();
             LobProperties properties = context.getBean(LobProperties.class);
             assertThat(properties.queueCapacity()).isEqualTo(10_000);
-            assertThat(properties.fsync()).isEqualTo(FsyncPolicy.EVERY_COMMAND);
+            assertThat(properties.fsync()).isEqualTo(FsyncPolicy.GROUP);     // ADR-0020 §5
             assertThat(properties.snapshotInterval()).isEqualTo(10_000);
             assertThat(properties.fix().enabled()).isFalse();
             assertThat(properties.fix().port()).isEqualTo(9878);
