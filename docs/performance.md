@@ -139,6 +139,45 @@ then remembering verified credentials (AC-012, the default):
 Reproduce: start a venue, then
 `java -cp engine-bench/target/benchmarks.jar io.github.ahmedberrada.lob.bench.LoadRun http://127.0.0.1:8080 2000 20 AAPL [user:password]`.
 
+### The whole venue over FIX (end-to-end load test)
+
+`FixLoadRun`: the same open loop and order mix as `LoadRun`, over FIX 4.4, from two member sessions (`MEMBER1`,
+`MEMBER2`) logged on to a running venue (`dev` profile, `fsync: GROUP`, one instrument, the per-member throttles
+switched off with `lob.throttle.messages-per-second=0` and `lob.throttle.max-order-to-trade-ratio=0`, or they would
+refuse a member above 1,000 messages a second, OE-008). A request's latency runs from the moment it was due to the
+first message the venue sends about it: the ExecutionReport that acknowledges, fills, cancels or rejects it, or a
+cancel reject. The client speaks FIX itself (framing, checksum, parsing, answering test requests) instead of
+running a FIX engine, so that its cost stays small. A fresh venue for each rate, so that each row starts with an
+empty book: the mix rests more orders than it cancels, and the book, and each snapshot, grows during a run.
+5 s of warm-up, then 20 s; client and venue on the same 4 vCPUs.
+
+| Target /s | Achieved /s | p50 | p99 | p99.9 | max | Answers | Refused `OVERLOADED` |
+|---:|---:|---:|---:|---:|---:|---|---:|
+| 1,000 | 1,000 | 948 µs | 4.7 ms | 12.1 ms | 22.5 ms | all | 0 |
+| 4,000 | 4,000 | 740 µs | 11.1 ms | 28.9 ms | 37.7 ms | all | 0 |
+| 8,000 | 8,000 | 944 µs | 35.2 ms | 51.5 ms | 61.2 ms | all | 0 |
+| 12,000 | 12,000 | 1.5 ms | 86.7 ms | 106.1 ms | 116.8 ms | all | 0 |
+| 16,000 | 16,000 | 10.1 ms | 547.4 ms | 607.6 ms | 616.0 ms | all | 0 |
+| 20,000 | 20,000 | 507.5 ms | 896.0 ms | 924.3 ms | 942.1 ms | all | 38,080 of 400,000 |
+
+- **FIX goes four times as far as REST on the same machine:** about 12,000 requests a second with a p99 under
+  0.1 s, against about 3,000 over REST. A FIX session pays for its connection, its parsing and its authentication
+  once; an HTTP request pays for them every time.
+- **The limit is now the instrument's own thread.** At 16,000 a second it runs at about 90% of a core, and the queue
+  in front of it grows: the p99 reaches half a second. At 20,000 the queue is full and new commands are refused at
+  once with `OVERLOADED` (OE-005), not made to wait: the venue sheds load rather than letting latency grow without
+  bound, and nothing refused is journaled. Matching itself takes about 4 µs a command
+  (`lob_command_duration_seconds`), a small part of the thread's time. The rest is the work the thread does around
+  it, in order: writing the command and its events to the journals, the snapshot every 10,000 commands, the
+  ExecutionReports to the FIX sessions and the market-data updates. A short profile (Java Flight Recorder) found
+  all four, but too few samples to apportion them exactly. Switching snapshots off changed little at 16,000.
+- What to try next, if one instrument must go faster: hand the ExecutionReports and market data to another thread,
+  so that the instrument's thread only journals and matches.
+
+Reproduce: start a venue with the throttles off, then
+`java -cp engine-bench/target/benchmarks.jar io.github.ahmedberrada.lob.bench.FixLoadRun 127.0.0.1:9878 8000 20 AAPL MEMBER1,MEMBER2`
+(`CompID:password` for a venue with FIX passwords).
+
 ## Reading the numbers
 
 - **Matching is not the bottleneck.** One thread matches over two million commands a second with a
@@ -162,4 +201,3 @@ Reproduce: start a venue, then
 | Disruptor / Aeron | The engine is not the limit; see ADR-0016 §3 |
 | GC comparison (G1, ZGC, Shenandoah) | Needs the end-to-end load test and a machine with stable cores |
 | A speed gate in CI | Shared runners vary more than the regressions worth catching |
-| A load test through FIX | REST is the front end the venue's limits showed up in; a FIX client adds a session per connection and is the next step |

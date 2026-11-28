@@ -11,10 +11,10 @@ a REST API on Spring Boot, and [published benchmarks](docs/performance.md).
 The goal is engineering rigour rather than feature count. The engine is **deterministic**,
 backed by **invariant tests**, and **measured before it is optimised**.
 
-> **Status: phases 0 to 4 and 10 complete; phases 5 to 9 in progress** (sub-phases 5a-5c, 6a-6c, 7a-7b, 8a-8d and 9a-9c
+> **Status: phases 0 to 4 and 10 complete; phases 5 to 9 in progress** (sub-phases 5a-5c, 6a-6d, 7a-7b, 8a-8d and 9a-9c
 > shipped, synchronous replication with manual failover; see the [Roadmap](#roadmap)).
 > **Performance:** [`docs/performance.md`](docs/performance.md) publishes the JMH and HdrHistogram results, an
-> open-loop (coordinated-omission-aware) end-to-end load test over REST, the hardware, and JMH error bars.
+> open-loop (coordinated-omission-aware) end-to-end load tests over REST and FIX, the hardware, and JMH error bars.
 >
 > Price-time matching
 > ([rulebook](docs/rulebook/continuous-trading.md)) is durable, with a write-ahead journal, crash
@@ -562,7 +562,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 3 | **Connectivity**: service layer, REST API, FIX order entry, mass cancel, trading status and drop copy, WebSocket and binary market data | ✅ |
 | 4 | **Venue functionality**: IOC / FOK / post-only / cancel-replace ✅, iceberg orders ✅, stop orders ✅, self-trade prevention ✅, trading phases and call auctions ✅, tick regime, DAY orders and volatility interruptions ✅; throttles and kill switch moved to phase 5 | ✅ |
 | 5 | **Pre-trade risk & members**: members, limits and the kill switch ✅, message-rate and order-to-trade throttles ✅, mass cancel ✅; trader hierarchy, venue-wide exposure | ⏳ |
-| 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅, group commit ✅, end-to-end load test ✅; GC study | ⏳ |
+| 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅, group commit ✅, end-to-end load tests over REST and FIX ✅; GC study | ⏳ |
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; [surveillance alerts](docs/analytics.md#surveillance) ✅; RTS 22 reports, real-time surveillance | ⏳ |
 | 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, lockout of repeated failed logins ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅, TLS and mutual TLS for FIX ✅, sealed journals ✅; OIDC | ⏳ |
 | 9 | **Operations & resilience**: [Prometheus metrics, probes and alerts](docs/operations/observability.md) ✅, OpenTelemetry traces ✅, [runbook](docs/operations/runbook.md) ✅, one writer per journal ✅, soak test ✅, container image, compose stack and Helm chart ✅, [HA design](docs/adr/0018-operations-and-high-availability.md) ✅; chaos tests (kill -9, full disk) ✅, synchronous replication to a standby with manual failover ✅; automatic failover | ⏳ |
