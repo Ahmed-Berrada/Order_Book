@@ -11,17 +11,15 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 
 /**
  * The replication protocol between a primary and its standby (RS-014 to RS-016, ADR-0025), and the term file.
  *
- * <p>Per instrument, over one TCP connection, the primary sends {@code HELLO(symbol, term)}; the standby answers a
- * random {@code CHALLENGE}; the primary proves the shared secret with {@code AUTH(HMAC-SHA256(secret, challenge ||
- * symbol || term))}; the standby answers {@code WELCOME} with its term and the length and SHA-256 of each file it
- * holds, or {@code REFUSED}. Then the primary sends {@code DATA(file, offset, bytes)} for what the standby lacks and
- * {@code SYNC(sequence)}, which the standby answers with {@code ACK(lengths)} once the bytes are on its device.
+ * <p>Per instrument, over one TCP connection, both sides prove the shared secret ({@link ReplicationLink}); then the
+ * standby sends {@code WELCOME} with its term and the length and SHA-256 of each file it holds, or {@code REFUSED}.
+ * The primary sends {@code DATA(file, offset, bytes)} for what the standby lacks and {@code SYNC(sequence)}, which the
+ * standby answers with {@code ACK(lengths)} once the bytes are on its device. Every message after the handshake is
+ * authenticated; only a refusal is not, and it ends the connection.
  */
 final class Replication {
 
@@ -45,7 +43,7 @@ final class Replication {
     private Replication() {
     }
 
-    /** An instrument directory's term; 1 when it has none (no promotion yet). */
+    /** The term of an instrument directory, or of the standby's root; 1 when it has none (no promotion yet). */
     static long term(Path directory) throws IOException {
         Path file = directory.resolve(TERM_FILE);
         if (!Files.exists(file)) {
@@ -71,19 +69,21 @@ final class Replication {
         } catch (AtomicMoveNotSupportedException e) {
             Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
         }
+        forceDirectory(directory);                  // the rename too: a promotion must survive a power loss
     }
 
-    static byte[] mac(byte[] secret, byte[] challenge, String symbol, long term) throws IOException {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret, "HmacSHA256"));
-            mac.update(challenge);
-            mac.update(symbol.getBytes(StandardCharsets.UTF_8));
-            mac.update(java.nio.ByteBuffer.allocate(8).putLong(term).array());
-            return mac.doFinal();
-        } catch (GeneralSecurityException e) {
-            throw new IOException("HmacSHA256 is required of every JVM", e);
+    /** Makes a directory's entries durable; a file system that cannot open directories is left as it is. */
+    static void forceDirectory(Path directory) {
+        try (var channel = java.nio.channels.FileChannel.open(directory, java.nio.file.StandardOpenOption.READ)) {
+            channel.force(true);
+        } catch (IOException e) {
+            // not every platform opens directories; the files themselves are forced either way
         }
+    }
+
+    /** A primary's term for an instrument: its own, or its data root's when that is higher (a later instrument). */
+    static long primaryTerm(Path directory) throws IOException {
+        return Math.max(term(directory), term(directory.toAbsolutePath().getParent()));
     }
 
     /** SHA-256 of a file's first {@code length} bytes (a missing file is empty). */

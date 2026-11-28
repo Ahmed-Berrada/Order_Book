@@ -180,8 +180,26 @@ public final class JournaledEngine implements AutoCloseable {
             }
             RecoveryReport report = new RecoveryReport(
                     snapshotSequence, replayed, reader.lastSequence(), missingBatches.size(), tornBytes);
-            ReplicationClient replica = options.replication() == null ? null
-                    : new ReplicationClient(directory, instrument.symbol(), options.replication());
+            ReplicationClient replica = null;
+            if (options.replication() != null) {
+                // RS-015: an instrument that cannot replicate does not open. Comparing and catching up whole
+                // journals happens here, under its own deadline, not in the first command's.
+                try {
+                    replica = new ReplicationClient(directory, instrument.symbol(), options.replication());
+                    replica.connect(reader.lastSequence());
+                } catch (IOException | RuntimeException e) {
+                    if (replica != null) {
+                        replica.close();
+                    }
+                    commandWriter.close();
+                    eventWriter.close();
+                    if (sealer != null) {
+                        sealer.close();
+                    }
+                    throw new IOException("the standby " + options.replication().host() + ":"
+                            + options.replication().port() + " could not be brought up to date: " + e.getMessage(), e);
+                }
+            }
             return new JournaledEngine(engine, options, timeSource, commandWriter, eventWriter, snapshots,
                     report, reader.lastTimestampMicros(), lock, sealer, replica);
         }
@@ -225,17 +243,13 @@ public final class JournaledEngine implements AutoCloseable {
         } catch (IOException e) {
             throw stop("command journal write failed", e);
         }
-        if (options.fsync() != FsyncPolicy.GROUP && replica != null) {
-            try {
-                replica.replicate(sequence);    // RS-014: on the standby's device before it is acknowledged
-            } catch (IOException e) {
-                throw stop("replication to the standby failed", e);
-            }
-        }
         lastCommandSequence = sequence;
         lastTimestampMicros = timestamp;
-        if (options.fsync() != FsyncPolicy.GROUP && sealer != null && sealer.due(timestamp)) {
-            seal();                             // GROUP seals after its flush, in sync()
+        if (options.fsync() != FsyncPolicy.GROUP) {
+            if (sealer != null && sealer.due(timestamp)) {
+                seal();                         // GROUP seals after its flush, in sync()
+            }
+            replicate();                        // RS-014: on the standby's device, with its seal, before any ack
         }
 
         EventBatch batch = new EventBatch(sequence, timestamp, engine.process(command, memberId), memberId);
@@ -293,22 +307,34 @@ public final class JournaledEngine implements AutoCloseable {
             unflushedBatches.clear();               // their commands' outcome is unknown: record nothing of them
             throw stop("command journal flush failed", e);
         }
-        if (replica != null) {
-            try {
-                replica.replicate(lastCommandSequence);     // RS-014: on the standby's device too, before any ack
-            } catch (IOException e) {
-                unflushedBatches.clear();           // on this device, perhaps not the standby's: outcome unknown
-                throw stop("replication to the standby failed", e);
-            }
+        if (sealer != null && sealer.due(lastTimestampMicros)) {
+            seal();                                 // in the same round to the standby as the commands it covers
         }
-        flushes++;
+        try {
+            replicate();                            // RS-014: on the standby's device too, before any ack
+        } catch (ReplicationException e) {
+            unflushedBatches.clear();               // on this device, perhaps not the standby's: outcome unknown
+            throw e;
+        }
         unsynced = false;
+        flushes++;
         for (byte[] batch : unflushedBatches) {
             record(batch);                          // a failure here stops the instance; the commands stay flushed
         }
         unflushedBatches.clear();
-        if (sealer != null && sealer.due(lastTimestampMicros)) {
-            seal();
+    }
+
+    /** Sends the standby what it lacks and waits for its confirmation; a failure stops this instance (RS-015). */
+    private void replicate() {
+        if (replica == null) {
+            return;
+        }
+        try {
+            replica.replicate(lastCommandSequence);
+        } catch (IOException | RuntimeException e) {
+            failed = true;
+            failure = e instanceof IOException io ? io : new IOException(e);
+            throw new ReplicationException("replication to the standby failed", failure);
         }
     }
 
@@ -321,17 +347,19 @@ public final class JournaledEngine implements AutoCloseable {
         if (sealer == null || failed || !sealer.unsealed()) {
             return;
         }
+        long sealsBefore = -1;
         try {
             if (options.fsync() == FsyncPolicy.OS || unsynced) {
                 commands.force();
             }
-            sealer.seal(lastCommandSequence, lastTimestampMicros);
-            if (replica != null) {
-                replica.replicate(lastCommandSequence);     // the seal too: a promoted standby checks its seals
-            }
+            sealsBefore = replica == null ? -1 : replica.size(1);
+            sealer.seal(lastCommandSequence, lastTimestampMicros);     // reaches the standby in the next round
         } catch (IOException e) {
             failed = true;
             failure = e;
+            if (sealsBefore >= 0) {
+                replica.limit(1, sealsBefore);      // a torn seal is not sent: recovery truncates it here
+            }
         }
     }
 

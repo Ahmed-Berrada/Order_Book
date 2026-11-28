@@ -19,8 +19,8 @@ public record ReplicationTarget(String host, int port, byte[] secret, Duration t
         if (secret.length < 32) {
             throw new IllegalArgumentException("the replication secret must be at least 32 bytes");
         }
-        if (!timeout.isPositive()) {
-            throw new IllegalArgumentException("timeout must be positive: " + timeout);
+        if (!timeout.isPositive() || timeout.compareTo(Duration.ofHours(1)) > 0) {
+            throw new IllegalArgumentException("timeout must be positive and at most an hour: " + timeout);
         }
         secret = secret.clone();
     }

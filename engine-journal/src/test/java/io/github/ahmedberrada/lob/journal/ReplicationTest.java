@@ -4,9 +4,11 @@ import static io.github.ahmedberrada.lob.journal.CommandStream.INSTRUMENT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.ahmedberrada.lob.core.Instrument;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.Rulebook;
 import io.github.ahmedberrada.lob.core.Side;
+import io.github.ahmedberrada.lob.core.TickBand;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -14,10 +16,12 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -185,10 +189,52 @@ class ReplicationTest {
         assertThat(Replication.term(replica())).isEqualTo(2);
 
         port = startStandby().port();                                            // say the old primary reaches it
-        try (JournaledEngine deposed = open(primary(), options(FsyncPolicy.GROUP, port))) {
-            deposed.process(new LimitOrder(Side.BUY, 100, 1));
-            assertThatThrownBy(deposed::sync).isInstanceOf(UncheckedIOException.class)
+        int promoted = port;
+        assertThatThrownBy(() -> open(primary(), options(FsyncPolicy.GROUP, promoted)))
+                .as("the old primary does not even open").isInstanceOf(IOException.class)
+                .hasRootCauseMessage("the standby refused: fenced: the standby is at term 2, the primary at 1 (RS-016)");
+    }
+
+    @Test
+    @Rulebook("RS-016")
+    void afterAPromotionAnInstrumentAddedLaterTakesTheVenuesTermAndANewStandbyIsSeededWithIt() throws IOException {
+        int port = startStandby().port();
+        try (JournaledEngine engine = open(primary(), options(FsyncPolicy.GROUP, port))) {
+            engine.process(new LimitOrder(Side.BUY, 100, 1));
+            engine.sync();
+        }
+        standby.close();
+        standby = null;
+        PrintStream quiet = new PrintStream(new ByteArrayOutputStream());
+        assertThat(ReplicaTool.run(new String[] {standbyRoot.toString()}, quiet, quiet)).isZero();   // promoted: term 2
+
+        Path nextStandby = primaryRoot.resolve("next-standby");                  // the new primary's new standby
+        assertThat(ReplicaTool.run(new String[] {"--term", "2", nextStandby.toString()}, quiet, quiet)).isZero();
+        assertThat(ReplicaTool.run(new String[] {"--term", "0", nextStandby.toString()}, quiet, quiet)).isEqualTo(2);
+        try (ReplicaServer next = ReplicaServer.start(nextStandby, "127.0.0.1", 0, SECRET)) {
+            JournalOptions toNext = options(FsyncPolicy.GROUP, next.port());
+            assertThatThrownBy(() -> open(primary(), toNext)).as("the deposed primary, at term 1, reaches it first")
                     .hasRootCauseMessage("the standby refused: fenced: the standby is at term 2, the primary at 1 (RS-016)");
+            Instrument listed = new Instrument("NEW", 100, 1_000, List.of(new TickBand(1, 1)), 300);
+            try (JournaledEngine added = JournaledEngine.open(standbyRoot.resolve("NEW"), listed, toNext, clock)) {
+                added.process(new LimitOrder(Side.BUY, 100, 1));
+                added.sync();                           // a new instrument of the promoted venue: at its term, 2
+            }
+            assertThat(Replication.term(nextStandby.resolve("NEW"))).isEqualTo(2);
+        }
+    }
+
+    @Test
+    @Rulebook("RS-015")
+    void aFailedReplicationIsNeverRetriedByTheStoppedInstance() throws IOException {
+        int port = startStandby().port();
+        try (JournaledEngine engine = open(primary(), options(FsyncPolicy.GROUP, port))) {
+            engine.process(new LimitOrder(Side.BUY, 100, 1));
+            standby.close();
+            assertThatThrownBy(engine::sync).isInstanceOf(ReplicationException.class);
+            standby = startStandby();                                            // back, but too late
+            assertThatThrownBy(engine::sync).isInstanceOf(ReplicationException.class)
+                    .cause().hasMessage("replication failed earlier; the instance has stopped");
         }
     }
 
@@ -198,17 +244,28 @@ class ReplicationTest {
         Files.createDirectories(replica());
         Files.write(replica().resolve(JournaledEngine.COMMANDS_FILE), new byte[] {1, 2, 3, 4});
         int port = startStandby().port();
-        try (JournaledEngine engine = open(primary(), options(FsyncPolicy.GROUP, port))) {
-            engine.process(new LimitOrder(Side.BUY, 100, 1));
-            assertThatThrownBy(engine::sync).hasRootCauseMessage("the standby's commands.journal differs from this "
-                    + "primary's in its first 4 bytes: another history; resynchronise it from empty");
+        try (JournaledEngine alone = open(primary(), new JournalOptions(FsyncPolicy.OS, 0))) {
+            alone.process(new LimitOrder(Side.BUY, 100, 1));
         }
+        assertThatThrownBy(() -> open(primary(), options(FsyncPolicy.GROUP, port)))
+                .hasMessageContaining("could not be brought up to date")
+                .hasRootCauseMessage("the standby's commands.journal differs from this "
+                        + "primary's in its first 4 bytes: another history; resynchronise it from empty");
         Files.delete(replica().resolve(JournaledEngine.COMMANDS_FILE));
         byte[] wrong = "another secret, also of 32 bytes or more".getBytes(StandardCharsets.UTF_8);
-        try (JournaledEngine engine = open(primary(), options(FsyncPolicy.GROUP, port, wrong))) {
-            engine.process(new LimitOrder(Side.BUY, 100, 1));
-            assertThatThrownBy(engine::sync).hasRootCauseMessage("the standby refused: authentication failed");
+        assertThatThrownBy(() -> open(primary(), options(FsyncPolicy.GROUP, port, wrong)))
+                .hasRootCauseMessage("the standby could not prove the replication secret: not the standby");
+        try (JournaledEngine engine = open(primary(), options(FsyncPolicy.GROUP, port))) {
+            assertThat(engine.recovery().lastCommandSequence()).as("the lock was released each time").isEqualTo(1);
         }
+        standby.close();
+        Files.write(replica().resolve(JournaledEngine.COMMANDS_FILE), new byte[] {9}, StandardOpenOption.APPEND);
+        startStandby();
+        int restarted = standby.port();
+        assertThatThrownBy(() -> open(primary(), options(FsyncPolicy.GROUP, restarted)))
+                .hasRootCauseMessage("the standby holds " + (bytes(primary().resolve(JournaledEngine.COMMANDS_FILE))
+                        .length + 1) + " bytes of commands.journal, this primary " + bytes(primary()
+                        .resolve(JournaledEngine.COMMANDS_FILE)).length + ": the standby is ahead (promote it, RS-016)");
     }
 
     @Test
@@ -236,10 +293,21 @@ class ReplicationTest {
     void theToolsCheckTheirArguments() throws Exception {
         PrintStream quiet = new PrintStream(new ByteArrayOutputStream());
         assertThat(ReplicaTool.run(new String[] {}, quiet, quiet)).isEqualTo(2);
+        assertThat(ReplicaTool.run(new String[] {"a", "b", "c"}, quiet, quiet)).isEqualTo(2);
+        assertThat(ReplicaTool.run(new String[] {"--term", "x", "r"}, quiet, quiet)).isEqualTo(2);
         assertThat(ReplicaTool.run(new String[] {standbyRoot.toString()}, quiet, quiet)).as("nothing to promote").isEqualTo(1);
         assertThat(ReplicaServer.run(new String[] {"x"}, quiet, quiet)).isEqualTo(2);
         org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
                 .isThrownBy(() -> new ReplicationTarget("h", 1, new byte[8], Duration.ofSeconds(1)));
         assertThat(new ReplicationTarget("h", 1, SECRET, Duration.ofSeconds(1)).toString()).doesNotContain("secret of");
+        for (Duration timeout : new Duration[] {Duration.ofHours(2), Duration.ZERO}) {
+            org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
+                    .isThrownBy(() -> new ReplicationTarget("h", 1, SECRET, timeout));
+        }
+        for (int port : new int[] {0, 65_536}) {
+            org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
+                    .isThrownBy(() -> new ReplicationTarget("h", port, SECRET, Duration.ofSeconds(1)));
+        }
+        assertThat(ReplicaServer.run(new String[] {"r", "127.0.0.1", "port", "secret"}, quiet, quiet)).isEqualTo(2);
     }
 }
