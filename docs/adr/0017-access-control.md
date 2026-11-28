@@ -80,7 +80,22 @@ every caller, so one caller could lock a member out for everyone: the proxy must
 (`X-Forwarded-For`), and Spring Boot be told to trust it (`server.forward-headers-strategy=native` with the
 proxy's addresses as internal proxies), before the venue is exposed this way.
 
-### 7. Not here
+### 7. Remember verified credentials, briefly (added in phase 8d)
+
+HTTP Basic sends the credentials with every request, and bcrypt is slow by design: at its default cost each check
+takes 70 to 100 ms of CPU, and the lockout lets five run at once per name and address. The end-to-end load test
+measured the result: one REST user could send about 50 requests a second. Once bcrypt has accepted a user's
+credentials, they are now accepted without bcrypt for ten minutes (AC-012); the same user then sends 2,000 a
+second, as without authentication.
+
+What is kept is an HMAC-SHA256 of the password under a key drawn at start and never written anywhere, compared in
+constant time: a heap dump gives no password and no hash that an offline guess could test without the key, which
+sits in the same dump, so the cache is as sensitive as the process memory, which already holds the bcrypt hashes.
+Only successes are kept, so the cache cannot grow beyond the configured users, and a wrong password always goes to
+bcrypt and is counted. The lockout is checked first. Users only change at a restart, which empties the cache, so
+ten minutes bounds nothing but a compromised process's reuse of a password it has seen.
+
+### 8. Not here
 
 Mutual TLS for FIX (needs certificates provisioned,
 phase 9), secret rotation and an external identity provider.
