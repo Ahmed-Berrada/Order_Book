@@ -551,7 +551,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 0 | **Foundations**: multi-module build, CI, enforced module boundary, ADR | ✅ |
 | 1 | **Core engine**: rulebook, LIMIT / MARKET / cancel, property tests, reference model, quality gates | ✅ |
 | 2 | **Durability & audit**: write-ahead journal, snapshots, crash recovery, replay | ✅ |
-| 3 | **Connectivity**: service layer, REST API, FIX order entry and drop copy, WebSocket and binary market data | ✅ |
+| 3 | **Connectivity**: service layer, REST API, FIX order entry, mass cancel, trading status and drop copy, WebSocket and binary market data | ✅ |
 | 4 | **Venue functionality**: IOC / FOK / post-only / cancel-replace ✅, iceberg orders ✅, stop orders ✅, self-trade prevention ✅, trading phases and call auctions ✅, tick regime, DAY orders and volatility interruptions ✅; throttles and kill switch moved to phase 5 | ⏳ |
 | 5 | **Pre-trade risk & members**: members, limits and the kill switch ✅, message-rate and order-to-trade throttles ✅, mass cancel ✅; trader hierarchy, venue-wide exposure | ⏳ |
 | 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅, group commit ✅; load test, GC study | ⏳ |

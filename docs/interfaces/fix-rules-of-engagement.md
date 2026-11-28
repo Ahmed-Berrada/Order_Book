@@ -79,6 +79,26 @@ value for the reason (`1` unknown security, `0` an unsupported request type) and
 (`UNKNOWN_INSTRUMENT`, `UNSUPPORTED_MASS_CANCEL_REQUEST_TYPE`, `INVALID_SIDE`, `DUPLICATE_CLORDID`). A mass cancel
 is accepted in every phase and while the member is suspended, and does not suspend it.
 
+### TradingSessionStatus (`35=h`) and TradingSessionStatusRequest (`35=g`)
+
+FIX 4.4's TradingSessionStatus names no instrument, so each instrument is a trading session of its own:
+`336 TradingSessionID` is its symbol. `340 TradSesStatus`:
+
+| Venue state | `340` |
+|---|---|
+| Continuous trading | `2` Open |
+| Call phase, before an auction | `4` Pre-open |
+| Closed | `3` Closed |
+| Stopped after a journal failure (OE-006) | `1` Halted |
+
+Every member and drop copy session receives the status of each instrument when it logs on, and again whenever an
+instrument's phase changes (`325 UnsolicitedIndicator=Y`), after the reports of the command that changed it; a
+change made by the volatility band carries `58 Text=VOLATILITY_INTERRUPTION` (FS-001). A member may ask with
+`35=g` (`335 TradSesReqID`, `263 SubscriptionRequestType`, and `336` for one instrument or none for all): it gets
+a snapshot with `335` echoed and `325=N`, and the changes keep coming as they do anyway, whatever `263` asks. An
+unknown `336` is answered with `340=6` and `567 TradSesStatusRejReason=1` (FS-002). A halt after a journal failure
+is not announced when it happens: it shows at the next logon or request.
+
 ### OrderStatusRequest (`35=H`)
 
 `11 ClOrdID` (the order's ClOrdID), `55`, `54`. Answered with an ExecutionReport `150=I`.
@@ -195,11 +215,11 @@ answered with a `BusinessMessageReject`, reason `6` (Not authorized) (DC-002).
   be reported over FIX and their ClOrdIDs are forgotten.
 - A Day order that expires is reported as `ExecType=C` (Expired), `OrdStatus=C`, `Text=DAY_EXPIRED`, when the
   venue sets the instrument to closed. There is no trading calendar: an operator closes the instrument (REST).
-- A volatility interruption (a fill that would execute outside the band) is not announced over FIX; the
-  affected order's remainder is cancelled with `Text=VOLATILITY_INTERRUPTION`, or rests, and later orders are
+- A volatility interruption (a fill that would execute outside the band) is announced as a move to `340=4`
+  with `Text=VOLATILITY_INTERRUPTION`; the affected order's remainder is cancelled with `Text=VOLATILITY_INTERRUPTION`, or rests, and later orders are
   collected as in any call phase.
-- Trading phases ([trading phases](../rulebook/trading-phases.md)) are set by an operator over REST, not
-  announced over FIX: the gateway sends no `TradingSessionStatus`. In a call phase the venue accepts
+- Trading phases ([trading phases](../rulebook/trading-phases.md)) are set by an operator over REST and
+  announced over FIX with `TradingSessionStatus` (above). In a call phase the venue accepts
   limit GTC orders and stops, and rejects the rest with `OrdRejReason=2` (Exchange closed) and text
   `NOT_ALLOWED_IN_PHASE`; the same reason is given for every new order while the instrument is closed.
   Auction fills are reported as ordinary `ExecType=Trade` reports at the auction price.
