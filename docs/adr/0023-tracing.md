@@ -22,7 +22,8 @@ alerts and the dashboard read (ADR-0018). Logs stay on standard output, with tra
 
 Each REST command is a Micrometer `Observation` from submission to acknowledgement (`TracedCommands`). One
 observation is both the span and the `lob.request` timer, so the trace and the metric measure the same interval. Its
-attributes are the instrument, the command's type, the outcome (accepted, rejected, refused, unknown), the member
+attributes are the instrument (as `symbol`, like the other meters; `unknown` for a symbol that is not listed, so a
+caller cannot create metric series by inventing symbols), the command's type, the outcome (accepted, rejected, refused, unknown), the member
 and the journal's command sequence, which joins a trace to the journal.
 
 The engine service is not instrumented. It stays free of frameworks (ADR-0004), and its thread would only add
@@ -32,7 +33,10 @@ carried into `SymbolWorker`; it can come later without changing what is recorded
 ### 3. Sampled, and exported only when asked
 
 10% of requests are sampled by default, and nothing leaves the process until an OTLP endpoint is configured: a
-venue without a collector pays for the spans of sampled requests and nothing else. Tracing never changes an
+venue without a collector pays for the spans of sampled requests and nothing else. Only W3C `traceparent` is read
+from callers and no baggage is carried, so a caller cannot put its own values into the venue's context. The sampler
+is parent-based: a caller that marks its request sampled has it traced. That lets a member trace its own requests,
+which is useful, and costs at most a span per request it sends anyway, within the throttles (OE-008). Tracing never changes an
 answer: a failure to export is the exporter's, outside the request.
 
 ### 4. FIX is not traced
@@ -45,4 +49,6 @@ the logs and the journal, by ClOrdID and order ID.
 - A new histogram, `lob_request_seconds`, for what REST clients wait for, by instrument, command and outcome.
 - Traces join logs (trace IDs in each line) and the journal (`lob.command.sequence`).
 - Every REST command now opens an observation, sampled or not; its cost has not been measured separately from
-  the request's HTTP handling, and the phase 6 numbers, taken on the engine service, do not include it.
+  the request's HTTP handling, and the phase 6 numbers, taken on the engine service, do not include it. The
+  observation stops on the thread that completes the command, the instrument's: one timer sample and, when
+  sampled, a span end, as a metric is recorded there today.

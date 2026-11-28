@@ -33,7 +33,7 @@ suffixed).
 | `lob_journal_flush_duration_seconds` | histogram | Time of one device flush of a group of commands (`GROUP`): the device's latency, which bounds the instrument's throughput |
 | `lob_journal_group_size` | summary | Commands covered by one flush (`GROUP`): about 1 at low load, growing with the load |
 | `lob_throttled_total` | counter | Members' orders and replaces refused before the queue by a throttle, by `member` and `reason`: `THROTTLED` (message rate, OE-008) or `ORDER_TO_TRADE_LIMIT` (OE-009). Appears with the first refusal |
-| `lob_request_seconds` | histogram | What a REST client waits for, from submission to acknowledgement: queueing, the engine, and the journal's flush with `fsync: GROUP` or `EVERY_COMMAND`. Tagged `lob_symbol`, `lob_command` (the command's type) and `lob_outcome`: `accepted`, `rejected` (by the engine), `refused` (before the journal) or `unknown` (a failed write). The same measurement as the command's span (Tracing, below). FIX commands are not in it |
+| `lob_request_seconds` | histogram | What a REST client waits for, from submission to acknowledgement: queueing, the engine, and the journal's flush with `fsync: GROUP` or `EVERY_COMMAND`. Tagged `symbol` (`unknown` for a symbol that is not listed), `lob_command` (the command's type), `lob_outcome` `accepted`, `rejected` (by the engine), `refused` (before the journal) or `unknown` (a failed write), and `error` (the exception's class, or `none`). Buckets from 50 µs to 10 s. The same measurement as the command's span (Tracing, below); `lob_request_active_seconds` counts those in progress. FIX commands are not in it |
 | `lob_instrument_halted` | gauge | `1` if the instrument stopped after a journal failure (OE-006), else `0` |
 
 The JVM, process and HTTP server metrics that Spring Boot provides (`jvm_*`, `process_*`,
@@ -81,7 +81,10 @@ or failed request, the trace leads to the journal record (`replay` or the order 
 | `management.opentelemetry.tracing.export.otlp.endpoint` | none | where to send spans over OTLP/HTTP, e.g. `http://collector:4318/v1/traces`; without it nothing is exported |
 
 Each log line carries the trace and span IDs of the request it was written for, so logs and traces join on them.
-An incoming `traceparent` header (W3C) continues the caller's trace.
+An incoming `traceparent` header (W3C; B3 is not read, and no baggage is carried) continues the caller's trace.
+The sampler follows the caller's decision: a request marked sampled is traced whatever the probability, so a
+caller can have its own requests traced, not anyone else's. A collector that cannot take every request should
+drop at its own edge (tail sampling).
 
 ## Not yet
 

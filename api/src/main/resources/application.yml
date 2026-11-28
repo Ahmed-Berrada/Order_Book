@@ -93,6 +93,21 @@ management:
   tracing:
     sampling:
       probability: 0.1
+    # Only W3C traceparent is read from callers, and no baggage is carried (ADR-0023 §3).
+    propagation:
+      consume: w3c
+      produce: w3c
+    baggage:
+      enabled: false
+  metrics:
+    distribution:
+      # lob_request_seconds as a histogram, for its quantiles; 50 µs to 10 s covers an acknowledged command.
+      percentiles-histogram:
+        lob.request: true
+      minimum-expected-value:
+        lob.request: 50us
+      maximum-expected-value:
+        lob.request: 10s
   # Logs stay on standard output, with the trace and span IDs in each line; they are not sent over OTLP.
   logging:
     export:

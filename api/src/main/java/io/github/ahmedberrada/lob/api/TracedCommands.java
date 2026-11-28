@@ -22,7 +22,8 @@ import org.springframework.stereotype.Component;
  * child of the HTTP request's, and the {@code lob.request} timer. Both cover what a client waits for, queueing and
  * the journal's flush included, which {@code lob.command.duration} does not.
  *
- * <p>Low-cardinality keys (metric tags and span attributes): {@code lob.symbol}, {@code lob.command} and
+ * <p>Low-cardinality keys (metric tags and span attributes): {@code symbol} (as on the other {@code lob} meters;
+ * {@code unknown} for a symbol that is not listed), {@code lob.command} and
  * {@code lob.outcome}: {@code accepted}, {@code rejected} (by the engine; journaled), {@code refused} (before the
  * journal) or {@code unknown} (a failed write). High-cardinality keys (span only): {@code lob.member},
  * {@code lob.command.sequence}, the command's position in the instrument's journal, and {@code lob.refusal}.
@@ -48,7 +49,8 @@ class TracedCommands {
         String type = command.getClass().getSimpleName();
         Observation observation = Observation.createNotStarted(NAME, registry)
                 .contextualName("lob " + type)
-                .lowCardinalityKeyValue("lob.symbol", symbol)
+                // a symbol from the URL that is not listed is not a tag value: callers could make series without end
+                .lowCardinalityKeyValue("symbol", service.instrument(symbol).isPresent() ? symbol : "unknown")
                 .lowCardinalityKeyValue("lob.command", type)
                 .highCardinalityKeyValue("lob.member", Long.toString(memberId))
                 .start();

@@ -76,7 +76,7 @@ class TracingTest {
                 .hasStatus(HttpStatus.CREATED);
 
         SpanData command = span("lob LimitOrder");
-        assertThat(attribute(command, "lob.symbol")).isEqualTo("AAPL");
+        assertThat(attribute(command, "symbol")).isEqualTo("AAPL");
         assertThat(attribute(command, "lob.outcome")).isEqualTo("accepted");
         assertThat(attribute(command, "lob.member")).isEqualTo("0");
         assertThat(Long.parseLong(attribute(command, "lob.command.sequence"))).isPositive();
@@ -97,8 +97,10 @@ class TracingTest {
         }
         assertThat(ancestors).anyMatch(name -> name.startsWith("http post"));
 
-        assertThat(meters.get(TracedCommands.NAME).tag("lob.command", "LimitOrder").tag("lob.outcome", "accepted")
-                .timer().count()).isPositive();
+        var timer = meters.get(TracedCommands.NAME).tag("symbol", "AAPL").tag("lob.command", "LimitOrder")
+                .tag("lob.outcome", "accepted").timer();
+        assertThat(timer.count()).isPositive();
+        assertThat(timer.takeSnapshot().histogramCounts()).as("a histogram, for quantiles").isNotEmpty();
     }
 
     @Test
@@ -115,6 +117,7 @@ class TracingTest {
         exporter.reset();
         assertThat(mvc.delete().uri("/api/v1/instruments/NOPE/orders/1")).hasStatus(HttpStatus.NOT_FOUND);
         SpanData refused = span("lob CancelOrder");
+        assertThat(attribute(refused, "symbol")).as("an unlisted symbol is no tag value").isEqualTo("unknown");
         assertThat(attribute(refused, "lob.outcome")).isEqualTo("refused");
         assertThat(attribute(refused, "lob.refusal")).isEqualTo("UNKNOWN_INSTRUMENT");
     }
