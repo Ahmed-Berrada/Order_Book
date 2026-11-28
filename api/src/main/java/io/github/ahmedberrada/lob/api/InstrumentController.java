@@ -24,8 +24,10 @@ import org.springframework.web.bind.annotation.RestController;
 class InstrumentController {
 
     private final MatchingService service;
+    private final TracedCommands commands;
 
-    InstrumentController(MatchingService service) {
+    InstrumentController(MatchingService service, TracedCommands commands) {
+        this.commands = commands;
         this.service = service;
     }
 
@@ -47,7 +49,7 @@ class InstrumentController {
     CompletableFuture<PhaseResponse> setPhase(@PathVariable String symbol, @Valid @RequestBody PhaseRequest request) {
         InstrumentConfig instrument = service.instrument(symbol).orElseThrow(() ->
                 new RequestRefusedException(RequestRefusedException.Reason.UNKNOWN_INSTRUMENT, symbol));
-        return service.submit(symbol, new SetPhase(request.phase())).thenApply(batch -> {
+        return commands.submit(symbol, new SetPhase(request.phase())).thenApply(batch -> {
             PhaseChanged changed = batch.events().stream().filter(PhaseChanged.class::isInstance)
                     .map(PhaseChanged.class::cast).findFirst()       // after the uncross's events, if any (TP-003)
                     .orElseThrow(() -> new PhaseChangeRejectedException(symbol, request.phase().name()));

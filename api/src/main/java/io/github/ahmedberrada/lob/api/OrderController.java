@@ -45,9 +45,11 @@ class OrderController {
     static final String MEMBER_HEADER = "X-Member-Id";
 
     private final MatchingService service;
+    private final TracedCommands commands;
     private final MemberResolver members;
 
-    OrderController(MatchingService service, MemberResolver members) {
+    OrderController(MatchingService service, MemberResolver members, TracedCommands commands) {
+        this.commands = commands;
         this.service = service;
         this.members = members;
     }
@@ -58,7 +60,7 @@ class OrderController {
             Authentication authentication,
             @Valid @RequestBody OrderRequest request) {
         InstrumentConfig instrument = instrument(symbol);
-        return service.submit(symbol, request.toCommand(instrument), members.resolve(authentication, memberHeader), null).thenApply(batch -> {
+        return commands.submit(symbol, request.toCommand(instrument), members.resolve(authentication, memberHeader)).thenApply(batch -> {
             if (batch.events().getFirst() instanceof OrderRejected rejected) {
                 throw new OrderRejectedException(rejected.orderId(), rejected.reason());
             }
@@ -72,7 +74,7 @@ class OrderController {
     CompletableFuture<CancelResponse> cancelOrder(@PathVariable String symbol, @PathVariable long orderId,
             @RequestHeader(name = MEMBER_HEADER, required = false) @PositiveOrZero Long memberHeader,
             Authentication authentication) {
-        return service.submit(symbol, new CancelOrder(orderId), members.resolve(authentication, memberHeader), null).thenApply(batch -> {
+        return commands.submit(symbol, new CancelOrder(orderId), members.resolve(authentication, memberHeader)).thenApply(batch -> {
             Event event = batch.events().getFirst();
             if (event instanceof CancelRejected) {
                 throw new OrderNotRestingException(orderId);
@@ -105,7 +107,7 @@ class OrderController {
                     ? "a mass cancel by the operator cancels every member's orders: name a member, or pass allMembers=true"
                     : "allMembers=true is for the operator only");
         }
-        return service.submit(symbol, new MassCancel(parsed), member, null)
+        return commands.submit(symbol, new MassCancel(parsed), member)
                 .thenApply(batch -> {
                     MassCancelled summary = (MassCancelled) batch.events().getFirst();
                     List<Long> ids = batch.events().stream().filter(OrderCancelled.class::isInstance)
@@ -121,7 +123,7 @@ class OrderController {
             Authentication authentication,
             @Valid @RequestBody ReplaceRequest request) {
         InstrumentConfig instrument = instrument(symbol);
-        return service.submit(symbol, request.toCommand(orderId, instrument), members.resolve(authentication, memberHeader), null).thenApply(batch -> {
+        return commands.submit(symbol, request.toCommand(orderId, instrument), members.resolve(authentication, memberHeader)).thenApply(batch -> {
             if (batch.events().getFirst() instanceof ReplaceRejected rejected) {
                 if (rejected.reason() == RejectReason.UNKNOWN_ORDER) {
                     throw new OrderNotRestingException(orderId);

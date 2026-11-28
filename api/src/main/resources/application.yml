@@ -88,6 +88,16 @@ management:
       group:
         readiness:
           include: readinessState,lob
+  # Traces (ADR-0023): one span per REST request and per command, sampled at 10%. They are exported over OTLP only
+  # when an endpoint is set, e.g. MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT=http://collector:4318/v1/traces.
+  tracing:
+    sampling:
+      probability: 0.1
+  # Logs stay on standard output, with the trace and span IDs in each line; they are not sent over OTLP.
+  logging:
+    export:
+      otlp:
+        enabled: false
 logging:
   level:
     # The REST authentication provider is defined on purpose (AC-009, ThrottledAuthentication): not a mistake to warn of.
