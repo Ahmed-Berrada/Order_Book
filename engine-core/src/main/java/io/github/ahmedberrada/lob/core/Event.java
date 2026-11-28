@@ -8,7 +8,7 @@ public sealed interface Event
         permits OrderAccepted, OrderRejected, TradeExecuted, OrderRested, OrderCancelled, CancelRejected,
                 OrderReplaced, ReplaceRejected, OrderReplenished, OrderParked, StopTriggered, PhaseChanged, PhaseChangeRejected,
                 AuctionPriceDetermined, VolatilityInterruption,
-                MemberLimitsChanged, MemberSuspended, MemberResumed, MemberCommandRejected {
+                MemberLimitsChanged, MemberSuspended, MemberResumed, MemberCommandRejected, MassCancelled {
 
     /** Position of this event in the instrument's event stream: 1, 2, 3… with no gaps (CT-011). */
     long sequence();

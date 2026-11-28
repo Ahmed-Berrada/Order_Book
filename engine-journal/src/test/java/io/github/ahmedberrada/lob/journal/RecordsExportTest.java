@@ -59,6 +59,9 @@ class RecordsExportTest {
             engine.process(new SuspendMember(7));
             engine.process(new SetPhase(TradingPhase.CALL));
             engine.process(new SetPhase(TradingPhase.CALL));
+            engine.process(new LimitOrder(Side.SELL, 140, 1), 8);
+            engine.process(new io.github.ahmedberrada.lob.core.MassCancel(Side.SELL), 8);
+            engine.process(io.github.ahmedberrada.lob.core.MassCancel.all(), 8);
         }
 
         assertThat(run(directory.toString())).isZero();
@@ -82,6 +85,9 @@ class RecordsExportTest {
         assertThat(lines).anyMatch(l -> l.contains(",7,,MEMBER_SUSPENDED,,,,,1,,,"));
         assertThat(lines).anyMatch(l -> l.contains(",ORDER_CANCELLED,,,,,2,,,KILL_SWITCH"));
         assertThat(lines).anyMatch(l -> l.contains(",PHASE_CHANGED,,,,,,,,CONTINUOUS to CALL"));
+        assertThat(lines).anyMatch(l -> l.contains(",8,,MASS_CANCELLED,SELL,,,,1,,,"));
+        assertThat(lines).anyMatch(l -> l.contains(",8,,MASS_CANCELLED,BOTH,,,,0,,,"));
+        assertThat(lines).anyMatch(l -> l.contains(",ORDER_CANCELLED,,,,,1,,,MASS_CANCEL"));
         assertThat(lines).anyMatch(l -> l.contains(",PHASE_CHANGE_REJECTED,,,,,,,,INVALID_PHASE_TRANSITION"));
         assertThat(lines).allSatisfy(l -> assertThat(l).startsWith(l.startsWith("timestamp") ? "timestamp" : "2025-"));
     }

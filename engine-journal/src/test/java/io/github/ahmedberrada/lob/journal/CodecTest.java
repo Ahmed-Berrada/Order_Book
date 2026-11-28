@@ -17,6 +17,8 @@ import io.github.ahmedberrada.lob.core.MatchingEngine;
 import io.github.ahmedberrada.lob.core.MemberCommandRejected;
 import io.github.ahmedberrada.lob.core.MemberLimits;
 import io.github.ahmedberrada.lob.core.MemberLimitsChanged;
+import io.github.ahmedberrada.lob.core.MassCancel;
+import io.github.ahmedberrada.lob.core.MassCancelled;
 import io.github.ahmedberrada.lob.core.MemberResumed;
 import io.github.ahmedberrada.lob.core.MemberState;
 import io.github.ahmedberrada.lob.core.MemberSuspended;
@@ -128,12 +130,14 @@ class CodecTest {
     void membersAndLimitsRoundTripThroughEntriesBatchesAndSnapshots() throws IOException {
         MemberLimits limits = new MemberLimits(10, 20, 30, 40, 50);
         for (Command command : List.<Command>of(new SetMemberLimits(7, limits), new SuspendMember(7),
-                new ResumeMember(7))) {
+                new ResumeMember(7), new MassCancel(Side.BUY), new MassCancel(Side.SELL), MassCancel.all())) {
             JournalEntry entry = new JournalEntry(1, 2, command, 9);
             assertThat(Codec.decodeEntry(Codec.encodeEntry(entry))).isEqualTo(entry);
         }
         List<Event> events = new ArrayList<>(List.of(new MemberLimitsChanged(1, 7, limits),
                 new MemberSuspended(2, 7, 3), new MemberResumed(3, 7),
+                new MassCancelled(6, 7, Side.SELL, 2), new MassCancelled(7, 7, null, 0),
+                new OrderCancelled(8, 3, 4, CancelReason.MASS_CANCEL),
                 new TradeExecuted(4, 2, 1, Side.BUY, 100, 5, 0, 0, 7, 8)));
         for (RejectReason reason : RejectReason.values()) {
             events.add(new MemberCommandRejected(5, 7, reason));
@@ -228,9 +232,11 @@ class CodecTest {
     }
 
     @Test
-    void earlierFormatVersionsAreRefused() {
+    void versionEightIsReadAndEarlierVersionsAreRefused() throws IOException {
         byte[] valid = Codec.encodeHeader(new Codec.Header(Codec.Kind.COMMANDS, CommandStream.INSTRUMENT));
-        assertThat(Codec.FORMAT_VERSION).isEqualTo((short) 8);
+        assertThat(Codec.FORMAT_VERSION).isEqualTo((short) 9);
+        assertThat(Codec.decodeHeader(withByte(valid, 5, 8))).as("version 9 only adds codes")
+                .isEqualTo(new Codec.Header(Codec.Kind.COMMANDS, CommandStream.INSTRUMENT));
         assertCorrupt(withByte(valid, 5, 7), "version 7");
         assertCorrupt(withByte(valid, 5, 6), "version 6");
         assertCorrupt(withByte(valid, 5, 4), "version 4");
@@ -257,7 +263,7 @@ class CodecTest {
         byte[] valid = Codec.encodeHeader(new Codec.Header(Codec.Kind.COMMANDS, CommandStream.INSTRUMENT));
 
         assertCorrupt(withByte(valid, 0, 0), "magic");
-        assertCorrupt(withByte(valid, 5, 9), "version");
+        assertCorrupt(withByte(valid, 5, 10), "version");
         assertCorrupt(withByte(valid, 6, 9), "kind");
         assertCorrupt(header(out -> {
             out.writeUTF("X");
@@ -315,7 +321,7 @@ class CodecTest {
 
         byte[] cancelled = Codec.encodeBatch(new EventBatch(1, 1, List.of(
                 new OrderCancelled(1, 1, 1, CancelReason.CLIENT_REQUEST))));
-        assertThatThrownBy(() -> Codec.decodeBatch(withByte(cancelled, eventStart + 25, 9)))
+        assertThatThrownBy(() -> Codec.decodeBatch(withByte(cancelled, eventStart + 25, 10)))
                 .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("cancel reason");
     }
 

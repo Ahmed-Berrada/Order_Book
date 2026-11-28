@@ -167,6 +167,13 @@ public final class OrderBook {
         return found;
     }
 
+    /** Every resting order, by order ID (RK-006). */
+    List<Order> allOrders() {
+        List<Order> found = new ArrayList<>(ordersById.values());
+        found.sort(Comparator.comparingLong(order -> order.orderId));
+        return found;
+    }
+
     /** Every resting DAY order, by order ID (DY-002). */
     List<Order> dayOrders() {
         List<Order> found = new ArrayList<>();

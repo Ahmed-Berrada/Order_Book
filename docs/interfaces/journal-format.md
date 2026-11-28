@@ -65,6 +65,7 @@ Then, by type:
 | 7 SET_MEMBER_LIMITS | member ID (8), the five limits (8 each: quantity, notional, collar, open orders, position) |
 | 8 SUSPEND_MEMBER | member ID (8) |
 | 9 RESUME_MEMBER | member ID (8) |
+| 10 MASS_CANCEL | side (1; `0` for both) |
 
 A **self-trade instruction** is a group (8; `0` for none) followed by a mode (1, see below).
 
@@ -102,6 +103,7 @@ Each event starts with its type (1 byte) and its event sequence number (8 bytes)
 | 17 | `MemberSuspended` | member ID (8), cancelled orders (8) |
 | 18 | `MemberResumed` | member ID (8) |
 | 19 | `MemberCommandRejected` | member ID (8), reject reason (1) |
+| 20 | `MassCancelled` | member ID (8), side (1; `0` for both), cancelled orders (8) |
 
 ## Snapshot (`snapshot-*.snap`: a single frame)
 
@@ -171,6 +173,7 @@ Codes are fixed here and never derived from Java enum order, so old journals kee
 | DAY_EXPIRED | 6 |
 | VOLATILITY_INTERRUPTION | 7 |
 | KILL_SWITCH | 8 |
+| MASS_CANCEL | 9 |
 
 | Self-trade mode | Code |
 |---|---|
@@ -188,7 +191,8 @@ Codes are fixed here and never derived from Java enum order, so old journals kee
 ## Compatibility
 
 Any change to these layouts or codes increments the format version. A reader refuses versions it
-does not know.
+does not know, and versions older than the oldest it reads: a version that only adds codes is read by the next
+one, so journals written before an upgrade recover after it.
 
 | Version | Change |
 |---|---|
@@ -200,3 +204,4 @@ does not know.
 | 6 | Trading phases: `SetPhase` command, `PhaseChanged`, `PhaseChangeRejected` and `AuctionPriceDetermined` events, the phase in snapshots, `NOT_ALLOWED_IN_PHASE` and `INVALID_PHASE_TRANSITION` codes (ADR-0013). Earlier versions are refused |
 | 7 | Venue controls: the instrument header carries the tick table and the volatility band; `DAY` time in force; `DAY_EXPIRED`, `VOLATILITY_INTERRUPTION` and `INVALID_TICK_SIZE` codes; `VolatilityInterruption` event; the day attribute of resting orders and the reference price in snapshots (ADR-0014). Earlier versions are refused |
 | 8 | Members and risk: the member ID in every command record and event batch; `SetMemberLimits`, `SuspendMember` and `ResumeMember` commands and their events; the maker and taker member in `TradeExecuted`; the member of resting orders and parked stops; members' limits, suspensions and positions in snapshots; the risk reject codes and `KILL_SWITCH` (ADR-0015). Earlier versions are refused |
+| 9 | Mass cancel: `MassCancel` command, `MassCancelled` event, `MASS_CANCEL` code (RK-006). Version 8 files are read too: version 9 only adds codes |

@@ -91,6 +91,7 @@ final class ReferenceEngine {
             case SetMemberLimits set -> setLimits(set, events);
             case SuspendMember suspend -> suspend(suspend.memberId(), events);
             case ResumeMember resume -> resume(resume.memberId(), events);
+            case MassCancel massCancel -> massCancel(massCancel.side(), events);
         }
         if (phase == TradingPhase.CONTINUOUS && !pending) {
             release(events);
@@ -323,6 +324,22 @@ final class ReferenceEngine {
             OrderCancelled e = (OrderCancelled) c;
             events.add(new OrderCancelled(++lastSequence, e.orderId(), e.cancelledQuantity(), e.reason()));
         });
+    }
+
+    /** RK-006: the actor's open orders on the side (every member's for the operator), in order of order ID. */
+    private void massCancel(Side side, List<Event> events) {
+        long member = actor;
+        List<Resting> orders = resting.stream()
+                .filter(o -> (member == 0 || o.member == member) && (side == null || o.side == side)).toList();
+        List<Stop> parked = stops.stream()
+                .filter(s -> (member == 0 || s.member() == member) && (side == null || s.side() == side)).toList();
+        events.add(new MassCancelled(++lastSequence, member, side, orders.size() + parked.size()));
+        java.util.TreeMap<Long, long[]> cancels = new java.util.TreeMap<>();
+        orders.forEach(o -> cancels.put(o.id, new long[] {o.remaining}));
+        parked.forEach(s -> cancels.put(s.id(), new long[] {s.quantity()}));
+        resting.removeAll(orders);
+        stops.removeAll(parked);
+        cancels.forEach((id, q) -> events.add(new OrderCancelled(++lastSequence, id, q[0], CancelReason.MASS_CANCEL)));
     }
 
     private void resume(long member, List<Event> events) {
