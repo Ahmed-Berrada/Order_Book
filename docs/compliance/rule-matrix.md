@@ -6,7 +6,7 @@ of every module's tests. Do not edit by hand: change a rule or a test, then run 
 
 Regulation to rules: [regulatory-mapping.md](regulatory-mapping.md).
 
-**137 rules, 137 in force, 0 draft.**
+**138 rules, 138 in force, 0 draft.**
 
 | Rule | Title | Chapter | Status | Verified by |
 |---|---|---|---|---|
