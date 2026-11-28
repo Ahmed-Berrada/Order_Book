@@ -477,7 +477,8 @@ AAPL-4,2026-11-26,2026-11-26T09:00:00.000001Z,AAPL,1,1,SELL,MAKER,18550,185.50,1
 
 `analytics/` reads the trade file and the order records and reports the day: VWAP, open, high, low and
 close, auction share, the venue's fee revenue, trade-size percentiles, realized volatility, price impact
-(Kyle's lambda) and each member's order-to-trade ratio (RTS 9). Definitions: [analytics](docs/analytics.md).
+(Kyle's lambda) and each member's order-to-trade ratio (RTS 9). With `--alerts` it adds market-abuse indicators
+for review: wash trades, spoofing and layering, excessive cancellation (MAR). Definitions: [analytics](docs/analytics.md).
 
 ```bash
 cd analytics && python3 -m lob_analytics --trades AAPL-trades.csv --records AAPL-records.csv
@@ -553,7 +554,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 4 | **Venue functionality**: IOC / FOK / post-only / cancel-replace ✅, iceberg orders ✅, stop orders ✅, self-trade prevention ✅, trading phases and call auctions ✅, tick regime, DAY orders and volatility interruptions ✅; throttles, kill switch (phase 5) | ⏳ |
 | 5 | **Pre-trade risk & members** | |
 | 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅; group commit, load test, GC study | ⏳ |
-| 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; RTS 22 reports, surveillance | ⏳ |
+| 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; [surveillance alerts](docs/analytics.md#surveillance) ✅; RTS 22 reports, real-time surveillance | ⏳ |
 | 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅; TLS and mTLS (phase 9), OIDC | ⏳ |
 | 9 | **Operations & resilience**: [Prometheus metrics, probes and alerts](docs/operations/observability.md) ✅, [runbook](docs/operations/runbook.md) ✅, one writer per journal ✅, soak test ✅, container image, compose stack and Helm chart ✅, [HA design](docs/adr/0018-operations-and-high-availability.md) ✅; chaos tests (kill -9, full disk) ✅; replication and failover | ⏳ |
 | 10 | **Post-trade & analytics** *(optional)*: [clearing trade file and maker/taker/auction fees](docs/interfaces/trade-file.md) ✅, [Python microstructure analytics](docs/analytics.md) ✅ | ✅ |

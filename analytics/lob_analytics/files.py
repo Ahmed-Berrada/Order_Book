@@ -49,6 +49,8 @@ class OrderRecord:
     quantity: str
     counterparty_member_id: str
     detail: str
+    price_ticks: str = ""
+    counterparty_order_id: str = ""
 
     @property
     def counterparty(self) -> int:
@@ -97,7 +99,8 @@ def read_records(source: TextIO) -> List[OrderRecord]:
         try:
             records.append(OrderRecord(_timestamp(row["timestamp_utc"]), row["instrument"], int(row["member_id"]),
                                        row["order_id"], row["record"], row["side"], row["quantity"],
-                                       row["counterparty_member_id"], row["detail"]))
+                                       row["counterparty_member_id"], row["detail"], row["price_ticks"],
+                                       row["counterparty_order_id"]))
             if row["record"] == "TRADE":
                 _ = records[-1].counterparty, int(row["quantity"])    # a trade names its maker's member
         except ValueError as e:
