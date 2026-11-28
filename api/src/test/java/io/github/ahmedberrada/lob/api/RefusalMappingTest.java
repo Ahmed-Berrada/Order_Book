@@ -31,7 +31,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /** Refusals that a healthy venue cannot produce on demand, mapped with a stubbed service. */
 @WebMvcTest(OrderController.class)
-@Import(MemberResolver.class)
+@Import({MemberResolver.class, TracedCommands.class})
 @AutoConfigureMockMvc(addFilters = false)      // the security chain has its own tests (SecurityApiTest)
 class RefusalMappingTest {
 

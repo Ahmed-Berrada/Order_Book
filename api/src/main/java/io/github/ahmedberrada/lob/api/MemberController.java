@@ -31,8 +31,10 @@ import org.springframework.web.bind.annotation.RestController;
 class MemberController {
 
     private final MatchingService service;
+    private final TracedCommands traced;
 
-    MemberController(MatchingService service) {
+    MemberController(MatchingService service, TracedCommands traced) {
+        this.traced = traced;
         this.service = service;
     }
 
@@ -45,7 +47,7 @@ class MemberController {
     CompletableFuture<MemberResponse> setLimits(@PathVariable @Positive long memberId,
             @Valid @RequestBody LimitsRequest request) {
         List<CompletableFuture<?>> commands = service.instruments().stream().map(instrument ->
-                service.submit(instrument.symbol(), new SetMemberLimits(memberId, request.toLimits(instrument)))
+                traced.submit(instrument.symbol(), new SetMemberLimits(memberId, request.toLimits(instrument)))
                         .thenAccept(batch -> reject(batch.events().getFirst()))).collect(java.util.stream.Collectors.toList());
         return CompletableFuture.allOf(commands.toArray(CompletableFuture[]::new)).thenCompose(done -> states(memberId));
     }
@@ -54,7 +56,7 @@ class MemberController {
     @PutMapping("/suspension")
     CompletableFuture<SuspensionResponse> suspend(@PathVariable @Positive long memberId) {
         List<CompletableFuture<Long>> commands = service.instruments().stream().map(instrument ->
-                service.submit(instrument.symbol(), new SuspendMember(memberId)).thenApply(batch -> {
+                traced.submit(instrument.symbol(), new SuspendMember(memberId)).thenApply(batch -> {
                     Event first = batch.events().getFirst();
                     reject(first);
                     return ((MemberSuspended) first).cancelledOrders();
@@ -66,7 +68,7 @@ class MemberController {
     @DeleteMapping("/suspension")
     CompletableFuture<SuspensionResponse> resume(@PathVariable @Positive long memberId) {
         List<CompletableFuture<?>> commands = service.instruments().stream().map(instrument ->
-                service.submit(instrument.symbol(), new ResumeMember(memberId))
+                traced.submit(instrument.symbol(), new ResumeMember(memberId))
                         .thenAccept(batch -> reject(batch.events().getFirst())))
                 .collect(java.util.stream.Collectors.toList());
         return CompletableFuture.allOf(commands.toArray(CompletableFuture[]::new))
