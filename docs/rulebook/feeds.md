@@ -1,7 +1,7 @@
-# Rulebook: binary market data feed and drop copy
+# Rulebook: binary market data feed, drop copy and session status
 
-Two feeds for professional members: a sequenced binary market data feed for low-latency consumers,
-and a FIX drop copy for members' risk and back-office systems. Rule IDs are cited by tests through
+Feeds for professional members: a sequenced binary market data feed for low-latency consumers,
+a FIX drop copy for members' risk and back-office systems, and the trading status of each instrument over FIX. Rule IDs are cited by tests through
 `@Rulebook`. Design: [ADR-0008](../adr/0008-binary-feed-and-drop-copy.md); formats:
 [`market-data-binary.md`](../interfaces/market-data-binary.md) and the
 [FIX Rules of Engagement](../interfaces/fix-rules-of-engagement.md#drop-copy).
@@ -36,3 +36,25 @@ each drop copy session, marked as a copy (`CopyMsgIndicator=Y`) and naming the m
 
 **DC-002: Read only.** A drop copy session cannot trade: every application message it sends is
 rejected.
+
+## Trading status over FIX
+
+FIX 4.4's `TradingSessionStatus` (`35=h`) carries no instrument, so each instrument is its own trading session:
+`336 TradingSessionID` is the instrument's symbol. Its `340 TradSesStatus` is `2` Open in continuous trading,
+`4` Pre-open in a call phase, `3` Closed when closed, and `1` Halted when the instrument stopped after a journal
+failure (OE-006).
+
+**FS-001: Phase changes are announced.** When an instrument's trading phase changes (TP-001), every member and
+drop copy session that is logged on receives a `TradingSessionStatus` for it, with `325 UnsolicitedIndicator=Y`,
+after the reports of the command that changed it. It gives the phase at the end of the command: a command that
+changes the phase twice (an auction that reopens trading, then a volatility interruption) is announced once.
+A session never receives a status older than one it already has, whichever reaches the gateway first. A change caused by the volatility band (VI-003) carries
+`58 Text=VOLATILITY_INTERRUPTION`.
+
+**FS-002: Status at logon and on request.** A session receives the status of every instrument when it logs on.
+A `TradingSessionStatusRequest` (`35=g`) is answered with the status of the instrument named in `336`, or of
+every instrument without one, with `335 TradSesReqID` echoed and `325=N`; an unknown `336` is answered with
+`340=6` Request rejected and `567 TradSesStatusRejReason=1` (unknown or invalid TradingSessionID). When the phase
+cannot be read at that moment (the instrument's queue is full, or the venue is stopping), the status is `0` Unknown
+with the reason in `58`.
+

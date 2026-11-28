@@ -63,3 +63,8 @@ fills that happened while a member was disconnected.
   before it. Phase 5 adds the member to each journaled command and removes this gap.
 - ➖ No authentication until phase 8: sessions are identified by CompIDs only. The acceptor therefore
   listens on the loopback interface by default (`lob.fix.bind-address`, `LOB_BIND_ADDRESS`).
+- ➖ Reports are sent from the instrument's thread (the listener), and since FS-001 so is a trading status to
+  every logged-on session on each phase change. QuickFIX/J's `sendToTarget` takes the session's lock and writes
+  its message store before the socket write, which is asynchronous: a session whose lock is held or a slow store
+  disk delays matching. A send queue per session would remove that coupling; with a handful of member sessions
+  and a local store it has not been needed (phase 6 measures the instrument thread with no FIX sessions).

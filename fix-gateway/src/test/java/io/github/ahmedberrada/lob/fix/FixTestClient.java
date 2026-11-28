@@ -29,6 +29,8 @@ public final class FixTestClient implements Application, AutoCloseable {
     private final SessionID session;
     private final SocketInitiator initiator;
     private final BlockingQueue<Message> received = new LinkedBlockingQueue<>();
+    /** TradingSessionStatus messages (FS-001, FS-002), kept apart so that order flow tests need not skip them. */
+    private final BlockingQueue<Message> statuses = new LinkedBlockingQueue<>();
     private volatile CountDownLatch loggedOn = new CountDownLatch(1);
 
     public FixTestClient(String compId, int port, Path storeDirectory) throws Exception {
@@ -104,6 +106,23 @@ public final class FixTestClient implements Application, AutoCloseable {
         return message;
     }
 
+    /** Next TradingSessionStatus, failing after a few seconds. */
+    public Message nextStatus() throws InterruptedException {
+        Message message = statuses.poll(5, TimeUnit.SECONDS);
+        if (message == null) {
+            throw new AssertionError(session + " received no TradingSessionStatus");
+        }
+        return message;
+    }
+
+    /** Asserts that no TradingSessionStatus arrives for a short while. */
+    public void expectNoStatus(Duration wait) throws InterruptedException {
+        Message message = statuses.poll(wait.toMillis(), TimeUnit.MILLISECONDS);
+        if (message != null) {
+            throw new AssertionError(session + " unexpectedly received " + message);
+        }
+    }
+
     /** Asserts that nothing arrives for a short while. */
     public void expectNothing(Duration wait) throws InterruptedException {
         Message message = received.poll(wait.toMillis(), TimeUnit.MILLISECONDS);
@@ -133,6 +152,14 @@ public final class FixTestClient implements Application, AutoCloseable {
 
     @Override
     public void fromApp(Message message, SessionID sessionId) {
+        try {
+            if (MsgType.TRADING_SESSION_STATUS.equals(type(message))) {
+                statuses.add(message);
+                return;
+            }
+        } catch (FieldNotFound e) {
+            throw new IllegalStateException(e);
+        }
         received.add(message);
     }
 

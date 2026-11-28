@@ -6,7 +6,7 @@ of every module's tests. Do not edit by hand: change a rule or a test, then run 
 
 Regulation to rules: [regulatory-mapping.md](regulatory-mapping.md).
 
-**138 rules, 138 in force, 0 draft.**
+**140 rules, 140 in force, 0 draft.**
 
 | Rule | Title | Chapter | Status | Verified by |
 |---|---|---|---|---|
@@ -50,6 +50,8 @@ Regulation to rules: [regulatory-mapping.md](regulatory-mapping.md).
 | `DY-001` | DAY orders | [day-orders](../rulebook/day-orders.md) | in force | MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel, TradingPhasesFixTest#aDayOrderExpiresWhenTheVenueClosesAndAGoodTillCancelledOneDoesNot, VenueControlsApiTest#aDayOrderRestsAndExpiresWhenTheInstrumentCloses, VenueControlsTest#aDayOrderEnteredInACallPhaseAndReplacedStillExpiresAfterTheUncross and 1 more |
 | `DY-002` | Expiry | [day-orders](../rulebook/day-orders.md) | in force | BookImageTest#imageAndSubscribersMatchTheEngineAfterEveryCommand, MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel, TradingPhasesFixTest#aDayOrderExpiresWhenTheVenueClosesAndAGoodTillCancelledOneDoesNot, VenueControlsTest#aDayOrderEnteredInACallPhaseAndReplacedStillExpiresAfterTheUncross and 1 more |
 | `DY-003` | State | [day-orders](../rulebook/day-orders.md) | in force | MatchingEnginePropertyTest#restoringASnapshotAtAnyPointChangesNothing, VenueControlsTest#theDayAttributeSurvivesASnapshot |
+| `FS-001` | Phase changes are announced | [feeds](../rulebook/feeds.md) | in force | FailureMappingTest#aHaltedInstrumentIsHaltedAndAnInterruptionIsNamed, FailureMappingTest#aStatusReadBeforeAPhaseChangeNeverOverwritesIt, TradingStatusFixTest#sessionsAreToldTheStatusAtLogonAndEveryPhaseChange |
+| `FS-002` | Status at logon and on request | [feeds](../rulebook/feeds.md) | in force | FailureMappingTest#aHaltedInstrumentIsHaltedAndAnInterruptionIsNamed, TradingStatusFixTest#aRequestIsAnsweredForOneInstrumentOrAll, TradingStatusFixTest#sessionsAreToldTheStatusAtLogonAndEveryPhaseChange |
 | `IC-001` | Display quantity | [iceberg-orders](../rulebook/iceberg-orders.md) | in force | IcebergTest#displayEqualToTheQuantityOrZeroIsFullyVisible, IcebergTest#icebergRestsWithItsPeakVisibleOnly, IcebergTest#invalidDisplayQuantitiesAreRejected, MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel and 2 more |
 | `IC-002` | Peak | [iceberg-orders](../rulebook/iceberg-orders.md) | in force | BookImageTest#imageAndSubscribersMatchTheEngineAfterEveryCommand, IcebergTest#icebergRestsWithItsPeakVisibleOnly, IcebergTest#icebergsSurviveASnapshot, MatchingEnginePropertyTest#bookIsNeverCrossedAndHoldsOnlyPositiveQuantities and 3 more |
 | `IC-003` | Matching a peak | [iceberg-orders](../rulebook/iceberg-orders.md) | in force | IcebergTest#aSweepReachesTheHiddenQuantityPeakByPeakAndTheLastPeakIsSmaller, IcebergTest#aggressorFillsThePeakThenTheIcebergRefillsBehindTheQueue, IcebergTest#partialFillOfAPeakKeepsPriority, MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel and 1 more |
