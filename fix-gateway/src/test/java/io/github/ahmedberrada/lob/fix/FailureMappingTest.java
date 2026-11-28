@@ -192,4 +192,43 @@ class FailureMappingTest {
         assertThat(report.getString(Text.FIELD)).isEqualTo("OUTCOME_UNKNOWN");
         assertThat(report.isSetField(OrdRejReason.FIELD)).isFalse();
     }
+
+    private Message massCancelAll(String clOrdId) throws Exception {
+        quickfix.fix44.OrderMassCancelRequest request = new quickfix.fix44.OrderMassCancelRequest();
+        request.setString(ClOrdID.FIELD, clOrdId);
+        request.setChar(quickfix.field.MassCancelRequestType.FIELD, quickfix.field.MassCancelRequestType.CANCEL_ALL_ORDERS);
+        request.setUtcTimeStamp(TransactTime.FIELD, LocalDateTime.now(ZoneOffset.UTC));
+        sent.clear();
+        application.fromApp(request, SESSION);
+        assertThat(sent).hasSize(1);
+        return sent.getFirst();
+    }
+
+    @Test
+    @Rulebook("RK-006")
+    void aMassCancelWhoseOutcomeIsUnknownIsNeverReportedAsRejected() throws Exception {
+        io.github.ahmedberrada.lob.service.InstrumentConfig msft = new io.github.ahmedberrada.lob.service.InstrumentConfig(
+                "MSFT", new BigDecimal("0.01"), 1_000, new BigDecimal("1000.00"));
+        when(service.instruments()).thenReturn(List.of(FixVenue.AAPL, msft));
+        when(service.submit(org.mockito.ArgumentMatchers.eq("AAPL"), any(), anyLong(), any()))
+                .thenReturn(CompletableFuture.failedFuture(new UncheckedIOException(new IOException("disk"))));
+        when(service.submit(org.mockito.ArgumentMatchers.eq("MSFT"), any(), anyLong(), any()))
+                .thenReturn(CompletableFuture.failedFuture(new RequestRefusedException(Reason.HALTED, "MSFT")));
+        Message report = massCancelAll("M-1");
+        assertThat(report.getChar(quickfix.field.MassCancelResponse.FIELD)).isEqualTo('7');
+        assertThat(report.getInt(quickfix.field.TotalAffectedOrders.FIELD)).isZero();
+        assertThat(report.getString(Text.FIELD)).isEqualTo("NOT_CANCELLED_IN MSFT HALTED; OUTCOME_UNKNOWN_IN AAPL");
+
+        when(service.submit(org.mockito.ArgumentMatchers.eq("AAPL"), any(), anyLong(), any()))
+                .thenReturn(CompletableFuture.failedFuture(new RequestRefusedException(Reason.STOPPED, "AAPL")));
+        Message rejected = massCancelAll("M-2");
+        assertThat(rejected.getChar(quickfix.field.MassCancelResponse.FIELD)).as("every instrument refused").isEqualTo('0');
+        assertThat(rejected.getString(Text.FIELD)).isEqualTo("AAPL STOPPED, MSFT HALTED");
+
+        when(service.instruments()).thenReturn(List.of());
+        Message none = massCancelAll("M-3");
+        assertThat(none.getChar(quickfix.field.MassCancelResponse.FIELD)).as("no instrument: nothing to cancel").isEqualTo('7');
+        assertThat(none.getInt(quickfix.field.TotalAffectedOrders.FIELD)).isZero();
+        assertThat(none.isSetField(Text.FIELD)).isFalse();
+    }
 }

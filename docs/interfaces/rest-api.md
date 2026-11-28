@@ -132,8 +132,9 @@ events are not in it; if a released stop trades with this order, that fill is in
 ### `DELETE /api/v1/instruments/{symbol}/orders?side=BUY`
 
 Mass cancel (RK-006): cancels all the caller's open orders in the instrument, resting and parked stops, on the
-`side` given or on both without one. Role `MEMBER`; an `ADMIN` without `X-Member-Id` acts as the operator and
-cancels every member's orders. Accepted in every phase and while the member is suspended. `200 OK`:
+`side` given (`BUY` or `SELL`) or on both without one. Role `MEMBER`. An `ADMIN` without `X-Member-Id` acts as the
+operator and cancels every member's orders, and must then also pass `allMembers=true`; without it, or with it from a
+member, `400`. Accepted in every phase and while the member is suspended. `200 OK`:
 
 ```json
 {"symbol": "AAPL", "side": "BUY", "cancelledOrders": 2, "cancelledOrderIds": [1, 2], "commandSequence": 44,

@@ -66,10 +66,15 @@ all the session's member's open orders, resting and parked stops, on that side o
 | `1` | the instrument named in `55` |
 | `7` | every instrument |
 
-Each order cancelled is reported first, as an ExecutionReport `150=4` with `Text=MASS_CANCEL`. Then an
-OrderMassCancelReport (`35=r`) gives `531 MassCancelResponse` (the request type), `533 TotalAffectedOrders` and
-`37=NONE`. If an instrument refused the request (a halt, say) while others accepted it, `58 Text` lists the
-instruments not cancelled. A rejected request gets `531=0`, with `532 MassCancelRejectReason` when FIX 4.4 has a
+Each order cancelled that the session entered over FIX since the gateway started is reported first, as an
+ExecutionReport `150=4` with `Text=MASS_CANCEL`; orders entered over REST or before a restart are cancelled and
+counted but have no ExecutionReport (see Current limitations). Then an OrderMassCancelReport (`35=r`) gives
+`531 MassCancelResponse` (the request type), `533 TotalAffectedOrders`, `37=NONE` and `60 TransactTime`, the
+venue's time of the cancel. It goes to the session only, not to drop copies, which see each cancel. If an
+instrument refused the request (a halt, say) while others accepted it, `58 Text` lists it after
+`NOT_CANCELLED_IN`; one whose outcome is unknown (a failed journal write) is listed after `OUTCOME_UNKNOWN_IN`,
+and its orders may have been cancelled: check them with OrderStatusRequest. The request is rejected only when
+every instrument refused it. A rejected request gets `531=0`, with `532 MassCancelRejectReason` when FIX 4.4 has a
 value for the reason (`1` unknown security, `0` an unsupported request type) and the reason in `58 Text`
 (`UNKNOWN_INSTRUMENT`, `UNSUPPORTED_MASS_CANCEL_REQUEST_TYPE`, `INVALID_SIDE`, `DUPLICATE_CLORDID`). A mass cancel
 is accepted in every phase and while the member is suspended, and does not suspend it.

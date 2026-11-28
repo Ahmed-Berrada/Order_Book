@@ -45,6 +45,7 @@ import quickfix.Message;
 import quickfix.RejectLogon;
 import quickfix.Session;
 import quickfix.SessionID;
+import quickfix.UtcTimestampPrecision;
 import quickfix.SessionNotFound;
 import quickfix.UnsupportedMessageType;
 import quickfix.field.BusinessRejectReason;
@@ -214,39 +215,64 @@ final class FixApplication implements Application, EventListener {
             results.put(s, service.submit(s, new MassCancel(side), memberOf(session), null));
         }
         CompletableFuture.allOf(results.values().toArray(CompletableFuture[]::new)).whenComplete((ignored, f) -> {
-            long cancelled = 0;
-            List<String> refused = new ArrayList<>();
-            for (Map.Entry<String, CompletableFuture<EventBatch>> result : results.entrySet()) {
-                try {
-                    cancelled += ((MassCancelled) result.getValue().join().events().getFirst()).cancelledOrders();
-                } catch (CompletionException e) {
-                    Throwable cause = unwrap(e);
-                    refused.add(result.getKey() + " " + (cause instanceof RequestRefusedException r
-                            ? r.reason().name() : "OUTCOME_UNKNOWN"));
-                    if (!(cause instanceof RequestRefusedException)) {
-                        LOG.error("Outcome unknown for mass cancel {} {} on {}", session, clOrdId, result.getKey(), cause);
-                    }
-                }
+            try {
+                reportMassCancel(session, clOrdId, type, symbol, fixSide, results);
+            } catch (RuntimeException e) {
+                LOG.error("Could not report mass cancel {} {}", session, clOrdId, e);
             }
-            if (refused.size() == symbols.size()) {
-                rejectMassCancel(session, clOrdId, type, symbol, fixSide, null,
-                        String.join(", ", refused));
-                return;
-            }
-            OrderMassCancelReport report = massCancelReport(clOrdId, type, symbol, fixSide);
-            report.setChar(MassCancelResponse.FIELD, type);
-            report.setInt(TotalAffectedOrders.FIELD, Math.toIntExact(Math.min(Integer.MAX_VALUE, cancelled)));
-            if (!refused.isEmpty()) {
-                report.setString(Text.FIELD, "NOT_CANCELLED_IN " + String.join(", ", refused));
-            }
-            sender.send(report, session);
         });
     }
 
     /**
-     * @param reason a FIX 4.4 MassCancelRejectReason ({@code 0} not supported, {@code 1} unknown security), or
-     *               {@code null} when none fits: FIX 4.4 has no "other", so the reason is only in {@code Text}
+     * One OrderMassCancelReport for the instruments' outcomes. Rejected only if every instrument refused the command
+     * before journaling it: an instrument whose outcome is unknown may have cancelled (ADR-0006 §5).
      */
+    private void reportMassCancel(SessionID session, String clOrdId, char type, String symbol, Character fixSide,
+            Map<String, CompletableFuture<EventBatch>> results) {
+        long cancelled = 0;
+        long latestMicros = 0;
+        List<String> refused = new ArrayList<>();
+        List<String> unknown = new ArrayList<>();
+        for (Map.Entry<String, CompletableFuture<EventBatch>> result : results.entrySet()) {
+            try {
+                EventBatch batch = result.getValue().join();
+                cancelled += ((MassCancelled) batch.events().getFirst()).cancelledOrders();
+                latestMicros = Math.max(latestMicros, batch.timestampMicros());
+            } catch (CompletionException | java.util.concurrent.CancellationException e) {
+                Throwable cause = unwrap(e);
+                if (cause instanceof RequestRefusedException r) {
+                    refused.add(result.getKey() + " " + r.reason().name());
+                } else {
+                    unknown.add(result.getKey());
+                    LOG.error("Outcome unknown for mass cancel {} {} on {}", session, clOrdId, result.getKey(), cause);
+                }
+            }
+        }
+        if (!results.isEmpty() && refused.size() == results.size()) {
+            rejectMassCancel(session, clOrdId, type, symbol, fixSide, null, String.join(", ", refused));
+            return;
+        }
+        OrderMassCancelReport report = massCancelReport(clOrdId, type, symbol, fixSide);
+        if (latestMicros > 0) {
+            report.setUtcTimeStamp(TransactTime.FIELD, LocalDateTime.ofEpochSecond(
+                    Math.floorDiv(latestMicros, 1_000_000), (int) Math.floorMod(latestMicros, 1_000_000) * 1_000,
+                    ZoneOffset.UTC), UtcTimestampPrecision.MICROS);
+        }
+        report.setChar(MassCancelResponse.FIELD, type);
+        report.setInt(TotalAffectedOrders.FIELD, Math.toIntExact(Math.min(Integer.MAX_VALUE, cancelled)));
+        List<String> text = new ArrayList<>();
+        if (!refused.isEmpty()) {
+            text.add("NOT_CANCELLED_IN " + String.join(", ", refused));
+        }
+        if (!unknown.isEmpty()) {                          // may have cancelled: OrderStatusRequest each order
+            text.add("OUTCOME_UNKNOWN_IN " + String.join(", ", unknown));
+        }
+        if (!text.isEmpty()) {
+            report.setString(Text.FIELD, String.join("; ", text));
+        }
+        sender.send(report, session);
+    }
+
     private void rejectMassCancel(SessionID session, String clOrdId, char type, String symbol, Character side,
             Character reason, String text) {
         OrderMassCancelReport report = massCancelReport(clOrdId, type, symbol, side);

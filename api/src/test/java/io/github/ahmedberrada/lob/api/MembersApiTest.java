@@ -99,7 +99,16 @@ class MembersApiTest {
                 .isLenientlyEqualTo("{\"bids\":[{\"price\":\"12.00\",\"quantity\":1}],\"asks\":[]}");
         assertThat(mvc.delete().uri(AAPL + "/orders?side=SIDEWAYS").header("X-Member-Id", "2"))
                 .hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(mvc.delete().uri(AAPL + "/orders?side=").header("X-Member-Id", "2"))
+                .as("an empty side is not both").hasStatus(HttpStatus.BAD_REQUEST);
         assertThat(order("2", "BUY", "10.00", 1)).as("not suspended").hasStatus(HttpStatus.CREATED);
+
+        assertThat(mvc.delete().uri(AAPL + "/orders")).as("the operator must say it means everyone")
+                .hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(mvc.delete().uri(AAPL + "/orders?allMembers=true").header("X-Member-Id", "2"))
+                .hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(mvc.delete().uri(AAPL + "/orders?allMembers=true")).hasStatusOk().bodyJson()
+                .isLenientlyEqualTo("{\"cancelledOrders\":2}");
     }
 
     @Test

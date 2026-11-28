@@ -114,11 +114,15 @@ def excessive_cancellation(records: Sequence[OrderRecord], thresholds: Threshold
     """Members who cancel nearly every order they enter, per day and instrument."""
     entered: Dict[Tuple[str, str, int], int] = defaultdict(int)
     cancelled: Dict[Tuple[str, str, int], int] = defaultdict(int)
+    owners: Dict[Tuple[str, str], int] = {}                       # (instrument, order ID) -> member who entered it
     for r in records:
         key = (_date(r), r.instrument, r.member_id)
         if r.record == "NEW_ORDER":
             entered[key] += 1
-        elif r.record == "ORDER_CANCELLED" and r.detail in MEMBER_CANCELS:
+            if r.order_id:
+                owners[(r.instrument, r.order_id)] = r.member_id
+        elif (r.record == "ORDER_CANCELLED" and r.detail in MEMBER_CANCELS
+              and owners.get((r.instrument, r.order_id)) == r.member_id):    # not the operator's mass cancel
             cancelled[key] += 1
     alerts = []
     for key in sorted(entered):

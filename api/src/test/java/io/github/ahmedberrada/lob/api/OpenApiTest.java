@@ -39,6 +39,8 @@ class OpenApiTest {
                 "/api/v1/instruments/{symbol}/orders/{orderId}");
         document.extractingPath("$.paths['/api/v1/instruments/{symbol}/orders/{orderId}']").asMap()
                 .containsOnlyKeys("get", "put", "delete");
+        document.extractingPath("$.paths['/api/v1/instruments/{symbol}/orders']").asMap()
+                .containsOnlyKeys("post", "delete");                            // delete: mass cancel (RK-006)
         document.extractingPath("$.components.schemas.OrderRequest.required").asArray()
                 .containsExactlyInAnyOrder("side", "type", "quantity");
         document.extractingPath("$.components.schemas.OrderRequest.properties.timeInForce.enum").asArray()

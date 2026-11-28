@@ -194,6 +194,11 @@ Any change to these layouts or codes increments the format version. A reader ref
 does not know, and versions older than the oldest it reads: a version that only adds codes is read by the next
 one, so journals written before an upgrade recover after it.
 
+A file's header gives the version it was created with. A venue upgraded from version 8 keeps appending to its
+version 8 files, now with version 9 records, and its reader decodes every record with the version 9 codes. So
+once a version 9 code is written (a mass cancel), the venue cannot go back to a version 8 binary: that reader
+accepts the header and stops at the first unknown code. Take a backup of the journals before upgrading.
+
 | Version | Change |
 |---|---|
 | 1 | Limit, market and cancel commands (phase 2) |

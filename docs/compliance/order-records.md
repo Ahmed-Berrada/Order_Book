@@ -25,8 +25,8 @@ command journal that does not match the event journal, `2` for bad usage.
 | `command_sequence`, `event_sequence` | Positions in the command and event journals: gap-free, so a missing record is detectable |
 | `member_id` | The member whose command produced the record; for a trade, the taker's member; for a member event, that member |
 | `order_id` | The venue's order identifier, unique per instrument |
-| `record` | `NEW_ORDER`, `NEW_ORDER_REJECTED`, `ORDER_RESTED`, `ORDER_REPLACED`, `REPLACE_REJECTED`, `ORDER_CANCELLED` (with the reason), `CANCEL_REJECTED`, `STOP_PARKED`, `STOP_TRIGGERED`, `ICEBERG_REPLENISHED`, `TRADE`, and venue events: `PHASE_CHANGED`, `PHASE_CHANGE_REJECTED`, `AUCTION_PRICE`, `VOLATILITY_INTERRUPTION`, `MEMBER_LIMITS_CHANGED`, `MEMBER_SUSPENDED`, `MEMBER_RESUMED`, `MEMBER_COMMAND_REJECTED` |
-| `side` | `BUY` or `SELL`; for a trade, the aggressor's side |
+| `record` | `NEW_ORDER`, `NEW_ORDER_REJECTED`, `ORDER_RESTED`, `ORDER_REPLACED`, `REPLACE_REJECTED`, `ORDER_CANCELLED` (with the reason), `CANCEL_REJECTED`, `STOP_PARKED`, `STOP_TRIGGERED`, `ICEBERG_REPLENISHED`, `TRADE`, and venue events: `PHASE_CHANGED`, `PHASE_CHANGE_REJECTED`, `AUCTION_PRICE`, `VOLATILITY_INTERRUPTION`, `MEMBER_LIMITS_CHANGED`, `MEMBER_SUSPENDED`, `MEMBER_RESUMED`, `MEMBER_COMMAND_REJECTED`, `MASS_CANCELLED` (with the number of orders cancelled as the quantity; the cancels follow as `ORDER_CANCELLED` with reason `MASS_CANCEL`) |
+| `side` | `BUY` or `SELL`; for a trade, the aggressor's side; `BOTH` for a mass cancel of both sides |
 | `order_type`, `time_in_force` | `LIMIT`, `MARKET`, `STOP`, `STOP_LIMIT`; `GTC`, `IOC`, `FOK`, `DAY` (on `NEW_ORDER`) |
 | `price_ticks`, `quantity` | Price in ticks of the instrument and quantity in lots, as journaled; the tick size is in the instrument's configuration |
 | `counterparty_order_id`, `counterparty_member_id` | On a `TRADE`, the resting order and its member |
