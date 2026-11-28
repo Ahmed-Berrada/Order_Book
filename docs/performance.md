@@ -91,6 +91,46 @@ device under both policies.
 
 Reproduce: `java -cp engine-bench/target/benchmarks.jar io.github.ahmedberrada.lob.bench.GroupCommitRun 1000 1,4,16,64`.
 
+### The whole venue over REST (end-to-end load test)
+
+`LoadRun`: an open-loop client against a running venue (`java -jar api/target/api-*.jar`, `fsync: GROUP`, one
+instrument), sending at a fixed rate whatever the answers: 60% resting limit orders, 30% cancels of orders it
+left resting, 10% market orders. Latency runs from the moment each request was due, so a stall delays every request
+scheduled behind it and is counted (no coordinated omission). Requests over 30 s count as failures; when more than
+twice the rate is in flight, new requests are dropped and counted. The client and the venue share the same 4 vCPU
+container, so the client takes CPU from the venue: these are lower bounds. 20 s per rate after a warm-up.
+
+Without authentication (`dev` profile):
+
+| Target /s | Achieved /s | p50 | p99 | p99.9 | max | Failures | Dropped |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 500 | 500 | 1.9 ms | 27.8 ms | 51.9 ms | 63.2 ms | 0 | 0 |
+| 1,000 | 1,000 | 1.4 ms | 20.7 ms | 66.0 ms | 83.6 ms | 0 | 0 |
+| 2,000 | 2,000 | 1.6 ms | 23.5 ms | 46.7 ms | 64.0 ms | 0 | 0 |
+| 3,000 | 3,000 | 2.4 ms | 56.5 ms | 80.9 ms | 105.6 ms | 0 | 0 |
+| 5,000 | 3,706 | 2.2 s | 5.7 s | 30.0 s | 30.1 s | 10,557 | 25,887 |
+
+With HTTP Basic and one user whose password is a `{bcrypt}` hash at the default cost (10), as `HashPassword` makes:
+
+| Target /s | Achieved /s | p50 | p99 | max | Answers |
+|---:|---:|---:|---:|---:|---|
+| 50 | 50 | 187 ms | 2.0 s | 2.2 s | 853 served, 142 × `429 AUTHENTICATION_BUSY` |
+| 200 | 165 | 6.1 s | 10.0 s | 11.5 s | 1,089 served, 2,220 × `429`, 691 dropped |
+
+- **The engine is not the limit.** At saturation the instrument's thread spent 24 µs a command
+  (`lob_command_duration_seconds`), and the journal flushed 2.5 commands at a time. The limit, between 3,000 and
+  5,000 requests a second here, is HTTP handling on 4 vCPUs shared with the client.
+- **With authentication, bcrypt is the limit:** HTTP Basic checks the secret on every request, about 70 to 100 ms
+  of CPU at cost 10, and at most five checks run at once for one user and address (AC-009). One REST user therefore
+  gets about 50 requests a second. FIX checks the password once per session and is not affected. A cache of
+  verified credentials would lift this; until then, REST is for the operator and low-rate members, FIX for order
+  flow.
+- The p99 at moderate rates (20 to 30 ms) is the JIT and the garbage collector on a shared machine, and the flush:
+  the server's own `lob_request_seconds` histogram shows the same shape.
+
+Reproduce: start a venue, then
+`java -cp engine-bench/target/benchmarks.jar io.github.ahmedberrada.lob.bench.LoadRun http://127.0.0.1:8080 2000 20 AAPL [user:password]`.
+
 ## Reading the numbers
 
 - **Matching is not the bottleneck.** One thread matches over two million commands a second with a
@@ -103,15 +143,16 @@ Reproduce: `java -cp engine-bench/target/benchmarks.jar io.github.ahmedberrada.l
   under load; the other levers are faster storage and replicating to a standby in memory (ADR-0018), not a faster
   matching loop.
 - **Allocation.** Each command allocates its event list and events; the numbers above include the garbage
-  collector's work. Whether that matters is a question for the end-to-end load test, not for the engine alone.
+  collector's work. End to end (above), HTTP handling dominates it.
 
 ## Not done, and why
 
 | Candidate | Why not yet |
 |---|---|
-| Primitive `long` maps for orders by ID | The map shows up in no profile above the journal; with group commit, re-profile under the load test |
+| Primitive `long` maps for orders by ID | The map shows up in no profile above the journal, and end to end HTTP handling dominates |
 | Zero-allocation events | Changes every consumer; the gain is invisible next to the `fsync` |
 | Disruptor / Aeron | The engine is not the limit; see ADR-0016 §3 |
 | GC comparison (G1, ZGC, Shenandoah) | Needs the end-to-end load test and a machine with stable cores |
 | A speed gate in CI | Shared runners vary more than the regressions worth catching |
-| End-to-end load test through REST and FIX | Phase 9 has the deployment it should run against |
+| A load test through FIX | REST is the front end the venue's limits showed up in; a FIX client adds a session per connection and is the next step |
+| A cache of verified credentials for REST | Lifts the bcrypt limit above; next change |
