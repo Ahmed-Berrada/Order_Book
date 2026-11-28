@@ -44,6 +44,9 @@ public final class JournaledEngine implements AutoCloseable {
     private boolean failed;
     private IOException failure;
     private boolean closed;
+    private boolean unsynced;
+    private volatile long flushes;          // written by the engine's thread only; read by metrics
+    private final List<byte[]> unflushedBatches = new ArrayList<>();   // GROUP: event batches awaiting the flush
     private final DirectoryLock lock;
 
     private JournaledEngine(MatchingEngine engine, JournalOptions options, TimeSource timeSource,
@@ -195,6 +198,9 @@ public final class JournaledEngine implements AutoCloseable {
             commands.append(Codec.encodeEntry(new JournalEntry(sequence, timestamp, command, memberId)));
             if (options.fsync() == FsyncPolicy.EVERY_COMMAND) {
                 commands.force();
+                flushes++;
+            } else if (options.fsync() == FsyncPolicy.GROUP) {
+                unsynced = true;                // flushed by sync(), before any acknowledgement (ADR-0020)
             }
         } catch (IOException e) {
             throw stop("command journal write failed", e);
@@ -203,8 +209,22 @@ public final class JournaledEngine implements AutoCloseable {
         lastTimestampMicros = timestamp;
 
         EventBatch batch = new EventBatch(sequence, timestamp, engine.process(command, memberId), memberId);
+        if (options.fsync() == FsyncPolicy.GROUP) {
+            // Written after the flush: on the device the events never get ahead of their commands (ADR-0020 §3).
+            unflushedBatches.add(Codec.encodeBatch(batch));
+        } else {
+            record(Codec.encodeBatch(batch));
+        }
+        return batch;
+    }
+
+    /** Appends one event batch, and a snapshot when one is due; a failure stops this instance (OE-006). */
+    private void record(byte[] encodedBatch) {
+        if (failed) {
+            return;
+        }
         try {
-            events.append(Codec.encodeBatch(batch));
+            events.append(encodedBatch);
             if (options.snapshotInterval() > 0 && ++commandsSinceSnapshot >= options.snapshotInterval()) {
                 snapshots.write(lastCommandSequence, engine.snapshot());
                 commandsSinceSnapshot = 0;
@@ -214,7 +234,50 @@ public final class JournaledEngine implements AutoCloseable {
             failed = true;
             failure = e;
         }
-        return batch;
+    }
+
+    /**
+     * Flushes the commands journaled since the last flush to the storage device, if there are any. With
+     * {@link FsyncPolicy#GROUP}, the caller calls it once after processing the commands waiting together and
+     * acknowledges none of them before it returns (RS-001, ADR-0020); with the other policies there is nothing to
+     * flush. Under {@code GROUP} it then writes the commands' event batches (and a snapshot when one is due), so the
+     * event journal is never ahead of the command journal on the device; a failure there stops this instance but
+     * leaves the flushed commands acknowledged. It works even after a failed event write has stopped this
+     * instance: those commands are journaled and owed their flush.
+     *
+     * @throws UncheckedIOException  if the flush fails; whether the unflushed commands are on the device is then
+     *                               unknown, and the instance stops
+     * @throws IllegalStateException if the instance is closed
+     */
+    public void sync() {
+        if (closed) {
+            throw new IllegalStateException("journaled engine is closed");
+        }
+        if (!unsynced) {
+            return;
+        }
+        try {
+            commands.force();
+        } catch (IOException e) {
+            unflushedBatches.clear();               // their commands' outcome is unknown: record nothing of them
+            throw stop("command journal flush failed", e);
+        }
+        flushes++;
+        unsynced = false;
+        for (byte[] batch : unflushedBatches) {
+            record(batch);                          // a failure here stops the instance; the commands stay flushed
+        }
+        unflushedBatches.clear();
+    }
+
+    /** Whether commands must be flushed with {@link #sync()} before they are acknowledged. */
+    public boolean groupCommit() {
+        return options.fsync() == FsyncPolicy.GROUP;
+    }
+
+    /** Device flushes of the command journal so far, for tests and metrics; safe to read from any thread. */
+    public long flushes() {
+        return flushes;
     }
 
     /** Writes a snapshot of the current state now (RS-005). */
