@@ -28,9 +28,9 @@ Members may resend it.
 
 **OE-006: Halt.** If an instrument's journal cannot be written, the instrument stops accepting
 commands and refuses them with `HALTED` until the venue is restarted and has recovered (RS-002). Its
-book can still be read, except after a failed flush of a group of commands (RS-001, `fsync: GROUP`): the
-instrument's memory then holds commands whose outcome is unknown, so reads are refused with `HALTED` too
-until the restart. Other instruments are not affected.
+book can still be read, except after a failed write or flush of the command journal (RS-001) or a failed
+replication to the standby (RS-015): the instrument's memory may then disagree with its journal about commands
+whose outcome is unknown, so reads are refused with `HALTED` too until the restart. Other instruments are not affected.
 
 **OE-007: Orderly shutdown.** When the venue shuts down, the commands already queued are processed and
 journaled before the journals are closed. Commands arriving after the shutdown has started are refused

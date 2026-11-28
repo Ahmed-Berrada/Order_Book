@@ -128,6 +128,7 @@ final class SymbolWorker implements AutoCloseable {
                 }
                 return batch;
             } catch (UncheckedIOException e) {
+                stateUnknown = true;            // journaled perhaps, or not replicated: memory may not be the venue
                 halt(e);
                 throw e;
             }

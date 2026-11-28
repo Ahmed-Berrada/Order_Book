@@ -185,7 +185,8 @@ class SymbolWorkerTest {
         assertThatThrownBy(unknown::join).cause().isInstanceOf(UncheckedIOException.class);
         assertThat(worker.isHalted()).isTrue();
         assertRefused(worker.submit(buy(100, 1)), Reason.HALTED);
-        assertThat(worker.book(5).join().bids()).containsExactly(new OrderBook.Level(99, 1, 1));
+        // The journal may hold the command the memory lacks: the book is not the venue's until recovery.
+        assertRefused(worker.book(5), Reason.HALTED);
         assertHaltLoggedOnce();
         assertThat(log.get(0).getThrown()).isInstanceOf(UncheckedIOException.class);    // with its cause
     }

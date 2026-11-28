@@ -12,7 +12,7 @@ The goal is engineering rigour rather than feature count. The engine is **determ
 backed by **invariant tests**, and **measured before it is optimised**.
 
 > **Status: phases 0 to 4 and 10 complete; phases 5 to 9 in progress** (sub-phases 5a-5c, 6a-6c, 7a-7b, 8a-8d and 9a-9c
-> shipped, replication and failover not yet built; see the [Roadmap](#roadmap)).
+> shipped, synchronous replication with manual failover; see the [Roadmap](#roadmap)).
 > **Performance:** [`docs/performance.md`](docs/performance.md) publishes the JMH and HdrHistogram results, an
 > open-loop (coordinated-omission-aware) end-to-end load test over REST, the hardware, and JMH error bars.
 >

@@ -102,18 +102,23 @@ RS-013) is copied byte for byte to the standby before any command is acknowledge
 (each command with `EVERY_COMMAND` or `OS`, each group with `GROUP`) the primary sends the bytes the standby lacks and
 waits until the standby has them on its device. An acknowledged command is therefore on two machines: losing either
 loses no acknowledged command. A standby that connects or reconnects is first checked to hold a prefix of the
-primary's files, then brought up to date; one that holds anything else is refused. The link is authenticated with a
-secret both sides share. The standby stores the bytes and nothing else; promoted, its directory is opened as any
+primary's files, then brought up to date; one that holds anything else is refused. That happens when the instrument
+opens, under its own deadline (10 minutes), before any command. Both ends prove a secret they share, and every
+message after that is authenticated, so nothing else can confirm a command or write to the standby. The standby stores the bytes and nothing else; promoted, its directory is opened as any
 venue's, and recovery rebuilds the event journal, snapshots and book from the commands (RS-002, RS-007).
 
 **RS-015: No standby, no acknowledgement.** If the standby cannot be reached, refuses, or does not confirm within the
 timeout (2 s by default), the commands waiting have an unknown outcome (they are on the primary, perhaps not on the
-standby) and the instrument halts, as on a failed flush (OE-006); the venue never goes on acknowledging with one copy
-by itself. Running without a standby is a restart without one configured.
+standby) and the instrument halts, as on a failed flush (OE-006), its book no longer readable; the venue never goes on
+acknowledging with one copy by itself. An instrument whose standby cannot be brought up to date does not open.
+Running without a standby is a restart without one configured.
 
 **RS-016: Promotion and fencing.** Each instrument's directory holds a term, the number of its latest promotion (1
-until the first). Promoting a standby raises the term of every instrument it holds; it is done by an operator, with
-the standby stopped, and the promoted standby is then started as the venue on the same directory. A standby refuses a
-primary whose term is lower than its own, so a deposed primary cannot have its commands confirmed anywhere, and
-therefore acknowledges none (RS-015). Who is primary is the operator's decision: nothing promotes automatically.
+until the first), and the standby's root holds the highest term it has seen. Promoting a standby raises every
+instrument it holds, and its root, to one term above any it has seen, all of them or none; it is done by an operator,
+with the standby stopped, and the promoted standby is then started as the venue on the same directory. A standby
+refuses a primary whose term is lower than the instrument's or the root's, even for an instrument it never held. A
+new standby for the promoted venue is seeded with its term before it is reachable. An instrument the venue adds
+later takes the venue's term from its data directory. A standby that has seen a promotion, or was seeded with it,
+therefore confirms nothing for a deposed primary, which acknowledges none (RS-015). Who is primary is the operator's decision: nothing promotes automatically.
 
