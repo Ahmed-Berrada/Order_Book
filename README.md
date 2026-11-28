@@ -6,7 +6,7 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 
 A **limit order book (LOB) matching engine** written in Java 21: price-time priority matching,
-a REST API on Spring Boot, and JMH benchmarks planned for phase 6.
+a REST API on Spring Boot, and [published benchmarks](docs/performance.md).
 
 The goal is engineering rigour rather than feature count. The engine is **deterministic**,
 backed by **invariant tests**, and **measured before it is optimised**.
@@ -80,7 +80,7 @@ flowchart LR
         b2[(OrderBook MSFT)]
     end
 
-    bench[[engine-bench — JMH<br/>phase 6]]
+    bench[[engine-bench — JMH<br/>and HdrHistogram]]
     tests[[JUnit 5 + jqwik]]
 
     client -->|JSON| ctrl --> svc
@@ -107,7 +107,7 @@ flowchart LR
 | `fix-gateway` | FIX 4.4 acceptor: orders, cancels, status, execution reports to both sides of a trade | `engine-service`, QuickFIX/J |
 | `market-data` | Level-2 book images built from events; snapshots, incremental updates, slow-consumer protection; binary ITCH-style feed with retransmission and a reference consumer | `engine-service`, JDK only |
 | `api` | REST adapter, OpenAPI, WebSocket market data, venue configuration; hosts the FIX gateway | `engine-service`, `fix-gateway`, `market-data`, Spring Boot |
-| `engine-bench` *(phase 6)* | JMH micro-benchmarks | `engine-core`, JMH |
+| `engine-bench` | JMH micro-benchmarks, latency and soak runs | `engine-core`, `engine-journal`, JMH, HdrHistogram |
 
 Why the core is isolated:
 - **Benchmarks measure the algorithm**, not Tomcat or Jackson.
@@ -316,8 +316,8 @@ The matching behaviour itself is specified in the [rulebook](docs/rulebook/conti
 |---|---|---|
 | Price representation | `long` ticks | `double` causes rounding errors. `BigDecimal` allocates on the hot path. Conversion happens in the API layer. |
 | Book sides | `TreeMap<Long, PriceLevel>` | Sorted best price in O(log n). Simple and correct first. |
-| Time priority | `ArrayDeque<Order>` per price level | FIFO by construction. |
-| Cancel | O(n) inside a price level (v1) | Deliberate. It will be measured with JMH and then optimised to O(1) in phase 6. |
+| Time priority | An intrusive doubly linked list of orders per price level | FIFO by construction. |
+| Cancel | O(1): the order unlinks itself from its level | Measured with JMH: a cancel from a 10,000-order level went from about 2 µs to 0.15 µs ([ADR-0016](docs/adr/0016-performance-and-the-queue.md)). |
 | Order IDs | Assigned by the engine, per instrument | Deterministic replay ([ADR-0002](docs/adr/0002-core-engine-model.md)). |
 | Ordering and time | Gap-free sequence numbers; one µs UTC timestamp per command, taken at ingress and journaled | Determinism and reproducible replay ([ADR-0003](docs/adr/0003-journal-and-recovery.md)). |
 | Durability | Write-ahead journal per instrument, CRC-framed, fsync per command by default | No acknowledged order is lost; journals are never rewritten (record keeping). |
@@ -528,7 +528,7 @@ Every alert links to the [runbook](docs/operations/runbook.md); metrics are list
 | Slow consumers | Stuck sink, mocked WebSocket session | A client that stops reading is disconnected without slowing order entry |
 | Binary feed | Real UDP and TCP sockets | A consumer losing one packet in five rebuilds every book by retransmission alone; a refused retransmission falls back to a snapshot; updates are never split; every sequence number exists at the source |
 | Drop copy | FIX sessions over sockets | Every ExecutionReport of every member is copied and marked; drop copy sessions cannot trade |
-| Performance *(phase 6)* | JMH | Throughput and p50 / p99 / p99.9 latency, with published methodology |
+| Performance | JMH, HdrHistogram | Throughput and p50 / p99 / p99.9 latency, with published methodology ([results](docs/performance.md)) |
 
 ---|---|---|
 | Core scenarios | JUnit 5 + AssertJ | Partial fills, multi-level sweeps, FIFO at equal price, cancels, rejections |
@@ -566,8 +566,8 @@ in C++17 (`std::map` price levels, intrusive FIFO lists, a pool allocator). It a
 can match, and its benchmark is documented there: a median of 149 to 163 ns per operation depending on the machine.
 
 Order_Book is the same idea rebuilt as a venue core: determinism, durability, interfaces and rules first, then speed.
-lob-engine is archived. Its latency figures are for the C++ code and say nothing about this Java engine, which will
-publish its own numbers, with methodology, in phase 6.
+lob-engine is archived. Its latency figures are for the C++ code and say nothing about this Java engine, which
+publishes its own numbers, with methodology, in [performance](docs/performance.md).
 
 Write-up of both: [ahmedberrada.com/work/order-book](https://www.ahmedberrada.com/work/order-book).
 
