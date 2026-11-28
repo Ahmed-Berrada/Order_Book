@@ -53,6 +53,13 @@ names are counted without regard to case, as they are looked up; an IPv6 address
 The lockout is per name and address, so a caller cannot lock a member out from another address. This holds with security enabled; the defaults are 5
 failures and 1 minute, and `maxFailures` `0` switches it off. Lockouts are kept in memory and logged.
 
+**AC-012: Verified credentials are remembered briefly.** HTTP Basic sends the credentials with every request,
+and bcrypt makes each check cost tens of milliseconds by design. Once bcrypt has accepted a user's credentials,
+the same credentials are accepted without bcrypt for `credentialCache` (10 minutes by default; `0` checks every
+request). The venue keeps only an HMAC-SHA256 of the password under a random key that exists in its memory alone,
+compares it in constant time, and remembers only successes, at most one per configured user. A wrong password is
+always checked by bcrypt and counted (AC-009), and a locked-out name is refused before the cache is consulted.
+
 ## Browsers
 
 **AC-008: No writes from another site.** A browser that has answered a Basic challenge resends the credentials
