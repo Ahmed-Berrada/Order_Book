@@ -137,7 +137,7 @@ class SecurityConfigurationTest {
                 new LobProperties.FixProperties(true, "127.0.0.1", 9999, "LOB", List.of("MEMBER1"), List.of("RISK"),
                         null, SelfTradeMode.CANCEL_NEWEST, passwords, null),
                 null, null, List.of(), new LobProperties.SecurityProperties(secure, List.of(), 5,
-                        java.time.Duration.ofMinutes(1), false), null);
+                        java.time.Duration.ofMinutes(1), false, java.time.Duration.ofMinutes(10)), null);
     }
 
     @Test

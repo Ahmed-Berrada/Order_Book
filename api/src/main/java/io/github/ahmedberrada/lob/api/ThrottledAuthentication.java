@@ -9,9 +9,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import java.time.Duration;
 import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.authentication.WebAuthenticationDetails;
 import org.springframework.security.web.authentication.www.BasicAuthenticationEntryPoint;
@@ -66,10 +69,16 @@ final class ThrottledAuthentication implements AuthenticationProvider {
 
     private final AuthenticationProvider secrets;
     private final LoginThrottle logins;
+    private final VerifiedCredentials verified;
 
     ThrottledAuthentication(AuthenticationProvider secrets, LoginThrottle logins) {
+        this(secrets, logins, new VerifiedCredentials(Duration.ZERO, System::nanoTime));
+    }
+
+    ThrottledAuthentication(AuthenticationProvider secrets, LoginThrottle logins, VerifiedCredentials verified) {
         this.secrets = secrets;
         this.logins = logins;
+        this.verified = verified;
     }
 
     @Override
@@ -84,10 +93,28 @@ final class ThrottledAuthentication implements AuthenticationProvider {
                     refusal.get().busy() ? "too many at once" : "locked out");
             throw new LockedOutException(refusal.get());
         }
+        String password = authentication.getCredentials() instanceof String p ? p : null;
+        // AC-012: bcrypt accepted these very credentials. While failures are counted for the name from this address,
+        // bcrypt checks again, and its success clears them (AC-009): a hit, cheap and frequent, must not reset a
+        // guesser's count behind an address it shares with the member faster than bcrypt would.
+        VerifiedCredentials.Verified known = logins.hasFailures(LoginThrottle.Channel.REST, name, address)
+                ? null : verified.lookup(name, password);
+        if (known != null) {
+            logins.release(LoginThrottle.Channel.REST, name, address);
+            UsernamePasswordAuthenticationToken result =
+                    UsernamePasswordAuthenticationToken.authenticated(known.principal(), null, known.authorities());
+            result.setDetails(authentication.getDetails());
+            return result;
+        }
         boolean succeeded = false;
         try {
             Authentication result = secrets.authenticate(authentication);
             succeeded = result != null;
+            if (succeeded) {
+                verified.remember(name, password, new VerifiedCredentials.Verified(
+                        result.getPrincipal() instanceof UserDetails user ? user.getUsername() : result.getName(),
+                        java.util.List.copyOf(result.getAuthorities())));
+            }
             return result;
         } finally {
             logins.end(LoginThrottle.Channel.REST, name, address, succeeded);

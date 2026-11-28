@@ -81,7 +81,7 @@ class TransportSecurityTest {
         org.springframework.mock.env.MockEnvironment environment = new org.springframework.mock.env.MockEnvironment()
                 .withProperty("server.address", "127.0.0.1");
         LobProperties.SecurityProperties security = new LobProperties.SecurityProperties(true, java.util.List.of(), 5,
-                java.time.Duration.ofMinutes(1), false);
+                java.time.Duration.ofMinutes(1), false, java.time.Duration.ofMinutes(10));
         org.assertj.core.api.Assertions.assertThatIllegalStateException()
                 .isThrownBy(() -> TransportSecurity.check(properties(open, security), environment))
                 .withMessageContaining("FIX on 0.0.0.0 (lob.fix.tls)");

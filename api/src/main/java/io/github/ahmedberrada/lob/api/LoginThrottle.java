@@ -170,6 +170,27 @@ final class LoginThrottle {
         }
     }
 
+    /** Whether failures are counted for a name from an address, which a success would have to clear (AC-009). */
+    synchronized boolean hasFailures(Channel channel, String name, String address) {
+        Failures f = maxFailures == 0 ? null : failures.get(key(channel, name, address));
+        return f != null && f.count > 0;
+    }
+
+    /**
+     * Ends an attempt that {@link #begin} let go on without a verdict of bcrypt (AC-012: remembered credentials): it
+     * frees its place, and neither counts a failure nor clears those counted.
+     */
+    synchronized void release(Channel channel, String name, String address) {
+        if (maxFailures == 0) {
+            return;
+        }
+        notifyAll();
+        Failures f = failures.get(key(channel, name, address));
+        if (f != null) {
+            f.inFlight = Math.max(0, f.inFlight - 1);
+        }
+    }
+
     /** Names and addresses tracked now (for tests). */
     synchronized int tracked() {
         return failures.size();

@@ -110,21 +110,29 @@ Without authentication (`dev` profile):
 | 3,000 | 3,000 | 2.4 ms | 56.5 ms | 80.9 ms | 105.6 ms | 0 | 0 |
 | 5,000 | 3,706 | 2.2 s | 5.7 s | 30.0 s | 30.1 s | 10,557 | 25,887 |
 
-With HTTP Basic and one user whose password is a `{bcrypt}` hash at the default cost (10), as `HashPassword` makes:
+With HTTP Basic and one user whose password is a `{bcrypt}` hash at the default cost (10), as `HashPassword` makes,
+first checking every request with bcrypt (`lob.security.credential-cache=0`, as before AC-012):
 
 | Target /s | Achieved /s | p50 | p99 | max | Answers |
 |---:|---:|---:|---:|---:|---|
 | 50 | 50 | 187 ms | 2.0 s | 2.2 s | 853 served, 142 × `429 AUTHENTICATION_BUSY` |
 | 200 | 165 | 6.1 s | 10.0 s | 11.5 s | 1,089 served, 2,220 × `429`, 691 dropped |
 
+then remembering verified credentials (AC-012, the default):
+
+| Target /s | Achieved /s | p50 | p99 | p99.9 | max | Failures | Dropped |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 200 | 200 | 2.5 ms | 10.2 ms | 60.9 ms | 71.9 ms | 0 | 0 |
+| 1,000 | 1,000 | 1.6 ms | 15.8 ms | 29.9 ms | 41.5 ms | 0 | 0 |
+| 2,000 | 2,000 | 2.0 ms | 34.9 ms | 58.0 ms | 73.6 ms | 0 | 0 |
+
 - **The engine is not the limit.** At saturation the instrument's thread spent 24 µs a command
   (`lob_command_duration_seconds`), and the journal flushed 2.5 commands at a time. The limit, between 3,000 and
   5,000 requests a second here, is HTTP handling on 4 vCPUs shared with the client.
-- **With authentication, bcrypt is the limit:** HTTP Basic checks the secret on every request, about 70 to 100 ms
-  of CPU at cost 10, and at most five checks run at once for one user and address (AC-009). One REST user therefore
-  gets about 50 requests a second. FIX checks the password once per session and is not affected. A cache of
-  verified credentials would lift this; until then, REST is for the operator and low-rate members, FIX for order
-  flow.
+- **Checking every request with bcrypt limits a user to about 50 a second:** HTTP Basic sends the secret with
+  every request, bcrypt takes 70 to 100 ms of CPU at cost 10, and at most five checks run at once for one user and
+  address (AC-009). Remembering verified credentials (AC-012) removes that limit: bcrypt runs once per user, and an
+  authenticated user goes as fast as an unauthenticated one. FIX checks the password once per session either way.
 - The p99 at moderate rates (20 to 30 ms) is the JIT and the garbage collector on a shared machine, and the flush:
   the server's own `lob_request_seconds` histogram shows the same shape.
 
@@ -155,4 +163,3 @@ Reproduce: start a venue, then
 | GC comparison (G1, ZGC, Shenandoah) | Needs the end-to-end load test and a machine with stable cores |
 | A speed gate in CI | Shared runners vary more than the regressions worth catching |
 | A load test through FIX | REST is the front end the venue's limits showed up in; a FIX client adds a session per connection and is the next step |
-| A cache of verified credentials for REST | Lifts the bcrypt limit above; next change |
