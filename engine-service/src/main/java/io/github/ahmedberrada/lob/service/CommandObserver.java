@@ -27,4 +27,8 @@ public interface CommandObserver {
      */
     default void flushed(String symbol, int commands, long nanos) {
     }
+
+    /** A member's command was refused by a throttle before it was queued (OE-008, OE-009). Called on the submitting thread. */
+    default void throttled(String symbol, long memberId, RequestRefusedException.Reason reason) {
+    }
 }

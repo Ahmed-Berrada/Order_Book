@@ -38,6 +38,8 @@ class LobPropertiesTest {
             assertThat(properties.queueCapacity()).isEqualTo(10_000);
             assertThat(properties.fsync()).isEqualTo(FsyncPolicy.GROUP);     // ADR-0020 §5
             assertThat(properties.snapshotInterval()).isEqualTo(10_000);
+            assertThat(properties.throttle().limits())                          // OE-008, OE-009
+                    .isEqualTo(new io.github.ahmedberrada.lob.service.IngressLimits(1_000, 1_000, 1_000));
             assertThat(properties.fix().enabled()).isFalse();
             assertThat(properties.fix().port()).isEqualTo(9878);
             assertThat(properties.fix().bindAddress()).isEqualTo("127.0.0.1");
@@ -68,6 +70,12 @@ class LobPropertiesTest {
                     assertThat(instrument.volatilityBandBps()).isEqualTo(300);
                 });
         runner.withPropertyValues(with("lob.data-directory=target/test-venue-regime", "lob.instruments[0].volatility-band-bps=-1"))
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void refusesANegativeThrottle() {
+        runner.withPropertyValues(with("lob.throttle.messages-per-second=-1"))
                 .run(context -> assertThat(context).hasFailed());
     }
 

@@ -36,7 +36,19 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
                     e.symbol() + " stopped after a journal failure", e.reason().name());
             case STOPPED -> problem(HttpStatus.SERVICE_UNAVAILABLE, "Venue stopping",
                     "The venue is shutting down", e.reason().name());
+            case THROTTLED -> tooMany(e, "Message rate exceeded",
+                    "Too many orders and replaces a second for this member; retry after the delay");
+            case ORDER_TO_TRADE_LIMIT -> tooMany(e, "Order-to-trade ratio exceeded",
+                    "Too many messages per trade on " + e.symbol() + " today; cancels are still accepted");
         };
+    }
+
+    /** {@code 429} with {@code Retry-After} in whole seconds, at least one (OE-008, OE-009). */
+    private static ResponseEntity<ProblemDetail> tooMany(RequestRefusedException e, String title, String detail) {
+        long seconds = Math.max(1, e.retryAfter().map(d -> d.plusNanos(999_999_999).toSeconds()).orElse(1L));
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(seconds))
+                .body(problemDetail(HttpStatus.TOO_MANY_REQUESTS, title, detail, e.reason().name()));
     }
 
     @ExceptionHandler
