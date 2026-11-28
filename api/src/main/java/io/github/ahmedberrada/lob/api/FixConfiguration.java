@@ -25,12 +25,37 @@ import quickfix.ConfigError;
 class FixConfiguration {
 
     @Bean(destroyMethod = "close")
-    FixGateway fixGateway(MatchingService service, LobProperties properties) throws ConfigError {
+    FixGateway fixGateway(MatchingService service, LobProperties properties, LoginThrottle logins) throws ConfigError {
         LobProperties.FixProperties fix = properties.fix();
         Path store = fix.storeDirectory() != null ? fix.storeDirectory() : properties.dataDirectory().resolve("fix");
         FixGatewayConfig config = new FixGatewayConfig(fix.bindAddress(), fix.port(), fix.senderCompId(),
                 fix.members(), fix.dropCopySessions(), store, fix.selfTradeMode(), properties.fixMemberIds());
-        return FixGateway.start(service, config, authenticator(properties, config));
+        return FixGateway.start(service, config, throttled(authenticator(properties, config), logins));
+    }
+
+    /** Refuses a CompID locked out from the Logon's address without checking its password, and counts failures (AC-009). */
+    static LogonAuthenticator throttled(LogonAuthenticator authenticator, LoginThrottle logins) {
+        return new LogonAuthenticator() {
+            @Override
+            public boolean authenticate(String compId, String password) {
+                return authenticate(compId, password, null);
+            }
+
+            @Override
+            public boolean authenticate(String compId, String password, String remoteAddress) {
+                String name = "FIX " + compId;                  // kept apart from REST user names
+                if (logins.lockedOut(name, remoteAddress).isPresent()) {
+                    return false;
+                }
+                boolean accepted = authenticator.authenticate(compId, password);
+                if (accepted) {
+                    logins.succeeded(name, remoteAddress);
+                } else {
+                    logins.failed(name, remoteAddress);
+                }
+                return accepted;
+            }
+        };
     }
 
     /**

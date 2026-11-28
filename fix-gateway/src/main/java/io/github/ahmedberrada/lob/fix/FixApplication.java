@@ -37,6 +37,7 @@ import quickfix.FieldNotFound;
 import quickfix.Message;
 import quickfix.RejectLogon;
 import quickfix.Session;
+import quickfix.Responder;
 import quickfix.SessionID;
 import quickfix.SessionNotFound;
 import quickfix.UnsupportedMessageType;
@@ -611,7 +612,7 @@ final class FixApplication implements Application, EventListener {
             return;
         }
         String password = message.isSetField(Password.FIELD) ? message.getString(Password.FIELD) : null;
-        if (!authenticator.authenticate(session.getTargetCompID(), password)) {
+        if (!authenticator.authenticate(session.getTargetCompID(), password, remoteAddress(session))) {
             LOG.warn("FIX logon refused for {}: authentication failed", session.getTargetCompID());
             throw new RejectLogon("authentication failed");
         }
@@ -619,5 +620,12 @@ final class FixApplication implements Application, EventListener {
 
     @Override
     public void toApp(Message message, SessionID session) {
+    }
+
+    /** Where a session's connection comes from, or {@code null} if it is not connected through a transport. */
+    private static String remoteAddress(SessionID id) {
+        Session session = Session.lookupSession(id);
+        Responder responder = session == null ? null : session.getResponder();
+        return responder == null ? null : responder.getRemoteAddress();
     }
 }
