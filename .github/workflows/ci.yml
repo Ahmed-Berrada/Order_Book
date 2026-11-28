@@ -17,6 +17,13 @@ jobs:
           java-version: '21'
           cache: maven
 
+      # The wrapper downloads Maven itself on every run; a failed download stops the job before any build.
+      - name: Cache the Maven distribution
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/wrapper
+          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
+
       # Tests, property tests, ArchUnit rules, rulebook traceability and the JaCoCo 90 % gate.
       - name: Build and test
         run: ./mvnw -B -ntp verify
@@ -32,6 +39,7 @@ jobs:
             engine-service/target/site/jacoco/
             fix-gateway/target/site/jacoco/
             market-data/target/site/jacoco/
+            post-trade/target/site/jacoco/
             api/target/site/jacoco/
           if-no-files-found: ignore
 
@@ -46,9 +54,16 @@ jobs:
           java-version: '21'
           cache: maven
 
+      # The wrapper downloads Maven itself on every run; a failed download stops the job before any build.
+      - name: Cache the Maven distribution
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/wrapper
+          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
+
       # ADR-0002 §7: PIT mutation score of each engine module must stay at or above 80 %.
       - name: Mutation testing
-        run: ./mvnw -B -ntp -pl engine-core,engine-journal,engine-service,market-data -am -Pmutation verify
+        run: ./mvnw -B -ntp -pl engine-core,engine-journal,engine-service,market-data,post-trade -am -Pmutation verify
 
       - name: Upload mutation report
         if: always()
@@ -60,4 +75,22 @@ jobs:
             engine-journal/target/pit-reports/
             engine-service/target/pit-reports/
             market-data/target/pit-reports/
+            post-trade/target/pit-reports/
           if-no-files-found: ignore
+
+  # Phase 10b: the Python analytics, standard library only (docs/analytics.md).
+  analytics:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Unit tests
+        working-directory: analytics
+        run: python -m unittest discover -s tests -t . -v

@@ -51,16 +51,28 @@ final class JournalReader<T> implements Closeable {
             return;
         }
         this.frames = new FrameReader(file);
+        try {
+            this.instrument = header(file, kind);
+        } catch (IOException | RuntimeException e) {
+            try {
+                frames.close();                 // the caller gets no reader to close
+            } catch (IOException suppressed) {
+                e.addSuppressed(suppressed);
+            }
+            throw e;
+        }
+    }
+
+    private Instrument header(Path file, Codec.Kind kind) throws IOException {
         byte[] header = frames.next();
         if (header == null) {
-            this.instrument = null;
-            return;
+            return null;
         }
         Codec.Header decoded = Codec.decodeHeader(header);
         if (decoded.kind() != kind) {
             throw new JournalCorruptedException(file + " is a " + decoded.kind() + " file, expected " + kind);
         }
-        this.instrument = decoded.instrument();
+        return decoded.instrument();
     }
 
     /** Instrument named in the header, or {@code null} if the journal is missing or has no complete header. */
