@@ -43,17 +43,16 @@ class FixConfiguration {
 
             @Override
             public boolean authenticate(String compId, String password, String remoteAddress) {
-                String name = "FIX " + compId;                  // kept apart from REST user names
-                if (logins.lockedOut(name, remoteAddress).isPresent()) {
+                if (logins.begin(LoginThrottle.Channel.FIX, compId, remoteAddress).isPresent()) {
                     return false;
                 }
-                boolean accepted = authenticator.authenticate(compId, password);
-                if (accepted) {
-                    logins.succeeded(name, remoteAddress);
-                } else {
-                    logins.failed(name, remoteAddress);
+                boolean accepted = false;
+                try {
+                    accepted = authenticator.authenticate(compId, password);
+                    return accepted;
+                } finally {
+                    logins.end(LoginThrottle.Channel.FIX, compId, remoteAddress, accepted);
                 }
-                return accepted;
             }
         };
     }

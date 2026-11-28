@@ -45,8 +45,10 @@ reason of a refusal is not revealed to the peer. Drop-copy sessions authenticate
 **AC-009: Repeated failures lock the name out.** After `maxFailures` failed authentications in a row for
 one user name (REST) or CompID (FIX) from one source address, further attempts for that name from that address
 are refused for `lockout`, without checking the secret: REST answers `429` with `Retry-After`, a FIX Logon is
-rejected as any failed Logon (AC-007). A success clears the count. The lockout is per name and address, so a
-caller cannot lock a member out from another address. This holds with security enabled; the defaults are 5
+rejected as any failed Logon (AC-007). A success clears the count; an attempt counts as a failure from the
+moment it starts until it is known to have succeeded, so attempts in parallel do not add guesses. REST user
+names are counted without regard to case, as they are looked up; an IPv6 address counts for its /64 network.
+The lockout is per name and address, so a caller cannot lock a member out from another address. This holds with security enabled; the defaults are 5
 failures and 1 minute, and `maxFailures` `0` switches it off. Lockouts are kept in memory and logged.
 
 ## Browsers

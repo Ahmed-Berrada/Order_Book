@@ -83,3 +83,7 @@ management:
       group:
         readiness:
           include: readinessState,lob
+logging:
+  level:
+    # The REST authentication provider is defined on purpose (AC-009, ThrottledAuthentication): not a mistake to warn of.
+    org.springframework.security.config.annotation.authentication.configuration.InitializeUserDetailsBeanManagerConfigurer: ERROR

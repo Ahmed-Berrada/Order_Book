@@ -51,16 +51,25 @@ that refuses.
 `fix-gateway` stays free of any framework (ADR-0006). It calls a `LogonAuthenticator` on every Logon; the API
 module implements it with Spring Security's password encoders, so REST and FIX verify secrets the same way.
 
-### 6. Lockout after repeated failures (added in phase 5b)
+### 6. Lockout after repeated failures (added in phase 8b)
 
 Bcrypt already makes each guess cost about a tenth of a second, but nothing stopped a caller from guessing
 for ever. After a few failures in a row for one name from one source address, that name is locked out from
-that address for a minute, and the secret is not even checked (AC-009). Keying on the address as well as the
+that address for a minute, and the secret is not even checked (AC-009). The check wraps the provider that
+verifies the secret, so it sees the name exactly as Spring Security authenticates it, whatever the spelling of
+the `Authorization` header; REST names are counted without regard to case, as they are looked up. An attempt
+reserves its place before the secret is checked, so guesses sent in parallel count as failures until they are
+known to have succeeded. Keying on the address as well as the
 name means an attacker cannot lock a member out by failing on purpose from elsewhere; it also means an
 attacker with many addresses gets a few guesses from each, which the bcrypt cost and the network controls in
 front of the venue must cover. REST answers `429` with `Retry-After`, which a client can act on and which
 reveals nothing more than a `401` (a name that does not exist is locked out the same way). FIX rejects the
-Logon as any failed one. The counts are in memory and bounded: a restart forgets them.
+Logon as any failed one. The counts are in memory, for at most 10,000 names and addresses, the least recently
+used forgotten first; a restart forgets them. An IPv6 address counts for its /64 network, since one host can
+usually choose any address in it. Behind a proxy that terminates TLS, the venue sees the proxy's address for
+every caller, so one caller could lock a member out for everyone: the proxy must pass the caller's address
+(`X-Forwarded-For`), and Spring Boot be told to trust it (`server.forward-headers-strategy=native` with the
+proxy's addresses as internal proxies), before the venue is exposed this way.
 
 ### 7. Not here
 

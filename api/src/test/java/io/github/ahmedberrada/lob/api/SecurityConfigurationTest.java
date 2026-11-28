@@ -96,7 +96,7 @@ class SecurityConfigurationTest {
     @Test
     @Rulebook("AC-006")
     void aFailedAuthenticationIsLoggedWithoutTheSecret(CapturedOutput output) {
-        LoginAudit audit = new LoginAudit(LoginThrottle.NONE);
+        LoginAudit audit = new LoginAudit();
         audit.onFailure(new org.springframework.security.authentication.event.AuthenticationFailureBadCredentialsEvent(
                 new org.springframework.security.authentication.UsernamePasswordAuthenticationToken("mallory",
                         "hunter2"), new org.springframework.security.authentication.BadCredentialsException("bad")));

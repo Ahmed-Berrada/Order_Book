@@ -10,7 +10,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.config.Customizer;
+import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -21,7 +22,6 @@ import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 
 /**
  * Authentication and authorisation of the REST API (docs/rulebook/access-control.md, ADR-0017): HTTP Basic
@@ -43,10 +43,19 @@ class SecurityConfiguration {
         return PasswordEncoderFactories.createDelegatingPasswordEncoder();
     }
 
-    /** Logs failed authentications and counts them for lockouts (AC-006, AC-009). */
+    /** Logs failed authentications (AC-006). */
     @Bean
-    LoginAudit loginAudit(LoginThrottle logins) {
-        return new LoginAudit(logins);
+    LoginAudit loginAudit() {
+        return new LoginAudit();
+    }
+
+    /** Checks secrets for names not locked out, and counts the outcome (AC-009). */
+    @Bean
+    AuthenticationProvider authenticationProvider(UserDetailsService users, PasswordEncoder encoder,
+            LoginThrottle logins) {
+        DaoAuthenticationProvider secrets = new DaoAuthenticationProvider(users);
+        secrets.setPasswordEncoder(encoder);
+        return new ThrottledAuthentication(secrets, logins);
     }
 
     /** Lockouts after repeated failed authentications, REST and FIX (AC-009); none with security disabled. */
@@ -112,8 +121,7 @@ class SecurityConfiguration {
     }
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, LobProperties properties, LoginThrottle logins)
-            throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, LobProperties properties) throws Exception {
         // A browser that has answered a Basic challenge resends the credentials on its own, so a page on
         // another site could make it act for the user. The CSRF filter therefore applies to every write a
         // browser marks as cross-site, and to form bodies; such a request cannot carry a token (none is ever
@@ -126,8 +134,7 @@ class SecurityConfiguration {
             LOG.warn("lob.security.enabled is false: every caller who reaches this port is trusted as the operator");
             return http.authorizeHttpRequests(a -> a.anyRequest().permitAll()).build();
         }
-        return http.addFilterBefore(new LockedOutLogins(logins), BasicAuthenticationFilter.class)
-                .httpBasic(Customizer.withDefaults())
+        return http.httpBasic(b -> b.authenticationEntryPoint(ThrottledAuthentication.ENTRY_POINT))
                 .authorizeHttpRequests(a -> a
                         .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/instruments/*/phase").hasRole("ADMIN")

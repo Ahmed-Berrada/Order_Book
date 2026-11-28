@@ -74,11 +74,15 @@ class SecurityApiTest {
         String wrong = "Basic " + Base64.getEncoder().encodeToString("alice:guess".getBytes(StandardCharsets.UTF_8));
         for (int i = 0; i < 5; i++) {
             assertThat(mvc.get().uri("/api/v1/instruments").header(HttpHeaders.AUTHORIZATION, wrong))
-                    .hasStatus(HttpStatus.UNAUTHORIZED);
+                    .hasStatus(HttpStatus.UNAUTHORIZED).headers().hasHeaderSatisfying("WWW-Authenticate",
+                            v -> assertThat(v).first().asString().startsWith("Basic realm="));
         }
         assertThat(mvc.get().uri("/api/v1/instruments").header(HttpHeaders.AUTHORIZATION, basic("alice")))
                 .as("even the right password, from this address").hasStatus(HttpStatus.TOO_MANY_REQUESTS)
                 .hasHeader("Retry-After", "60").bodyJson().isLenientlyEqualTo("{\"reason\":\"LOCKED_OUT\"}");
+        String variant = "basic\t" + Base64.getEncoder().encodeToString("ALICE:alice-pass".getBytes(StandardCharsets.UTF_8));
+        assertThat(mvc.get().uri("/api/v1/instruments").header(HttpHeaders.AUTHORIZATION, variant))
+                .as("another spelling of the header and of the name").hasStatus(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(mvc.get().uri("/api/v1/instruments").header(HttpHeaders.AUTHORIZATION, basic("alice"))
                 .with(r -> { r.setRemoteAddr("10.1.2.3"); return r; })).as("from another address").hasStatusOk();
         assertThat(mvc.get().uri("/api/v1/instruments").header(HttpHeaders.AUTHORIZATION, basic("bob")))

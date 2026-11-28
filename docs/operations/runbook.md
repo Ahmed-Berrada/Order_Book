@@ -88,7 +88,8 @@ The kill switch suspends a member and cancels its open orders in every instrumen
 After `lob.security.max-failures` failed authentications in a row (5 by default) for one name from one address,
 that name is refused from that address for `lob.security.lockout` (1 minute): REST answers `429` with reason
 `LOCKED_OUT`, a FIX Logon is rejected (AC-009). The log has a `WARN` line for each failure and one when the
-lockout starts (`'alice' locked out from 10.0.0.1 …`; FIX names are prefixed `FIX`). A member that is locked
+lockout starts (`REST 'alice' locked out from 10.0.0.1 …`, or `FIX 'MEMBER1' …`). Behind a proxy, check that the address
+is the caller's and not the proxy's (ADR-0017 §6). A member that is locked
 out has usually been configured with an old secret: fix its configuration and wait out the minute. Many
 names locked out from one address is someone guessing: block the address in front of the venue. A restart
 clears the lockouts.
