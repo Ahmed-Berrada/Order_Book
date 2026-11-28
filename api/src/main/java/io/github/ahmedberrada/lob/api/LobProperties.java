@@ -74,10 +74,13 @@ public record LobProperties(
      * @param maxFailures failed authentications in a row, for one name from one address, before a lockout (AC-009);
      *                {@code 0} switches lockouts off
      * @param lockout how long a locked-out name is refused from that address
+     * @param credentialCache how long credentials bcrypt accepted are trusted without bcrypt again (AC-012);
+     *                {@code 0} checks every request with bcrypt
      */
     public record SecurityProperties(
             @DefaultValue("true") boolean enabled, @DefaultValue List<@Valid UserProperties> users,
-            @DefaultValue("5") @PositiveOrZero int maxFailures, @DefaultValue("1m") @NotNull Duration lockout) {
+            @DefaultValue("5") @PositiveOrZero int maxFailures, @DefaultValue("1m") @NotNull Duration lockout,
+            @DefaultValue("10m") @NotNull Duration credentialCache) {
     }
 
     /**

@@ -9,7 +9,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import java.time.Duration;
 import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
@@ -66,10 +68,16 @@ final class ThrottledAuthentication implements AuthenticationProvider {
 
     private final AuthenticationProvider secrets;
     private final LoginThrottle logins;
+    private final VerifiedCredentials verified;
 
     ThrottledAuthentication(AuthenticationProvider secrets, LoginThrottle logins) {
+        this(secrets, logins, new VerifiedCredentials(Duration.ZERO, System::nanoTime));
+    }
+
+    ThrottledAuthentication(AuthenticationProvider secrets, LoginThrottle logins, VerifiedCredentials verified) {
         this.secrets = secrets;
         this.logins = logins;
+        this.verified = verified;
     }
 
     @Override
@@ -86,8 +94,21 @@ final class ThrottledAuthentication implements AuthenticationProvider {
         }
         boolean succeeded = false;
         try {
+            String password = authentication.getCredentials() instanceof String p ? p : null;
+            VerifiedCredentials.Verified known = verified.lookup(name, password);
+            if (known != null) {                               // AC-012: bcrypt accepted these very credentials
+                UsernamePasswordAuthenticationToken result =
+                        UsernamePasswordAuthenticationToken.authenticated(known.principal(), null, known.authorities());
+                result.setDetails(authentication.getDetails());
+                succeeded = true;
+                return result;
+            }
             Authentication result = secrets.authenticate(authentication);
             succeeded = result != null;
+            if (succeeded) {
+                verified.remember(name, password, new VerifiedCredentials.Verified(result.getPrincipal(),
+                        result.getAuthorities()));
+            }
             return result;
         } finally {
             logins.end(LoginThrottle.Channel.REST, name, address, succeeded);
