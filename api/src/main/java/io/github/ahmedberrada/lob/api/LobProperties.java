@@ -107,11 +107,14 @@ public record LobProperties(
      * @param lockout how long a locked-out name is refused from that address
      * @param tlsTerminatedInFront the ports may listen beyond loopback in clear, because TLS ends in front of the
      *                venue (an ingress, a load balancer): an explicit choice, logged (AC-010)
+     * @param credentialCache how long credentials bcrypt accepted are trusted without bcrypt again (AC-012);
+     *                {@code 0} checks every request with bcrypt
      */
     public record SecurityProperties(
             @DefaultValue("true") boolean enabled, @DefaultValue List<@Valid UserProperties> users,
             @DefaultValue("5") @PositiveOrZero int maxFailures, @DefaultValue("1m") @NotNull Duration lockout,
-            @DefaultValue("false") boolean tlsTerminatedInFront) {
+            @DefaultValue("false") boolean tlsTerminatedInFront,
+            @DefaultValue("10m") @NotNull Duration credentialCache) {
     }
 
     /**

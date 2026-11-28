@@ -61,10 +61,11 @@ class SecurityConfiguration {
     /** Checks secrets for names not locked out, and counts the outcome (AC-009). */
     @Bean
     AuthenticationProvider authenticationProvider(UserDetailsService users, PasswordEncoder encoder,
-            LoginThrottle logins) {
+            LoginThrottle logins, LobProperties properties) {
         DaoAuthenticationProvider secrets = new DaoAuthenticationProvider(users);
         secrets.setPasswordEncoder(encoder);
-        return new ThrottledAuthentication(secrets, logins);
+        return new ThrottledAuthentication(secrets, logins,
+                new VerifiedCredentials(properties.security().credentialCache(), System::nanoTime));
     }
 
     /** Lockouts after repeated failed authentications, REST and FIX (AC-009); none with security disabled. */
