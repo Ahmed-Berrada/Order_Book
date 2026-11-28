@@ -80,7 +80,18 @@ every caller, so one caller could lock a member out for everyone: the proxy must
 (`X-Forwarded-For`), and Spring Boot be told to trust it (`server.forward-headers-strategy=native` with the
 proxy's addresses as internal proxies), before the venue is exposed this way.
 
-### 7. Remember verified credentials, briefly (added in phase 8d)
+### 7. TLS in the venue, and a venue that will not run in clear (added in phase 8c)
+
+ADR-0018 left TLS to a proxy in front. That stays possible, but is now a stated choice: with security on, a port
+open beyond loopback must speak TLS, or the operator must declare that TLS ends in front of it, or the venue does
+not start (AC-010), as it refuses to start without users (AC-003). REST uses Spring Boot's TLS (`server.ssl`, or
+an SSL bundle that it reloads when the files change); FIX uses QuickFIX/J's, always with the venue's own key store,
+since QuickFIX/J would otherwise fall back to a demonstration key shipped in its jar. Only TLS 1.2 and 1.3 are
+offered. Mutual TLS for FIX is a setting: a member's connection must present a certificate from a CA the venue
+trusts. The certificate is not bound to the CompID: the Logon password still is (AC-007), so a member's certificate
+and its password are two separate factors, not one identity.
+
+### 8. Remember verified credentials, briefly (added in phase 8d)
 
 HTTP Basic sends the credentials with every request, and bcrypt is slow by design: at its default cost each check
 takes 70 to 100 ms of CPU, and the lockout lets five run at once per name and address. The end-to-end load test
@@ -105,10 +116,10 @@ Spring Security stamps a password authentication with the time bcrypt checked it
 authentication carries that first time for up to ten minutes. Nothing in the venue reads it; a rule on the
 freshness of the password factor would have to set the cache to `0`.
 
-### 8. Not here
+### 9. Not here
 
-Mutual TLS for FIX (needs certificates provisioned,
-phase 9), secret rotation and an external identity provider.
+Binding a client certificate to a CompID, revocation checking (OCSP, CRLs), secret rotation and an external
+identity provider.
 
 ## Consequences
 

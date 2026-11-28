@@ -19,6 +19,19 @@ env:
   LOB_BIND_ADDRESS: "0.0.0.0"
 existingSecret: ""
 
+# Beyond loopback a secured venue speaks TLS or does not start (AC-010).
+tls:
+  # inPod: false: an ingress (REST) and a TCP proxy (FIX) terminate TLS in front of the pod, which the venue is told
+  # (LOB_SECURITY_TLS_TERMINATED_IN_FRONT). Traffic inside the cluster to the pod is then in clear.
+  # inPod: true: the venue terminates TLS itself, REST and FIX, with the PKCS12 key store `venue.p12` from the secret
+  # named below, mounted at /tls. Put its password in existingSecret as SERVER_SSL_KEY_STORE_PASSWORD and
+  # LOB_FIX_TLS_KEY_STORE_PASSWORD. Probes and the ServiceMonitor then use HTTPS.
+  inPod: false
+  secretName: ""
+  # With inPod, members' FIX connections must also present a certificate from a CA in `members.p12` (mutual TLS,
+  # AC-011; its password as LOB_FIX_TLS_TRUST_STORE_PASSWORD).
+  mutualFix: false
+
 service:
   restPort: 8080
   fixPort: 9878

@@ -62,6 +62,21 @@ always checked by bcrypt and counted (AC-009), and a locked-out name is refused 
 while failures are counted for a name from an address, its credentials are checked by bcrypt again, whose success
 clears them. A negative `credentialCache` stops the venue from starting.
 
+## Encryption in transit
+
+**AC-010: TLS on every exposed port.** With security enabled, the REST API, a management port of its own (the
+actuator, `management.server.port`) and the FIX acceptor accept only TLS 1.2 or 1.3 on an address other than
+loopback: the venue refuses to start if any of them would listen beyond loopback in clear, and checks it before
+it opens any of them.
+Credentials (HTTP Basic, the FIX Logon password) and orders never cross a network unencrypted. A venue whose TLS is
+terminated in front of it (an ingress, a load balancer) says so explicitly (`lob.security.tls-terminated-in-front`),
+and is logged as a warning at start-up. The market data feeds carry public data and no credentials, and are not
+covered.
+
+**AC-011: FIX over TLS, optionally mutual.** The FIX acceptor uses the venue's own key store, never a default one.
+With `need-client-auth`, a session's connection must also present a certificate issued by a CA in the venue's trust
+store, or the handshake fails before any FIX message; the Logon password is still checked (AC-007).
+
 ## Browsers
 
 **AC-008: No writes from another site.** A browser that has answered a Basic challenge resends the credentials

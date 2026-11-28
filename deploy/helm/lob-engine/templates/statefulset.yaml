@@ -32,20 +32,32 @@ spec:
             {{- range $k, $v := .Values.env }}
             - {name: {{ $k }}, value: {{ $v | quote }}}
             {{- end }}
+            {{- if .Values.tls.inPod }}
+            - {name: SERVER_SSL_KEY_STORE, value: /tls/venue.p12}
+            - {name: SERVER_SSL_KEY_STORE_TYPE, value: PKCS12}
+            - {name: LOB_FIX_TLS_ENABLED, value: "true"}
+            - {name: LOB_FIX_TLS_KEY_STORE, value: /tls/venue.p12}
+            {{- if .Values.tls.mutualFix }}
+            - {name: LOB_FIX_TLS_NEED_CLIENT_AUTH, value: "true"}
+            - {name: LOB_FIX_TLS_TRUST_STORE, value: /tls/members.p12}
+            {{- end }}
+            {{- else }}
+            - {name: LOB_SECURITY_TLS_TERMINATED_IN_FRONT, value: "true"}
+            {{- end }}
           {{- if .Values.existingSecret }}
           envFrom:
             - secretRef: {name: {{ .Values.existingSecret }}}
           {{- end }}
           # Slow recovery is normal after a crash (the journal is replayed): the startup probe waits for it.
           startupProbe:
-            httpGet: {path: /actuator/health/liveness, port: rest}
+            httpGet: {path: /actuator/health/liveness, port: rest, scheme: {{ if .Values.tls.inPod }}HTTPS{{ else }}HTTP{{ end }}}
             periodSeconds: 5
             failureThreshold: 120
           livenessProbe:
-            httpGet: {path: /actuator/health/liveness, port: rest}
+            httpGet: {path: /actuator/health/liveness, port: rest, scheme: {{ if .Values.tls.inPod }}HTTPS{{ else }}HTTP{{ end }}}
             periodSeconds: 10
           readinessProbe:
-            httpGet: {path: /actuator/health/readiness, port: rest}
+            httpGet: {path: /actuator/health/readiness, port: rest, scheme: {{ if .Values.tls.inPod }}HTTPS{{ else }}HTTP{{ end }}}
             periodSeconds: 5
           resources: {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
@@ -55,8 +67,15 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
+            {{- if .Values.tls.inPod }}
+            - {name: tls, mountPath: /tls, readOnly: true}
+            {{- end }}
       volumes:
         - {name: tmp, emptyDir: {}}
+        {{- if .Values.tls.inPod }}
+        - name: tls
+          secret: {secretName: {{ required "tls.secretName is needed with tls.inPod" .Values.tls.secretName }}}
+        {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: data

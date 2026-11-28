@@ -10,4 +10,7 @@ spec:
   endpoints:
     - port: rest
       path: /actuator/prometheus
+      {{- if .Values.tls.inPod }}
+      scheme: https
+      {{- end }}
 {{- end }}

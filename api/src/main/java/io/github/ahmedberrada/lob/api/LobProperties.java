@@ -74,12 +74,15 @@ public record LobProperties(
      * @param maxFailures failed authentications in a row, for one name from one address, before a lockout (AC-009);
      *                {@code 0} switches lockouts off
      * @param lockout how long a locked-out name is refused from that address
+     * @param tlsTerminatedInFront the ports may listen beyond loopback in clear, because TLS ends in front of the
+     *                venue (an ingress, a load balancer): an explicit choice, logged (AC-010)
      * @param credentialCache how long credentials bcrypt accepted are trusted without bcrypt again (AC-012);
      *                {@code 0} checks every request with bcrypt
      */
     public record SecurityProperties(
             @DefaultValue("true") boolean enabled, @DefaultValue List<@Valid UserProperties> users,
             @DefaultValue("5") @PositiveOrZero int maxFailures, @DefaultValue("1m") @NotNull Duration lockout,
+            @DefaultValue("false") boolean tlsTerminatedInFront,
             @DefaultValue("10m") @NotNull Duration credentialCache) {
     }
 
@@ -171,7 +174,25 @@ public record LobProperties(
             @DefaultValue List<String> dropCopySessions,
             Path storeDirectory,
             @DefaultValue("CANCEL_NEWEST") SelfTradeMode selfTradeMode,
-            @DefaultValue java.util.Map<String, String> passwords) {
+            @DefaultValue java.util.Map<String, String> passwords,
+            @DefaultValue @Valid FixTlsProperties tls) {
+    }
+
+    /**
+     * TLS for the FIX acceptor (AC-010, AC-011).
+     *
+     * @param needClientAuth mutual TLS: a connection must present a certificate from a CA in {@code trustStore}
+     */
+    public record FixTlsProperties(
+            @DefaultValue("false") boolean enabled, Path keyStore, String keyStorePassword,
+            @DefaultValue("PKCS12") String keyStoreType, Path trustStore, String trustStorePassword,
+            @DefaultValue("PKCS12") String trustStoreType, @DefaultValue("false") boolean needClientAuth) {
+
+        @Override
+        public String toString() {                    // never the passwords
+            return "FixTlsProperties[enabled=" + enabled + ", keyStore=" + keyStore + ", trustStore=" + trustStore
+                    + ", needClientAuth=" + needClientAuth + "]";
+        }
     }
 
     /** One listed instrument. */
