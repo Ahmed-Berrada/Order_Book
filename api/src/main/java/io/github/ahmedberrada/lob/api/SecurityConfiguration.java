@@ -121,6 +121,7 @@ class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/v1/instruments/*/orders").hasRole("MEMBER")
                         .requestMatchers(HttpMethod.PUT, "/api/v1/instruments/*/orders/*").hasRole("MEMBER")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/instruments/*/orders/*").hasRole("MEMBER")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/instruments/*/orders").hasRole("MEMBER")
                         .requestMatchers(HttpMethod.GET, "/**").hasRole("READ")
                         .anyRequest().denyAll())
                 .build();

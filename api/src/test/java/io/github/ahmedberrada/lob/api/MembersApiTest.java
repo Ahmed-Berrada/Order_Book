@@ -84,6 +84,25 @@ class MembersApiTest {
     }
 
     @Test
+    @Rulebook("RK-006")
+    void aMemberMassCancelsItsOwnOrdersOnASideOrBoth() {
+        assertThat(order("2", "BUY", "10.00", 3)).hasStatus(HttpStatus.CREATED);
+        assertThat(order("2", "BUY", "11.00", 3)).hasStatus(HttpStatus.CREATED);
+        assertThat(order("2", "SELL", "50.00", 3)).hasStatus(HttpStatus.CREATED);
+        assertThat(order("1", "BUY", "12.00", 1)).hasStatus(HttpStatus.CREATED);
+
+        assertThat(mvc.delete().uri(AAPL + "/orders?side=BUY").header("X-Member-Id", "2")).hasStatusOk().bodyJson()
+                .isLenientlyEqualTo("{\"symbol\":\"AAPL\",\"side\":\"BUY\",\"cancelledOrders\":2,\"cancelledOrderIds\":[1,2]}");
+        assertThat(mvc.delete().uri(AAPL + "/orders").header("X-Member-Id", "2")).hasStatusOk().bodyJson()
+                .isLenientlyEqualTo("{\"cancelledOrders\":1,\"cancelledOrderIds\":[3]}");
+        assertThat(mvc.get().uri(AAPL + "/book")).hasStatusOk().bodyJson()
+                .isLenientlyEqualTo("{\"bids\":[{\"price\":\"12.00\",\"quantity\":1}],\"asks\":[]}");
+        assertThat(mvc.delete().uri(AAPL + "/orders?side=SIDEWAYS").header("X-Member-Id", "2"))
+                .hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(order("2", "BUY", "10.00", 1)).as("not suspended").hasStatus(HttpStatus.CREATED);
+    }
+
+    @Test
     @Rulebook({"RK-004", "RK-005"})
     void theKillSwitchCancelsOrdersBlocksTheMemberAndCanBeLifted() {
         assertThat(order("2", "BUY", "10.00", 3)).hasStatus(HttpStatus.CREATED);

@@ -7,6 +7,8 @@ import io.github.ahmedberrada.lob.core.Command;
 import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
+import io.github.ahmedberrada.lob.core.MassCancel;
+import io.github.ahmedberrada.lob.core.MassCancelled;
 import io.github.ahmedberrada.lob.core.OrderAccepted;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
 import io.github.ahmedberrada.lob.core.OrderRejected;
@@ -26,9 +28,14 @@ import io.github.ahmedberrada.lob.service.InstrumentConfig;
 import io.github.ahmedberrada.lob.service.MatchingService;
 import io.github.ahmedberrada.lob.service.RequestRefusedException;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,6 +54,9 @@ import quickfix.field.CxlRejReason;
 import quickfix.field.CxlRejResponseTo;
 import quickfix.field.ExecInst;
 import quickfix.field.ExecType;
+import quickfix.field.MassCancelRejectReason;
+import quickfix.field.MassCancelRequestType;
+import quickfix.field.MassCancelResponse;
 import quickfix.field.MaxFloor;
 import quickfix.field.MsgSeqNum;
 import quickfix.field.MsgType;
@@ -54,6 +64,7 @@ import quickfix.field.OnBehalfOfCompID;
 import quickfix.field.OrdRejReason;
 import quickfix.field.OrdStatus;
 import quickfix.field.OrdType;
+import quickfix.field.OrderID;
 import quickfix.field.OrderQty;
 import quickfix.field.OrigClOrdID;
 import quickfix.field.Password;
@@ -65,7 +76,10 @@ import quickfix.field.StopPx;
 import quickfix.field.Symbol;
 import quickfix.field.Text;
 import quickfix.field.TimeInForce;
+import quickfix.field.TotalAffectedOrders;
+import quickfix.field.TransactTime;
 import quickfix.fix44.BusinessMessageReject;
+import quickfix.fix44.OrderMassCancelReport;
 
 /**
  * Application layer of the gateway: application messages become commands, events become execution
@@ -147,8 +161,116 @@ final class FixApplication implements Application, EventListener {
             case MsgType.ORDER_CANCEL_REQUEST -> onCancel(message, session);
             case MsgType.ORDER_CANCEL_REPLACE_REQUEST -> onReplace(message, session);
             case MsgType.ORDER_STATUS_REQUEST -> onStatus(message, session);
+            case MsgType.ORDER_MASS_CANCEL_REQUEST -> onMassCancel(message, session);
             default -> throw new UnsupportedMessageType();
         }
+    }
+
+    // ---- OrderMassCancelRequest ---------------------------------------------------------------------
+
+    /**
+     * Cancels all the session's member's open orders in one instrument (MassCancelRequestType 1) or in all of them
+     * (7), on one side or both (RK-006). Each order is reported cancelled with {@code Text=MASS_CANCEL}; then one
+     * OrderMassCancelReport gives the number of orders cancelled (Rules of Engagement, OrderMassCancelRequest).
+     */
+    private void onMassCancel(Message request, SessionID session) throws FieldNotFound {
+        String clOrdId = request.getString(ClOrdID.FIELD);
+        char type = request.getChar(MassCancelRequestType.FIELD);
+        String symbol = request.isSetField(Symbol.FIELD) ? request.getString(Symbol.FIELD) : null;
+        Character fixSide = request.isSetField(Side.FIELD) ? request.getChar(Side.FIELD) : null;
+        if (!registry.reserve(session, clOrdId)) {
+            rejectMassCancel(session, clOrdId, type, symbol, fixSide, null, "DUPLICATE_CLORDID");
+            return;
+        }
+        registry.refused(session, clOrdId);                  // a mass cancel never becomes an order
+        io.github.ahmedberrada.lob.core.Side side;
+        if (fixSide == null) {
+            side = null;
+        } else if (fixSide == Side.BUY) {
+            side = io.github.ahmedberrada.lob.core.Side.BUY;
+        } else if (fixSide == Side.SELL) {
+            side = io.github.ahmedberrada.lob.core.Side.SELL;
+        } else {
+            rejectMassCancel(session, clOrdId, type, symbol, fixSide, null, "INVALID_SIDE");
+            return;
+        }
+        List<String> symbols;
+        if (type == MassCancelRequestType.CANCEL_ORDERS_FOR_A_SECURITY) {
+            if (symbol == null || service.instrument(symbol).isEmpty()) {
+                rejectMassCancel(session, clOrdId, type, symbol, fixSide,
+                        '1', "UNKNOWN_INSTRUMENT");
+                return;
+            }
+            symbols = List.of(symbol);
+        } else if (type == MassCancelRequestType.CANCEL_ALL_ORDERS) {
+            symbols = service.instruments().stream().map(InstrumentConfig::symbol).toList();
+        } else {
+            rejectMassCancel(session, clOrdId, type, symbol, fixSide,
+                    '0', "UNSUPPORTED_MASS_CANCEL_REQUEST_TYPE");
+            return;
+        }
+        Map<String, CompletableFuture<EventBatch>> results = new LinkedHashMap<>();
+        for (String s : symbols) {
+            results.put(s, service.submit(s, new MassCancel(side), memberOf(session), null));
+        }
+        CompletableFuture.allOf(results.values().toArray(CompletableFuture[]::new)).whenComplete((ignored, f) -> {
+            long cancelled = 0;
+            List<String> refused = new ArrayList<>();
+            for (Map.Entry<String, CompletableFuture<EventBatch>> result : results.entrySet()) {
+                try {
+                    cancelled += ((MassCancelled) result.getValue().join().events().getFirst()).cancelledOrders();
+                } catch (CompletionException e) {
+                    Throwable cause = unwrap(e);
+                    refused.add(result.getKey() + " " + (cause instanceof RequestRefusedException r
+                            ? r.reason().name() : "OUTCOME_UNKNOWN"));
+                    if (!(cause instanceof RequestRefusedException)) {
+                        LOG.error("Outcome unknown for mass cancel {} {} on {}", session, clOrdId, result.getKey(), cause);
+                    }
+                }
+            }
+            if (refused.size() == symbols.size()) {
+                rejectMassCancel(session, clOrdId, type, symbol, fixSide, null,
+                        String.join(", ", refused));
+                return;
+            }
+            OrderMassCancelReport report = massCancelReport(clOrdId, type, symbol, fixSide);
+            report.setChar(MassCancelResponse.FIELD, type);
+            report.setInt(TotalAffectedOrders.FIELD, Math.toIntExact(Math.min(Integer.MAX_VALUE, cancelled)));
+            if (!refused.isEmpty()) {
+                report.setString(Text.FIELD, "NOT_CANCELLED_IN " + String.join(", ", refused));
+            }
+            sender.send(report, session);
+        });
+    }
+
+    /**
+     * @param reason a FIX 4.4 MassCancelRejectReason ({@code 0} not supported, {@code 1} unknown security), or
+     *               {@code null} when none fits: FIX 4.4 has no "other", so the reason is only in {@code Text}
+     */
+    private void rejectMassCancel(SessionID session, String clOrdId, char type, String symbol, Character side,
+            Character reason, String text) {
+        OrderMassCancelReport report = massCancelReport(clOrdId, type, symbol, side);
+        report.setChar(MassCancelResponse.FIELD, MassCancelResponse.CANCEL_REQUEST_REJECTED_SEE_MASSCANCELREJECTREASON);
+        if (reason != null) {
+            report.setChar(MassCancelRejectReason.FIELD, reason);
+        }
+        report.setString(Text.FIELD, text);
+        sender.send(report, session);
+    }
+
+    private static OrderMassCancelReport massCancelReport(String clOrdId, char type, String symbol, Character side) {
+        OrderMassCancelReport report = new OrderMassCancelReport();
+        report.setString(ClOrdID.FIELD, clOrdId);
+        report.setString(OrderID.FIELD, "NONE");
+        report.setChar(MassCancelRequestType.FIELD, type);
+        if (symbol != null) {
+            report.setString(Symbol.FIELD, symbol);
+        }
+        if (side != null) {
+            report.setChar(Side.FIELD, side);
+        }
+        report.setUtcTimeStamp(TransactTime.FIELD, LocalDateTime.now(ZoneOffset.UTC));
+        return report;
     }
 
     // ---- NewOrderSingle ---------------------------------------------------------------------------
