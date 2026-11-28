@@ -6,7 +6,7 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 
 A **limit order book (LOB) matching engine** written in Java 21: price-time priority matching,
-a REST API on Spring Boot, and JMH benchmarks planned for phase 6.
+a REST API on Spring Boot, and [published benchmarks](docs/performance.md).
 
 The goal is engineering rigour rather than feature count. The engine is **deterministic**,
 backed by **invariant tests**, and **measured before it is optimised**.
@@ -39,6 +39,7 @@ backed by **invariant tests**, and **measured before it is optimised**.
 5. [Build & run](#build--run)
 6. [Testing strategy](#testing-strategy)
 7. [Roadmap](#roadmap)
+8. [Origins: the C++ prototype](#origins-the-c-prototype)
 
 ---
 
@@ -79,7 +80,7 @@ flowchart LR
         b2[(OrderBook MSFT)]
     end
 
-    bench[[engine-bench — JMH<br/>phase 6]]
+    bench[[engine-bench — JMH<br/>and HdrHistogram]]
     tests[[JUnit 5 + jqwik]]
 
     client -->|JSON| ctrl --> svc
@@ -106,7 +107,7 @@ flowchart LR
 | `fix-gateway` | FIX 4.4 acceptor: orders, cancels, status, execution reports to both sides of a trade | `engine-service`, QuickFIX/J |
 | `market-data` | Level-2 book images built from events; snapshots, incremental updates, slow-consumer protection; binary ITCH-style feed with retransmission and a reference consumer | `engine-service`, JDK only |
 | `api` | REST adapter, OpenAPI, WebSocket market data, venue configuration; hosts the FIX gateway | `engine-service`, `fix-gateway`, `market-data`, Spring Boot |
-| `engine-bench` *(phase 6)* | JMH micro-benchmarks | `engine-core`, JMH |
+| `engine-bench` | JMH micro-benchmarks, latency and soak runs | `engine-core`, `engine-journal`, JMH, HdrHistogram |
 
 Why the core is isolated:
 - **Benchmarks measure the algorithm**, not Tomcat or Jackson.
@@ -315,8 +316,8 @@ The matching behaviour itself is specified in the [rulebook](docs/rulebook/conti
 |---|---|---|
 | Price representation | `long` ticks | `double` causes rounding errors. `BigDecimal` allocates on the hot path. Conversion happens in the API layer. |
 | Book sides | `TreeMap<Long, PriceLevel>` | Sorted best price in O(log n). Simple and correct first. |
-| Time priority | `ArrayDeque<Order>` per price level | FIFO by construction. |
-| Cancel | O(n) inside a price level (v1) | Deliberate. It will be measured with JMH and then optimised to O(1) in phase 6. |
+| Time priority | An intrusive doubly linked list of orders per price level | FIFO by construction. |
+| Cancel | O(1): the order unlinks itself from its level | Measured with JMH: a cancel from a 10,000-order level went from about 2 µs to 0.15 µs ([ADR-0016](docs/adr/0016-performance-and-the-queue.md)). |
 | Order IDs | Assigned by the engine, per instrument | Deterministic replay ([ADR-0002](docs/adr/0002-core-engine-model.md)). |
 | Ordering and time | Gap-free sequence numbers; one µs UTC timestamp per command, taken at ingress and journaled | Determinism and reproducible replay ([ADR-0003](docs/adr/0003-journal-and-recovery.md)). |
 | Durability | Write-ahead journal per instrument, CRC-framed, fsync per command by default | No acknowledged order is lost; journals are never rewritten (record keeping). |
@@ -454,6 +455,34 @@ Book            3 resting orders
 Verification    OK: 5 event batches identical to the event journal
 ```
 
+### Trade file and fees
+
+`lob-post-trade` turns an instrument's journals into the file a clearing house receives (one line per side of
+every trade, the counterparty hidden) and the members' fee statements, with maker, taker and auction rates in
+basis points. Auction trades are neither maker nor taker. Rules: [post-trade](docs/rulebook/post-trade.md);
+format: [trade file](docs/interfaces/trade-file.md).
+
+```bash
+java -cp "$CP:post-trade/target/post-trade-0.1.0-SNAPSHOT.jar" io.github.ahmedberrada.lob.posttrade.PostTradeTool \
+    trades data/AAPL --tick-size 0.01 --fees maker=-0.20,taker=0.30,auction=0.10
+```
+
+```
+trade_id,trade_date,timestamp_utc,instrument,member_id,order_id,side,liquidity,price_ticks,price,quantity,notional,fee_rate_bps,fee
+AAPL-4,2026-11-26,2026-11-26T09:00:00.000001Z,AAPL,2,2,BUY,TAKER,18550,185.50,100,18550.00,0.3,0.56
+AAPL-4,2026-11-26,2026-11-26T09:00:00.000001Z,AAPL,1,1,SELL,MAKER,18550,185.50,100,18550.00,-0.2,-0.37
+```
+
+### Market analytics
+
+`analytics/` reads the trade file and the order records and reports the day: VWAP, open, high, low and
+close, auction share, the venue's fee revenue, trade-size percentiles, realized volatility, price impact
+(Kyle's lambda) and each member's order-to-trade ratio (RTS 9). Definitions: [analytics](docs/analytics.md).
+
+```bash
+cd analytics && python3 -m lob_analytics --trades AAPL-trades.csv --records AAPL-records.csv
+```
+
 ### Running it in production
 
 The venue is packaged as a container image (`Dockerfile`) and a Helm chart (`deploy/helm/lob-engine`): one
@@ -499,7 +528,7 @@ Every alert links to the [runbook](docs/operations/runbook.md); metrics are list
 | Slow consumers | Stuck sink, mocked WebSocket session | A client that stops reading is disconnected without slowing order entry |
 | Binary feed | Real UDP and TCP sockets | A consumer losing one packet in five rebuilds every book by retransmission alone; a refused retransmission falls back to a snapshot; updates are never split; every sequence number exists at the source |
 | Drop copy | FIX sessions over sockets | Every ExecutionReport of every member is copied and marked; drop copy sessions cannot trade |
-| Performance *(phase 6)* | JMH | Throughput and p50 / p99 / p99.9 latency, with published methodology |
+| Performance | JMH, HdrHistogram | Throughput and p50 / p99 / p99.9 latency, with published methodology ([results](docs/performance.md)) |
 
 ---|---|---|
 | Core scenarios | JUnit 5 + AssertJ | Partial fills, multi-level sweeps, FIFO at equal price, cancels, rejections |
@@ -526,7 +555,21 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; RTS 22 reports, surveillance | ⏳ |
 | 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅; TLS and mTLS (phase 9), OIDC | ⏳ |
 | 9 | **Operations & resilience**: [Prometheus metrics, probes and alerts](docs/operations/observability.md) ✅, [runbook](docs/operations/runbook.md) ✅, one writer per journal ✅, soak test ✅, container image, compose stack and Helm chart ✅, [HA design](docs/adr/0018-operations-and-high-availability.md) ✅; replication and failover, chaos tests | ⏳ |
-| 10 | **Post-trade & analytics** *(optional)* | |
+| 10 | **Post-trade & analytics** *(optional)*: [clearing trade file and maker/taker/auction fees](docs/interfaces/trade-file.md) ✅, [Python microstructure analytics](docs/analytics.md) ✅ | ✅ |
+
+---
+
+## Origins: the C++ prototype
+
+This project started as [lob-engine](https://github.com/Ahmed-Berrada/lob-engine), a single-threaded matching engine
+in C++17 (`std::map` price levels, intrusive FIFO lists, a pool allocator). It answered one question, how fast a book
+can match, and its benchmark is documented there: a median of 149 to 163 ns per operation depending on the machine.
+
+Order_Book is the same idea rebuilt as a venue core: determinism, durability, interfaces and rules first, then speed.
+lob-engine is archived. Its latency figures are for the C++ code and say nothing about this Java engine, which
+publishes its own numbers, with methodology, in [performance](docs/performance.md).
+
+Write-up of both: [ahmedberrada.com/work/order-book](https://www.ahmedberrada.com/work/order-book).
 
 ---
 
@@ -539,6 +582,8 @@ Order_Book/
 ├── engine-service/     writer thread per instrument, routing, price conversion, event listeners
 ├── fix-gateway/        FIX 4.4 order entry (QuickFIX/J)
 ├── market-data/        level-2 feed built from the event stream
+├── post-trade/         clearing trade file and fees, computed from the journals
+├── analytics/          Python market report from the post-trade files (standard library only)
 ├── api/                Spring Boot REST adapter, OpenAPI
 ├── docs/adr/           architecture decision records
 ├── docs/rulebook/      venue rules, cited by tests
