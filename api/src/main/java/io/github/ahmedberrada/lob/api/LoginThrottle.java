@@ -31,59 +31,110 @@ final class LoginThrottle {
         REST, FIX
     }
 
+    /**
+     * Why an attempt may not go on.
+     *
+     * @param retryAfter how long to wait before trying again
+     * @param busy       {@code true} if the name is not locked out, but enough of its attempts are already being
+     *                   checked that they could reach the limit
+     */
+    record Refusal(Duration retryAfter, boolean busy) {
+    }
+
     /** Lockouts off. */
-    static final LoginThrottle NONE = new LoginThrottle(0, Duration.ZERO, System::nanoTime);
+    static final LoginThrottle NONE = new LoginThrottle(0, Duration.ZERO, Duration.ZERO, System::nanoTime);
 
     static final int MAX_TRACKED = 10_000;
 
     private static final Logger LOG = LoggerFactory.getLogger(LoginThrottle.class);
-    /** How long to wait when the attempts already in progress could reach the limit. */
+    /** How long a refused busy attempt is told to wait. */
     private static final Duration BUSY = Duration.ofSeconds(1);
     private static final Pattern IPV6_LITERAL = Pattern.compile("[0-9A-Fa-f:.]+");
 
     private final int maxFailures;
     private final long lockoutNanos;
     private final LongSupplier nanos;
-    private final Map<Key, Failures> failures = new LinkedHashMap<>(16, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<Key, Failures> eldest) {
-            return size() > MAX_TRACKED;
-        }
-    };
+    private final long busyWaitNanos;
+    /** In access order: the least recently used first. */
+    private final Map<Key, Failures> failures = new LinkedHashMap<>(16, 0.75f, true);
 
-    LoginThrottle(int maxFailures, Duration lockout, LongSupplier nanos) {
+    /**
+     * @param busyWait how long an attempt waits for one of the same name and address to finish, when those being
+     *                 checked could reach the limit, before it is refused
+     * @param nanos    the clock of lockouts
+     */
+    LoginThrottle(int maxFailures, Duration lockout, Duration busyWait, LongSupplier nanos) {
         if (maxFailures > 0 && !lockout.isPositive()) {
             throw new IllegalArgumentException("a lockout must be positive: " + lockout);
         }
         this.maxFailures = maxFailures;
         this.lockoutNanos = lockout.toNanos();
+        this.busyWaitNanos = busyWait.toNanos();
         this.nanos = nanos;
     }
 
     /**
      * Starts an attempt for {@code name} from {@code address}, unless the name is locked out from there.
      *
-     * @return how long to wait before trying again, or empty if the attempt may go on; then {@link #end} must follow
+     * <p>At most {@code maxFailures} minus the failures so far are checked at once for a name and address; another
+     * attempt waits for one of them to finish, for up to {@code busyWait}. A client with the right secret is
+     * therefore slowed, not refused, when it sends many requests at once.
+     *
+     * @return why the attempt may not go on, or empty if it may; then {@link #end} must follow
      */
-    synchronized Optional<Duration> begin(Channel channel, String name, String address) {
+    synchronized Optional<Refusal> begin(Channel channel, String name, String address) {
         if (maxFailures == 0) {
             return Optional.empty();
         }
         Key key = key(channel, name, address);
-        Failures f = failures.computeIfAbsent(key, k -> new Failures());
-        long now = nanos.getAsLong();
-        if (f.count >= maxFailures) {
-            long left = f.lockedUntil - now;
-            if (left > 0) {
-                return Optional.of(Duration.ofNanos(left));
+        long waitUntil = System.nanoTime() + busyWaitNanos;
+        while (true) {
+            if (!failures.containsKey(key) && failures.size() >= MAX_TRACKED && !forgetOne()
+                    && failures.size() >= 2 * MAX_TRACKED) {
+                return Optional.of(new Refusal(BUSY, true));     // full of lockouts and attempts in progress
             }
-            f.count = 0;                                   // the lockout is over: count again from zero
+            Failures f = failures.computeIfAbsent(key, k -> new Failures());
+            if (f.count >= maxFailures) {
+                long left = f.lockedUntil - nanos.getAsLong();
+                if (left > 0) {
+                    return Optional.of(new Refusal(Duration.ofNanos(left), false));
+                }
+                f.count = 0;                               // the lockout is over: count again from zero
+            }
+            if (f.count + f.inFlight < maxFailures) {
+                f.inFlight++;
+                return Optional.empty();
+            }
+            long waitNanos = waitUntil - System.nanoTime();
+            if (waitNanos <= 0) {
+                return Optional.of(new Refusal(BUSY, true));
+            }
+            try {
+                wait(Math.max(1, waitNanos / 1_000_000));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return Optional.of(new Refusal(BUSY, true));
+            }
         }
-        if (f.count + f.inFlight >= maxFailures) {
-            return Optional.of(BUSY);
+    }
+
+    /**
+     * Forgets the least recently used entry that is neither locked out nor being checked, so that a flood of new
+     * names cannot reset a lockout. Partial counts can be forgotten: undoing them takes as many new names as there
+     * are entries, a guess on another name each.
+     */
+    private boolean forgetOne() {
+        long now = nanos.getAsLong();
+        var entries = failures.values().iterator();
+        while (entries.hasNext()) {
+            Failures f = entries.next();
+            boolean locked = f.count >= maxFailures && f.lockedUntil - now > 0;
+            if (!locked && f.inFlight == 0) {
+                entries.remove();
+                return true;
+            }
         }
-        f.inFlight++;
-        return Optional.empty();
+        return false;
     }
 
     /** Ends an attempt that {@link #begin} let go on. */
@@ -91,6 +142,7 @@ final class LoginThrottle {
         if (maxFailures == 0) {
             return;
         }
+        notifyAll();                                       // an attempt waiting for this one may go on
         Key key = key(channel, name, address);
         Failures f = failures.get(key);
         if (f == null) {                                   // forgotten meanwhile: count the failure afresh

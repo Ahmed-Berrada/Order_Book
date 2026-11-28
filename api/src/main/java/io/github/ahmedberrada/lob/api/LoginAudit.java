@@ -17,7 +17,6 @@ class LoginAudit {
         String name = event.getAuthentication().getName();
         String address = event.getAuthentication().getDetails() instanceof WebAuthenticationDetails web
                 ? web.getRemoteAddress() : null;
-        LOG.warn("authentication failed for user '{}' from {}{}", name, address == null ? "unknown address" : address,
-                event.getException() instanceof ThrottledAuthentication.LockedOutException ? " (locked out)" : "");
+        LOG.warn("authentication failed for user '{}' from {}", name, address == null ? "unknown address" : address);
     }
 }

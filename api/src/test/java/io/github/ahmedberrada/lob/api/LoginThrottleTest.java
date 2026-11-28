@@ -15,14 +15,14 @@ import org.junit.jupiter.api.Test;
 class LoginThrottleTest {
 
     private final AtomicLong nanos = new AtomicLong(-5_000_000_000L);       // System.nanoTime may be negative
-    private final LoginThrottle throttle = new LoginThrottle(3, Duration.ofSeconds(60), nanos::get);
+    private final LoginThrottle throttle = new LoginThrottle(3, Duration.ofSeconds(60), Duration.ZERO, nanos::get);
 
     private Optional<Duration> attempt(String name, String address, boolean succeeds) {
-        Optional<Duration> wait = throttle.begin(Channel.REST, name, address);
-        if (wait.isEmpty()) {
+        Optional<LoginThrottle.Refusal> refusal = throttle.begin(Channel.REST, name, address);
+        if (refusal.isEmpty()) {
             throttle.end(Channel.REST, name, address, succeeds);
         }
-        return wait;
+        return refusal.map(LoginThrottle.Refusal::retryAfter);
     }
 
     private void fail(String name, String address, int times) {
@@ -61,7 +61,7 @@ class LoginThrottleTest {
         assertThat(throttle.begin(Channel.REST, "alice", "10.0.0.1")).isEmpty();
         assertThat(throttle.begin(Channel.REST, "alice", "10.0.0.1")).isEmpty();
         assertThat(throttle.begin(Channel.REST, "alice", "10.0.0.1")).as("one failed, two in flight")
-                .contains(Duration.ofSeconds(1));
+                .contains(new LoginThrottle.Refusal(Duration.ofSeconds(1), true));
         throttle.end(Channel.REST, "alice", "10.0.0.1", true);                 // one succeeded: count cleared
         assertThat(throttle.begin(Channel.REST, "alice", "10.0.0.1")).isEmpty();
         throttle.end(Channel.REST, "alice", "10.0.0.1", false);
@@ -109,20 +109,43 @@ class LoginThrottleTest {
             assertThat(LoginThrottle.NONE.begin(Channel.REST, "alice", "10.0.0.1")).isEmpty();
             LoginThrottle.NONE.end(Channel.REST, "alice", "10.0.0.1", false);
         }
-        assertThatIllegalArgumentException().isThrownBy(() -> new LoginThrottle(5, Duration.ZERO, nanos::get));
-        assertThatIllegalArgumentException().isThrownBy(() -> new LoginThrottle(5, Duration.ofSeconds(-1), nanos::get));
+        assertThatIllegalArgumentException().isThrownBy(() -> new LoginThrottle(5, Duration.ZERO, Duration.ZERO, nanos::get));
+        assertThatIllegalArgumentException().isThrownBy(() -> new LoginThrottle(5, Duration.ofSeconds(-1), Duration.ZERO, nanos::get));
     }
 
     @Test
-    void theCountsAreBoundedTheLeastRecentlyUsedForgottenFirst() {
-        fail("alice", "10.0.0.1", 3);
-        for (int i = 0; i < LoginThrottle.MAX_TRACKED - 1; i++) {
+    void aFloodOfNewNamesForgetsPartialCountsButNeverALockoutOrAnAttemptInProgress() {
+        fail("alice", "10.0.0.1", 3);                                           // locked, and the eldest entry
+        assertThat(throttle.begin(Channel.REST, "bob", "10.0.0.1")).isEmpty();  // in progress
+        fail("carol", "10.0.0.1", 1);                                           // a partial count
+        for (int i = 0; i < LoginThrottle.MAX_TRACKED; i++) {
             fail("guess" + i, "10.9.9.9", 1);
         }
-        assertThat(attempt("alice", "10.0.0.1", true)).as("still locked, and now recently used").isPresent();
-        fail("one-more", "10.9.9.9", 1);
         assertThat(throttle.tracked()).isEqualTo(LoginThrottle.MAX_TRACKED);
-        assertThat(attempt("alice", "10.0.0.1", true)).as("the eldest was forgotten, not alice").isPresent();
+        assertThat(attempt("alice", "10.0.0.1", true)).as("a lockout survives a flood").isPresent();
+        throttle.end(Channel.REST, "bob", "10.0.0.1", false);
+        fail("bob", "10.0.0.1", 2);
+        assertThat(attempt("bob", "10.0.0.1", true)).as("the attempt in progress was counted").isPresent();
+        fail("carol", "10.0.0.1", 2);
+        assertThat(attempt("carol", "10.0.0.1", true)).as("carol's partial count was forgotten").isEmpty();
+    }
+
+    @Test
+    void anAttemptBeyondThoseBeingCheckedWaitsForOneToFinish() throws Exception {
+        LoginThrottle waiting = new LoginThrottle(2, Duration.ofSeconds(60), Duration.ofSeconds(5), nanos::get);
+        assertThat(waiting.begin(Channel.REST, "alice", "10.0.0.1")).isEmpty();
+        assertThat(waiting.begin(Channel.REST, "alice", "10.0.0.1")).isEmpty();
+        var third = java.util.concurrent.CompletableFuture.supplyAsync(
+                () -> waiting.begin(Channel.REST, "alice", "10.0.0.1"));
+        Thread.sleep(100);
+        assertThat(third).as("waits while two are being checked").isNotDone();
+        waiting.end(Channel.REST, "alice", "10.0.0.1", true);                    // the right secret
+        assertThat(third.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEmpty();
+
+        LoginThrottle impatient = new LoginThrottle(1, Duration.ofSeconds(60), Duration.ofMillis(50), nanos::get);
+        assertThat(impatient.begin(Channel.REST, "alice", "10.0.0.1")).isEmpty();
+        assertThat(impatient.begin(Channel.REST, "alice", "10.0.0.1"))
+                .contains(new LoginThrottle.Refusal(Duration.ofSeconds(1), true));
     }
 
     @Test
@@ -143,5 +166,39 @@ class LoginThrottleTest {
         nanos.addAndGet(60_000_000_000L);
         assertThat(logons.authenticate("MEMBER1", "secret", "/10.0.0.1:4002")).isTrue();
         assertThat(logons.authenticate("MEMBER1", "guess")).isFalse();             // no address known
+    }
+
+    @Test
+    void endingAnAttemptWhoseEntryWasForgottenCountsAFailureAfresh() {
+        LoginThrottle one = new LoginThrottle(1, Duration.ofSeconds(60), Duration.ZERO, nanos::get);
+        one.end(Channel.REST, "alice", "10.0.0.1", true);                        // nothing to clear
+        assertThat(one.tracked()).isZero();
+        one.end(Channel.REST, "alice", "10.0.0.1", false);
+        assertThat(one.begin(Channel.REST, "alice", "10.0.0.1")).isPresent();
+    }
+
+    @Test
+    void aTableFullOfLockoutsRefusesNewNames() {
+        for (int i = 0; i < 2 * LoginThrottle.MAX_TRACKED; i++) {
+            fail("locked" + i, "10.9.9.9", 3);
+        }
+        assertThat(throttle.tracked()).isEqualTo(2 * LoginThrottle.MAX_TRACKED);
+        assertThat(throttle.begin(Channel.REST, "newcomer", "10.0.0.1"))
+                .contains(new LoginThrottle.Refusal(Duration.ofSeconds(1), true));
+        nanos.addAndGet(60_000_000_000L);                                        // the lockouts are over
+        assertThat(attempt("newcomer", "10.0.0.1", true)).isEmpty();
+    }
+
+    @Test
+    void anInterruptedWaitIsRefused() throws Exception {
+        LoginThrottle waiting = new LoginThrottle(1, Duration.ofSeconds(60), Duration.ofSeconds(30), nanos::get);
+        assertThat(waiting.begin(Channel.REST, "alice", "10.0.0.1")).isEmpty();
+        java.util.concurrent.atomic.AtomicReference<Optional<LoginThrottle.Refusal>> result =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Thread thread = Thread.ofPlatform().start(() -> result.set(waiting.begin(Channel.REST, "alice", "10.0.0.1")));
+        Thread.sleep(100);
+        thread.interrupt();
+        thread.join(5_000);
+        assertThat(result.get()).contains(new LoginThrottle.Refusal(Duration.ofSeconds(1), true));
     }
 }

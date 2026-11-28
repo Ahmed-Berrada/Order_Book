@@ -1,5 +1,6 @@
 package io.github.ahmedberrada.lob.api;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -63,7 +64,8 @@ class SecurityConfiguration {
     LoginThrottle loginThrottle(LobProperties properties) {
         LobProperties.SecurityProperties security = properties.security();
         return security.enabled()
-                ? new LoginThrottle(security.maxFailures(), security.lockout(), System::nanoTime) : LoginThrottle.NONE;
+                ? new LoginThrottle(security.maxFailures(), security.lockout(), Duration.ofSeconds(2),
+                        System::nanoTime) : LoginThrottle.NONE;
     }
 
     @Bean

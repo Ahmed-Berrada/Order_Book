@@ -59,7 +59,16 @@ that address for a minute, and the secret is not even checked (AC-009). The chec
 verifies the secret, so it sees the name exactly as Spring Security authenticates it, whatever the spelling of
 the `Authorization` header; REST names are counted without regard to case, as they are looked up. An attempt
 reserves its place before the secret is checked, so guesses sent in parallel count as failures until they are
-known to have succeeded. Keying on the address as well as the
+known to have succeeded. The price is that a client with the right secret, sending many requests at once over
+REST, has at most five checked at a time (HTTP Basic checks the secret on every request): the others wait for
+a slot rather than being refused, for up to 2 seconds. FIX checks the secret once per session and is not
+affected.
+
+A flood of new names cannot undo a lockout: when the table is full, the entry forgotten is the least
+recently used that is neither locked out nor being checked. It can forget a partial count, at the price of a
+guess on another name for each entry in the table. Callers that share an address (NAT, a proxy) share its
+counts: a success of the member clears an attacker's failures on that name from there. A FIX Logon whose
+address the transport does not give is counted under one shared address for its CompID. Keying on the address as well as the
 name means an attacker cannot lock a member out by failing on purpose from elsewhere; it also means an
 attacker with many addresses gets a few guesses from each, which the bcrypt cost and the network controls in
 front of the venue must cover. REST answers `429` with `Retry-After`, which a client can act on and which

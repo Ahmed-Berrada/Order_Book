@@ -103,7 +103,8 @@ lockout starts (`REST 'alice' locked out from 10.0.0.1 …`, or `FIX 'MEMBER1' �
 is the caller's and not the proxy's (ADR-0017 §6). A member that is locked
 out has usually been configured with an old secret: fix its configuration and wait out the minute. Many
 names locked out from one address is someone guessing: block the address in front of the venue. A restart
-clears the lockouts.
+clears the lockouts. `AUTHENTICATION_BUSY` means a client sends many REST requests at once and the secret
+checks queue up behind each other: the client should use fewer connections in parallel, or FIX.
 
 ## The queue is nearly full or commands are slow
 
