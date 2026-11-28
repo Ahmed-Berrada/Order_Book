@@ -16,4 +16,14 @@ public interface LogonAuthenticator {
      * @return whether the session may log on
      */
     boolean authenticate(String compId, String password);
+
+    /**
+     * Like {@link #authenticate(String, String)}, knowing where the Logon came from, so that repeated failures
+     * can be locked out per address (AC-009).
+     *
+     * @param remoteAddress the peer's address as the transport gives it, or {@code null} if not known
+     */
+    default boolean authenticate(String compId, String password, String remoteAddress) {
+        return authenticate(compId, password);
+    }
 }

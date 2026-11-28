@@ -71,9 +71,13 @@ public record LobProperties(
      *
      * @param enabled whether callers must authenticate; on unless switched off by name (AC-003)
      * @param users   the REST principals
+     * @param maxFailures failed authentications in a row, for one name from one address, before a lockout (AC-009);
+     *                {@code 0} switches lockouts off
+     * @param lockout how long a locked-out name is refused from that address
      */
     public record SecurityProperties(
-            @DefaultValue("true") boolean enabled, @DefaultValue List<@Valid UserProperties> users) {
+            @DefaultValue("true") boolean enabled, @DefaultValue List<@Valid UserProperties> users,
+            @DefaultValue("5") @PositiveOrZero int maxFailures, @DefaultValue("1m") @NotNull Duration lockout) {
     }
 
     /**
