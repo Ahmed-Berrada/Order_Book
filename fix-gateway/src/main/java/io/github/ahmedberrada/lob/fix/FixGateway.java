@@ -38,9 +38,15 @@ public final class FixGateway implements AutoCloseable {
     /** Starts accepting member connections; a session logs on only if the authenticator accepts it. */
     public static FixGateway start(MatchingService service, FixGatewayConfig config,
             LogonAuthenticator authenticator) throws ConfigError {
+        return start(service, config, authenticator, null);
+    }
+
+    /** Like {@link #start(MatchingService, FixGatewayConfig, LogonAuthenticator)}, over TLS unless {@code tls} is null. */
+    public static FixGateway start(MatchingService service, FixGatewayConfig config,
+            LogonAuthenticator authenticator, FixTls tls) throws ConfigError {
         Objects.requireNonNull(service, "service");
         Objects.requireNonNull(authenticator, "authenticator");
-        SessionSettings settings = settings(config);
+        SessionSettings settings = settings(config, tls);
         List<SessionID> dropCopies = config.dropCopyCompIds().stream()
                 .map(target -> new SessionID(BEGIN_STRING, config.senderCompId(), target)).toList();
         Map<SessionID, SelfTradeInstruction> selfTrade = new HashMap<>();
@@ -57,7 +63,24 @@ public final class FixGateway implements AutoCloseable {
     }
 
     static SessionSettings settings(FixGatewayConfig config) {
+        return settings(config, null);
+    }
+
+    static SessionSettings settings(FixGatewayConfig config, FixTls tls) {
         SessionSettings settings = new SessionSettings();
+        if (tls != null) {                                             // AC-010, AC-011
+            settings.setString("SocketUseSSL", "Y");
+            settings.setString("SocketKeyStore", tls.keyStore().toAbsolutePath().toString());
+            settings.setString("SocketKeyStorePassword", tls.keyStorePassword());
+            settings.setString("KeyStoreType", tls.keyStoreType());
+            settings.setString("EnabledProtocols", FixTls.PROTOCOLS);
+            if (tls.trustStore() != null) {
+                settings.setString("SocketTrustStore", tls.trustStore().toAbsolutePath().toString());
+                settings.setString("SocketTrustStorePassword", tls.trustStorePassword());
+                settings.setString("TrustStoreType", tls.trustStoreType());
+            }
+            settings.setString("NeedClientAuth", tls.needClientAuth() ? "Y" : "N");
+        }
         settings.setString("ConnectionType", "acceptor");
         settings.setString("BeginString", BEGIN_STRING);
         settings.setString("SenderCompID", config.senderCompId());

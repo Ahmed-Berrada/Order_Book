@@ -32,12 +32,17 @@ final class FixVenue implements AutoCloseable {
 
     FixVenue(Path directory, int port, SelfTradeMode selfTradeMode, LogonAuthenticator authenticator)
             throws Exception {
+        this(directory, port, selfTradeMode, authenticator, null);
+    }
+
+    FixVenue(Path directory, int port, SelfTradeMode selfTradeMode, LogonAuthenticator authenticator, FixTls tls)
+            throws Exception {
         this.port = port;
         this.service = MatchingService.start(directory.resolve("journals"), List.of(AAPL),
                 new JournalOptions(FsyncPolicy.OS, 0), TimeSource.system(), 1_000);
         this.gateway = FixGateway.start(service, new FixGatewayConfig("127.0.0.1", port, "LOB",
                 List.of("MEMBER1", "MEMBER2"), List.of("RISK"), directory.resolve("fix-store"), selfTradeMode),
-                authenticator);
+                authenticator, tls);
     }
 
     static int freePort() throws IOException {
