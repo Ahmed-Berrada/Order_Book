@@ -51,7 +51,7 @@ front, certificates are rotated by the platform, and the venue must be told so
 (`lob.security.tls-terminated-in-front`, AC-010). The FIX port is exposed by its own service, over TLS in the
 venue or a TCP proxy that terminates it.
 
-### 5. High availability (design, not built)
+### 5. High availability (design; replication and manual promotion built in ADR-0025)
 
 **Model.** One primary per instrument group and one standby. The primary journals a command, sends it to
 the standby, and acknowledges it only when the standby has written it (synchronous replication). The

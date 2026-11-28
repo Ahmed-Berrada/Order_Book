@@ -6,7 +6,7 @@ of every module's tests. Do not edit by hand: change a rule or a test, then run 
 
 Regulation to rules: [regulatory-mapping.md](regulatory-mapping.md).
 
-**144 rules, 144 in force, 0 draft.**
+**147 rules, 147 in force, 0 draft.**
 
 | Rule | Title | Chapter | Status | Verified by |
 |---|---|---|---|---|
@@ -119,7 +119,10 @@ Regulation to rules: [regulatory-mapping.md](regulatory-mapping.md).
 | `RS-010` | Snapshot fidelity | [resilience](../rulebook/resilience.md) | in force | EngineSnapshotTest#restoreRejectsInconsistentSnapshots, EngineSnapshotTest#snapshotListsOrdersInPriorityOrderAndRestoresTheSameQueues, IcebergTest#icebergsSurviveASnapshot, IcebergTest#snapshotWithAnInvalidPeakIsRefused and 4 more |
 | `RS-011` | One writer | [resilience](../rulebook/resilience.md) | in force | JournaledEngineTest#aFailedRecoveryReleasesTheLock, JournaledEngineTest#aJournalDirectoryHasOneWriterAndTheLockIsReleasedOnClose |
 | `RS-012` | The venue's acknowledgement | [resilience](../rulebook/resilience.md) | in force | VenueCrashTest#aFullDiskHaltsOnlyTheInstrumentWhoseJournalFilledAndARestartRecoversIt, VenueCrashTest#aVenueKilledWhileClientsTradeLosesNoAcknowledgedOrder |
-| `RS-013` | Sealed command journal | [resilience](../rulebook/resilience.md) | in force | JournalSealConfigurationTest, JournalSealTest |
+| `RS-013` | Sealed command journal | [resilience](../rulebook/resilience.md) | in force | JournalSealConfigurationTest, JournalSealTest, ReplicationTest#aSealedJournalIsReplicatedWithItsSealsAndTheirKeyHoldsOnThePromotedStandby |
+| `RS-014` | Synchronous replication | [resilience](../rulebook/resilience.md) | in force | ReplicationConfigurationTest, ReplicationProtocolTest, ReplicationTest#aSealedJournalIsReplicatedWithItsSealsAndTheirKeyHoldsOnThePromotedStandby, ReplicationTest#aStandbyThatStartsLateOrIsCutMidMessageCatchesUp and 3 more |
+| `RS-015` | No standby, no acknowledgement | [resilience](../rulebook/resilience.md) | in force | ReplicationTest#aStandbyTooSlowToConfirmStopsThePrimary, ReplicationTest#withoutItsStandbyThePrimaryAcknowledgesNothingAndStops |
+| `RS-016` | Promotion and fencing | [resilience](../rulebook/resilience.md) | in force | ReplicationProtocolTest, ReplicationTest#aPromotedStandbyFencesTheOldPrimary |
 | `SP-001` | Group and mode | [self-trade-prevention](../rulebook/self-trade-prevention.md) | in force | FixAndRestTest#theConfiguredSelfTradeModeAppliesToFixMembersButNotToRest, MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel, SelfTradePreventionFixTest#aMembersOrderThatMeetsItsOwnIsCancelledAndAnotherMemberStillTrades, SelfTradePreventionFixTest#ordersFromOtherChannelsHaveNoGroup and 3 more |
 | `SP-002` | Cancel newest | [self-trade-prevention](../rulebook/self-trade-prevention.md) | in force | MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel, SelfTradePreventionFixTest#aMembersOrderThatMeetsItsOwnIsCancelledAndAnotherMemberStillTrades, SelfTradePreventionTest#cancelNewestStopsAtTheOwnOrderAndKeepsEarlierFills, SelfTradePreventionTest#cancelOldestThenAnEmptyBookIsAnOrdinaryUnfilledMarketRemainder |
 | `SP-003` | Cancel oldest | [self-trade-prevention](../rulebook/self-trade-prevention.md) | in force | BookImageTest#imageAndSubscribersMatchTheEngineAfterEveryCommand, FixAndRestTest#theConfiguredSelfTradeModeAppliesToFixMembersButNotToRest, MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel, SelfTradePreventionFixTest#cancelOldestReportsTheCancelledRestingOrderToItsOwner and 2 more |

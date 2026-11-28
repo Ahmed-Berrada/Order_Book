@@ -25,7 +25,8 @@ class VenueConfiguration {
         MeterRegistry meters = registry.getIfAvailable();
         return MatchingService.start(properties.dataDirectory(), properties.instrumentConfigs(),
                 new JournalOptions(properties.fsync(), properties.snapshotInterval(),
-                        properties.journalSeal() == null ? null : properties.journalSeal().sealing()),
+                        properties.journalSeal() == null ? null : properties.journalSeal().sealing(),
+                        properties.replication() == null ? null : properties.replication().target()),
                 TimeSource.system(), properties.queueCapacity(),
                 meters == null ? CommandObserver.NONE : new MicrometerCommandObserver(meters),
                 properties.throttle().limits());

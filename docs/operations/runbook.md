@@ -142,6 +142,25 @@ sealing was just turned on for a venue that already traded: only in that second 
 `lob.journal-seal.seal-existing-journal=true`. Keys: `openssl genpkey -algorithm ed25519 -out seal.pem` and
 `openssl pkey -in seal.pem -pubout -out seal.pub`; keep `seal.pem` in a secret store, never with the journals.
 
+## Failing over to the standby
+
+With a standby (RS-014), the primary halts its instruments as soon as the standby cannot confirm (RS-015): every
+acknowledged command is on the standby. If the primary's machine or disk is lost:
+
+1. Make sure the old primary is stopped, or cut off: it must not be restarted as primary. (If it is, its standby,
+   once promoted, refuses it: RS-016.)
+2. Stop the standby (`lob-replica`), then promote it:
+   `java -cp "$CP" io.github.ahmedberrada.lob.journal.ReplicaTool <standby-root>`, which prints each instrument's new
+   term.
+3. Start the venue on the standby's root as data directory (`LOB_DATA_DIR`). Recovery rebuilds every instrument from
+   its command journal; with sealing (RS-013), its seals are checked.
+4. Point members at the new primary, and give it a new standby (`lob.replication.*`): an empty directory on another
+   machine. Never reuse the old primary's directory as a standby: it may hold commands no one confirmed.
+
+`the standby refused: fenced` in a primary's log means it was deposed: stop it. `the standby is ahead` means the
+standby holds more than this primary (possible only with `fsync: OS`): promote the standby instead. `differs from
+this primary's`: the standby holds another history; give it an empty directory.
+
 ## Backups and retention
 
 Journals grow without bound; the engine never deletes them (RS-008). Back up each instrument's directory
