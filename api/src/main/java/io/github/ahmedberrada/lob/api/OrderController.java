@@ -3,17 +3,22 @@ package io.github.ahmedberrada.lob.api;
 import io.github.ahmedberrada.lob.core.CancelOrder;
 import io.github.ahmedberrada.lob.core.CancelRejected;
 import io.github.ahmedberrada.lob.core.Event;
+import io.github.ahmedberrada.lob.core.MassCancel;
+import io.github.ahmedberrada.lob.core.MassCancelled;
 import io.github.ahmedberrada.lob.core.OrderCancelled;
 import io.github.ahmedberrada.lob.core.OrderRejected;
 import io.github.ahmedberrada.lob.core.RejectReason;
 import io.github.ahmedberrada.lob.core.ReplaceRejected;
+import io.github.ahmedberrada.lob.core.Side;
 import io.github.ahmedberrada.lob.service.InstrumentConfig;
 import io.github.ahmedberrada.lob.service.MatchingService;
 import io.github.ahmedberrada.lob.service.RequestRefusedException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.PositiveOrZero;
 import java.net.URI;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,7 +29,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Order entry (docs/interfaces/rest-api.md). Each handler returns the service's future, so the servlet
@@ -74,6 +81,38 @@ class OrderController {
             return new CancelResponse(orderId, cancelled.cancelledQuantity(), batch.commandSequence(),
                     Timestamps.of(batch));
         });
+    }
+
+    /**
+     * Cancels all the caller's open orders in the instrument, on one side or both (RK-006). The operator (an
+     * {@code ADMIN} naming no member) cancels every member's orders, and must say so with {@code allMembers=true}:
+     * a forgotten header must not empty the book.
+     */
+    @DeleteMapping
+    CompletableFuture<MassCancelResponse> massCancel(@PathVariable String symbol,
+            @RequestParam(required = false) String side, @RequestParam(defaultValue = "false") boolean allMembers,
+            @RequestHeader(name = MEMBER_HEADER, required = false) @PositiveOrZero Long memberHeader,
+            Authentication authentication) {
+        Side parsed;
+        try {
+            parsed = side == null ? null : Side.valueOf(side);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "side must be BUY or SELL");
+        }
+        long member = members.resolve(authentication, memberHeader);
+        if ((member == 0) != allMembers) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, member == 0
+                    ? "a mass cancel by the operator cancels every member's orders: name a member, or pass allMembers=true"
+                    : "allMembers=true is for the operator only");
+        }
+        return service.submit(symbol, new MassCancel(parsed), member, null)
+                .thenApply(batch -> {
+                    MassCancelled summary = (MassCancelled) batch.events().getFirst();
+                    List<Long> ids = batch.events().stream().filter(OrderCancelled.class::isInstance)
+                            .map(e -> ((OrderCancelled) e).orderId()).toList();
+                    return new MassCancelResponse(symbol, summary.side(), summary.cancelledOrders(), ids,
+                            batch.commandSequence(), Timestamps.of(batch));
+                });
     }
 
     @PutMapping("/{orderId}")

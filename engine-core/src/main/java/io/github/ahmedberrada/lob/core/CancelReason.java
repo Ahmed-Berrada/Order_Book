@@ -17,5 +17,7 @@ public enum CancelReason {
     /** The remainder of an order that met the volatility band (VI-003). */
     VOLATILITY_INTERRUPTION,
     /** The member was suspended and its open orders cancelled (RK-004). */
-    KILL_SWITCH
+    KILL_SWITCH,
+    /** The member, or the operator, cancelled all its open orders (RK-006). */
+    MASS_CANCEL
 }

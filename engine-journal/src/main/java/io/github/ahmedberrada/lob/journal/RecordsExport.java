@@ -7,6 +7,7 @@ import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MemberCommandRejected;
+import io.github.ahmedberrada.lob.core.MassCancelled;
 import io.github.ahmedberrada.lob.core.MemberLimitsChanged;
 import io.github.ahmedberrada.lob.core.MemberResumed;
 import io.github.ahmedberrada.lob.core.MemberSuspended;
@@ -139,6 +140,8 @@ public final class RecordsExport {
             case MemberSuspended e -> row.member(e.memberId()).record("MEMBER_SUSPENDED")
                     .quantity(e.cancelledOrders());
             case MemberResumed e -> row.member(e.memberId()).record("MEMBER_RESUMED");
+            case MassCancelled e -> row.member(e.memberId()).record("MASS_CANCELLED")
+                    .side(e.side() == null ? "BOTH" : e.side().name()).quantity(e.cancelledOrders());
             case MemberCommandRejected e -> row.member(e.memberId()).record("MEMBER_COMMAND_REJECTED")
                     .detail(e.reason().name());
         }

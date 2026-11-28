@@ -5,6 +5,7 @@ import io.github.ahmedberrada.lob.core.Command;
 import io.github.ahmedberrada.lob.core.Event;
 import io.github.ahmedberrada.lob.core.LimitOrder;
 import io.github.ahmedberrada.lob.core.MarketOrder;
+import io.github.ahmedberrada.lob.core.MassCancel;
 import io.github.ahmedberrada.lob.core.ReplaceOrder;
 import io.github.ahmedberrada.lob.core.StopOrder;
 import io.github.ahmedberrada.lob.core.TradeExecuted;
@@ -44,7 +45,7 @@ final class Throttles implements EventListener {
             return null;
         }
         boolean entersOrder = entersOrder(command);
-        if (!entersOrder && !(command instanceof CancelOrder)) {
+        if (!entersOrder && !(isCancel(command))) {
             return null;
         }
         long now = clock.nowMicros();
@@ -74,7 +75,7 @@ final class Throttles implements EventListener {
      * ({@code OVERLOADED}, {@code HALTED}, {@code STOPPED}): it never reached the journal, so it is not a message.
      */
     void release(String symbol, Command command, long memberId) {
-        if (memberId == 0 || !(entersOrder(command) || command instanceof CancelOrder)) {
+        if (memberId == 0 || !(entersOrder(command) || isCancel(command))) {
             return;
         }
         if (entersOrder(command) && limits.messagesPerSecond() > 0) {
@@ -87,6 +88,11 @@ final class Throttles implements EventListener {
         if (ratio != null) {
             ratio.unmessage();
         }
+    }
+
+    /** A cancel, of one order or all (RK-006): counted as a message, never refused. */
+    private static boolean isCancel(Command command) {
+        return command instanceof CancelOrder || command instanceof MassCancel;
     }
 
     private static boolean entersOrder(Command command) {

@@ -77,7 +77,9 @@ class MatchingEnginePropertyTest {
                 .as((m, q, n, c, o, p) -> new SetMemberLimits(m, new MemberLimits(q, n, c, o, p)));
         Arbitrary<Command> suspend = Arbitraries.longs().between(0, 3).map(SuspendMember::new);
         Arbitrary<Command> resume = Arbitraries.longs().between(0, 3).map(ResumeMember::new);
+        Arbitrary<Command> massCancel = Arbitraries.of(Side.BUY, Side.SELL).injectNull(0.4).map(MassCancel::new);
         return Arbitraries.frequencyOf(Tuple.of(2, setLimits), Tuple.of(1, suspend), Tuple.of(1, resume),
+                        Tuple.of(1, massCancel),
                         Tuple.of(6, limit), Tuple.of(1, market), Tuple.of(2, cancel),
                         Tuple.of(2, replace), Tuple.of(2, stop), Tuple.of(1, phase))
                 .list().ofMaxSize(150);
@@ -91,7 +93,7 @@ class MatchingEnginePropertyTest {
             "SP-008", "TP-001", "TP-002", "TP-003", "TP-004", "TP-005", "TP-006", "TP-007", "TP-008",
             "AU-001", "AU-002", "AU-004", "AU-005", "TK-001", "TK-002", "TK-003", "DY-001", "DY-002",
             "VI-001", "VI-002", "VI-003", "VI-004", "VI-005", "MB-001", "MB-002", "MB-003", "RK-001", "RK-002",
-            "RK-003", "RK-004", "RK-005"})
+            "RK-003", "RK-004", "RK-005", "RK-006"})
     void producesExactlyTheSameEventsAsTheReferenceModel(@ForAll("commands") List<Command> commands) {
         MatchingEngine engine = new MatchingEngine(INSTRUMENT);
         ReferenceEngine reference = new ReferenceEngine(INSTRUMENT);
@@ -173,6 +175,7 @@ class MatchingEnginePropertyTest {
                     case MemberSuspended e -> { }
                     case MemberResumed e -> { }
                     case MemberCommandRejected e -> { }
+                    case MassCancelled e -> { }
                 }
             }
 
@@ -265,6 +268,7 @@ class MatchingEnginePropertyTest {
             case SetMemberLimits set -> throw new AssertionError("a member command is never accepted");
             case SuspendMember suspend -> throw new AssertionError("a member command is never accepted");
             case ResumeMember resume -> throw new AssertionError("a member command is never accepted");
+            case MassCancel massCancel -> throw new AssertionError("a mass cancel is never accepted");
         };
     }
 }

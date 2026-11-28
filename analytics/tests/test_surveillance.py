@@ -98,6 +98,21 @@ class ExcessiveCancellationTest(unittest.TestCase):
                                                                          {"orders": 50, "cancelled": 45}))
         self.assertIn("90%", alert.summary)
 
+    def test_a_mass_cancel_is_the_members_own_cancel(self):
+        records = [new(i, 9, i + 1, "BUY", 1) for i in range(50)]
+        records += [cancel(1_000, 9, i + 1, 1, reason="MASS_CANCEL") for i in range(45)]
+        (alert,) = surveillance.excessive_cancellation(records)
+        self.assertEqual(alert.evidence, {"orders": 50, "cancelled": 45})
+        venue = [new(i, 9, i + 1, "BUY", 1) for i in range(50)] + [
+            cancel(1_000, 9, i + 1, 1, reason="KILL_SWITCH") for i in range(50)]
+        self.assertEqual(surveillance.excessive_cancellation(venue), [], "the operator's kill switch is not")
+        operator = [new(i, 9, i + 1, "BUY", 1) for i in range(50)] + [new(100 + i, 0, 100 + i, "BUY", 1) for i in range(50)]
+        operator += [cancel(1_000, 0, i + 1, 1, reason="MASS_CANCEL") for i in range(50)]
+        operator += [cancel(1_000, 0, 100 + i, 1, reason="MASS_CANCEL") for i in range(45)]
+        (alert,) = surveillance.excessive_cancellation(operator)
+        self.assertEqual((alert.member_id, alert.evidence), (0, {"orders": 50, "cancelled": 45}),
+                         "the operator's mass cancel of member 9's orders is not member 9's, nor counted for the operator")
+
     def test_below_either_threshold_nothing(self):
         self.assertEqual(self.day(49, 49), [], "too few orders to judge")
         self.assertEqual(self.day(50, 44), [], "88% cancelled")

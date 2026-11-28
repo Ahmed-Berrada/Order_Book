@@ -33,6 +33,10 @@ class Thresholds:
     cancel_ratio: float = 0.9             # and at least this share of them cancelled by the member
 
 
+# Cancels the member asked for: one by one, or all at once (RK-006). The venue's are not the member's doing.
+MEMBER_CANCELS = {"CLIENT_REQUEST", "MASS_CANCEL"}
+
+
 def _date(r: OrderRecord) -> str:
     return r.timestamp.astimezone(timezone.utc).date().isoformat()
 
@@ -79,7 +83,7 @@ def spoofing(records: Sequence[OrderRecord], thresholds: Thresholds = Thresholds
     medians = {key: median(values) for key, values in sizes.items()}
     alerts = []
     for r in records:
-        if r.record != "ORDER_CANCELLED" or r.detail != "CLIENT_REQUEST" or not r.order_id:
+        if r.record != "ORDER_CANCELLED" or r.detail not in MEMBER_CANCELS or not r.order_id:
             continue
         entry = orders.get((r.instrument, int(r.order_id)))
         if entry is None or entry.member_id != r.member_id:
@@ -110,11 +114,15 @@ def excessive_cancellation(records: Sequence[OrderRecord], thresholds: Threshold
     """Members who cancel nearly every order they enter, per day and instrument."""
     entered: Dict[Tuple[str, str, int], int] = defaultdict(int)
     cancelled: Dict[Tuple[str, str, int], int] = defaultdict(int)
+    owners: Dict[Tuple[str, str], int] = {}                       # (instrument, order ID) -> member who entered it
     for r in records:
         key = (_date(r), r.instrument, r.member_id)
         if r.record == "NEW_ORDER":
             entered[key] += 1
-        elif r.record == "ORDER_CANCELLED" and r.detail == "CLIENT_REQUEST":
+            if r.order_id:
+                owners[(r.instrument, r.order_id)] = r.member_id
+        elif (r.record == "ORDER_CANCELLED" and r.detail in MEMBER_CANCELS
+              and owners.get((r.instrument, r.order_id)) == r.member_id):    # not the operator's mass cancel
             cancelled[key] += 1
     alerts = []
     for key in sorted(entered):

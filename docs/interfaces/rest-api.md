@@ -129,6 +129,18 @@ events are not in it; if a released stop trades with this order, that fill is in
 
 `404` if the order is not resting (CT-008). The cancel request is still journaled.
 
+### `DELETE /api/v1/instruments/{symbol}/orders?side=BUY`
+
+Mass cancel (RK-006): cancels all the caller's open orders in the instrument, resting and parked stops, on the
+`side` given (`BUY` or `SELL`) or on both without one. Role `MEMBER`. An `ADMIN` without `X-Member-Id` acts as the
+operator and cancels every member's orders, and must then also pass `allMembers=true`; without it, or with it from a
+member, `400`. Accepted in every phase and while the member is suspended. `200 OK`:
+
+```json
+{"symbol": "AAPL", "side": "BUY", "cancelledOrders": 2, "cancelledOrderIds": [1, 2], "commandSequence": 44,
+ "timestamp": "2026-10-08T09:11:40.000001Z"}
+```
+
 ### `PUT /api/v1/instruments/{symbol}/orders/{orderId}`
 
 Replaces a resting order's price and **remaining** quantity (OT-005). The order keeps its ID.

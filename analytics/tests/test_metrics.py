@@ -67,6 +67,16 @@ class BucketTest(unittest.TestCase):
 
 class OrderToTradeTest(unittest.TestCase):
 
+    def test_a_mass_cancel_is_one_message_whatever_it_cancels(self):
+        from lob_analytics.files import OrderRecord
+        from datetime import datetime, timezone
+        t = datetime(2026, 11, 28, 9, tzinfo=timezone.utc)
+        records = [OrderRecord(t, "PTX", 9, str(i), "NEW_ORDER", "BUY", "1", "", "", "100", "") for i in (1, 2, 3)]
+        records.append(OrderRecord(t, "PTX", 9, "", "MASS_CANCELLED", "BUY", "3", "", "", "", ""))
+        records += [OrderRecord(t, "PTX", 9, str(i), "ORDER_CANCELLED", "", "1", "", "MASS_CANCEL", "", "") for i in (1, 2, 3)]
+        (ratio,) = metrics.order_to_trade(records)
+        self.assertEqual((ratio.messages, ratio.trades), (4, 0))
+
     def test_counts_the_members_own_messages_and_each_trade_once(self):
         ratios = metrics.order_to_trade(read_records(io.StringIO(RECORDS)))
         by_member = {o.member_id: o for o in ratios if o.trade_date == "2026-11-26"}

@@ -220,6 +220,7 @@ public final class MatchingEngine {
             case SetMemberLimits set -> onSetMemberLimits(set, events);
             case SuspendMember suspend -> onSuspend(suspend, events);
             case ResumeMember resume -> onResume(resume, events);
+            case MassCancel massCancel -> onMassCancel(massCancel, events);
         }
         if (phase == TradingPhase.CONTINUOUS && !interruptionPending) {
             releaseTriggeredStops(events);                       // TP-007
@@ -668,6 +669,23 @@ public final class MatchingEngine {
         List<Order> resting = book.ordersOf(suspend.memberId());
         List<ParkedStop> stops = parkedStops.values().stream().filter(s -> s.memberId() == suspend.memberId()).toList();
         events.add(new MemberSuspended(nextSequence++, suspend.memberId(), resting.size() + stops.size()));
+        cancelAll(resting, stops, CancelReason.KILL_SWITCH, events);
+    }
+
+    private void onMassCancel(MassCancel massCancel, List<Event> events) {
+        long member = currentMember;
+        Side side = massCancel.side();
+        List<Order> resting = (member == 0 ? book.allOrders() : book.ordersOf(member)).stream()
+                .filter(o -> side == null || o.side == side).toList();
+        List<ParkedStop> stops = parkedStops.values().stream()
+                .filter(s -> (member == 0 || s.memberId() == member) && (side == null || s.side() == side))
+                .toList();                                         // by order ID: the map's order
+        events.add(new MassCancelled(nextSequence++, member, side, resting.size() + stops.size()));
+        cancelAll(resting, stops, CancelReason.MASS_CANCEL, events);
+    }
+
+    /** Cancels resting orders and parked stops, both in order of order ID, merged in order of order ID. */
+    private void cancelAll(List<Order> resting, List<ParkedStop> stops, CancelReason reason, List<Event> events) {
         int r = 0;
         int s = 0;
         while (r < resting.size() || s < stops.size()) {                           // in order of order ID
@@ -676,11 +694,10 @@ public final class MatchingEngine {
             if (takeResting) {
                 Order order = resting.get(r++);
                 book.remove(order.orderId);
-                events.add(new OrderCancelled(
-                        nextSequence++, order.orderId, order.remainingQuantity, CancelReason.KILL_SWITCH));
+                events.add(new OrderCancelled(nextSequence++, order.orderId, order.remainingQuantity, reason));
             } else {
                 ParkedStop stop = removeParked(stops.get(s++).orderId());
-                events.add(new OrderCancelled(nextSequence++, stop.orderId(), stop.quantity(), CancelReason.KILL_SWITCH));
+                events.add(new OrderCancelled(nextSequence++, stop.orderId(), stop.quantity(), reason));
             }
         }
     }

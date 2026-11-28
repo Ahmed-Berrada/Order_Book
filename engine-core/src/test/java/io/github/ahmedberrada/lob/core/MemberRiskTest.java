@@ -2,6 +2,7 @@ package io.github.ahmedberrada.lob.core;
 
 import static io.github.ahmedberrada.lob.core.CancelReason.CLIENT_REQUEST;
 import static io.github.ahmedberrada.lob.core.CancelReason.KILL_SWITCH;
+import static io.github.ahmedberrada.lob.core.CancelReason.MASS_CANCEL;
 import static io.github.ahmedberrada.lob.core.RejectReason.INVALID_MEMBER;
 import static io.github.ahmedberrada.lob.core.RejectReason.INVALID_MEMBER_LIMITS;
 import static io.github.ahmedberrada.lob.core.RejectReason.MEMBER_SUSPENDED;
@@ -153,6 +154,59 @@ class MemberRiskTest {
         limits(1, new MemberLimits(5, 0, 0, 0, 0));
         assertThat(engine.process(new ReplaceOrder(1, 90, 6), 1)).containsExactly(
                 new ReplaceRejected(8, 1, RISK_ORDER_QUANTITY));
+    }
+
+    @Test
+    @Rulebook("RK-006")
+    void aMassCancelCancelsTheMembersOpenOrdersOnASideOrBothInOrderId() {
+        limit(1, BUY, 90, 4);                                                   // 1
+        limit(2, BUY, 91, 5);                                                   // 2
+        engine.process(new LimitOrder(BUY, 80, 9, TimeInForce.GTC, false, 3), 1);   // 3, an iceberg
+        limit(1, SELL, 120, 6);                                                 // 4
+        engine.process(new StopOrder(SELL, 70, 2), 1);                          // 5, a parked sell stop
+        engine.process(new StopOrder(BUY, 130, 2), 1);                          // 6, a parked buy stop
+
+        assertThat(engine.process(new MassCancel(BUY), 1)).containsExactly(
+                new MassCancelled(13, 1, BUY, 3),
+                new OrderCancelled(14, 1, 4, MASS_CANCEL),
+                new OrderCancelled(15, 3, 9, MASS_CANCEL),
+                new OrderCancelled(16, 6, 2, MASS_CANCEL));
+        assertThat(engine.process(MassCancel.all(), 1)).containsExactly(
+                new MassCancelled(17, 1, null, 2),
+                new OrderCancelled(18, 4, 6, MASS_CANCEL),
+                new OrderCancelled(19, 5, 2, MASS_CANCEL));
+        assertThat(engine.process(MassCancel.all(), 1)).as("nothing left: accepted all the same")
+                .containsExactly(new MassCancelled(20, 1, null, 0));
+        assertThat(engine.book().depth(BUY)).extracting(OrderBook.Level::priceTicks).containsExactly(91L);
+
+        assertThat(limit(1, BUY, 90, 1)).as("not suspended").contains(new OrderAccepted(21, 7));
+    }
+
+    @Test
+    @Rulebook("RK-006")
+    void aSuspendedMemberMayMassCancelAndTheOperatorCancelsEveryone() {
+        limit(1, BUY, 90, 4);                                                   // 1
+        limit(2, SELL, 110, 5);                                                 // 2
+        limit(3, BUY, 80, 6);                                                   // 3
+        engine.process(new SuspendMember(1));                                   // cancels 1
+        assertThat(engine.process(MassCancel.all(), 1)).containsExactly(new MassCancelled(9, 1, null, 0));
+
+        assertThat(engine.process(new MassCancel(SELL))).containsExactly(
+                new MassCancelled(10, 0, SELL, 1),
+                new OrderCancelled(11, 2, 5, MASS_CANCEL));
+        assertThat(engine.process(MassCancel.all(), 0)).containsExactly(
+                new MassCancelled(12, 0, null, 1),
+                new OrderCancelled(13, 3, 6, MASS_CANCEL));
+    }
+
+    @Test
+    @Rulebook("RK-006")
+    void aMassCancelIsAcceptedInEveryPhase() {
+        limit(1, BUY, 90, 4);
+        engine.process(new SetPhase(TradingPhase.CALL));
+        assertThat(engine.process(MassCancel.all(), 1)).contains(new OrderCancelled(5, 1, 4, MASS_CANCEL));
+        engine.process(new SetPhase(TradingPhase.CLOSED));
+        assertThat(engine.process(MassCancel.all(), 1)).hasSize(1);
     }
 
     @Test

@@ -553,7 +553,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 2 | **Durability & audit**: write-ahead journal, snapshots, crash recovery, replay | ✅ |
 | 3 | **Connectivity**: service layer, REST API, FIX order entry and drop copy, WebSocket and binary market data | ✅ |
 | 4 | **Venue functionality**: IOC / FOK / post-only / cancel-replace ✅, iceberg orders ✅, stop orders ✅, self-trade prevention ✅, trading phases and call auctions ✅, tick regime, DAY orders and volatility interruptions ✅; throttles and kill switch moved to phase 5 | ⏳ |
-| 5 | **Pre-trade risk & members**: members, limits and the kill switch ✅, message-rate and order-to-trade throttles ✅; trader hierarchy, venue-wide exposure | ⏳ |
+| 5 | **Pre-trade risk & members**: members, limits and the kill switch ✅, message-rate and order-to-trade throttles ✅, mass cancel ✅; trader hierarchy, venue-wide exposure | ⏳ |
 | 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅, group commit ✅; load test, GC study | ⏳ |
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; [surveillance alerts](docs/analytics.md#surveillance) ✅; RTS 22 reports, real-time surveillance | ⏳ |
 | 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, lockout of repeated failed logins ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅; TLS and mTLS (phase 9), OIDC | ⏳ |

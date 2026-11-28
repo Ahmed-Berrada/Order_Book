@@ -217,6 +217,20 @@ class ThrottlesTest {
     }
 
     @Test
+    @Rulebook({"OE-008", "OE-009", "RK-006"})
+    void aMassCancelIsNeverRefusedAndCountsAsOneMessage() throws IOException {
+        try (MatchingService service = start(new IngressLimits(1, 2, 1))) {
+            buy(service, "AAPL", 7, 100).join();                                     // 1 message
+            assertThat(refusal(buy(service, "AAPL", 7, 100)).reason()).isEqualTo(Reason.THROTTLED);
+            service.submit("AAPL", io.github.ahmedberrada.lob.core.MassCancel.all(), 7, null).join();   // 2 messages
+            micros.addAndGet(1_000_000);
+            assertThat(refusal(buy(service, "AAPL", 7, 100)).reason()).as("2 + 1 > 2 × 1")
+                    .isEqualTo(Reason.ORDER_TO_TRADE_LIMIT);
+            service.submit("AAPL", io.github.ahmedberrada.lob.core.MassCancel.all(), 7, null).join();
+        }
+    }
+
+    @Test
     void limitsMustNotBeNegative() {
         assertThatIllegalArgumentException().isThrownBy(() -> new IngressLimits(-1, 0, 0));
         assertThatIllegalArgumentException().isThrownBy(() -> new IngressLimits(0, -1, 0));

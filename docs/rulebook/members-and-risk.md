@@ -72,3 +72,14 @@ suspended, is refused with `MemberCommandRejected(member, INVALID_MEMBER)`.
 
 **RK-005: Resuming.** `ResumeMember(member)` ends the suspension: `MemberResumed(member)`. Resuming a member
 that is not suspended is refused with `INVALID_MEMBER`. Cancelled orders do not come back.
+
+## Mass cancel
+
+**RK-006: Mass cancel.** `MassCancel(side)`, processed for a member, cancels all the member's open orders in the
+instrument, its resting orders and parked stops, on one side or on both when no side is given. It emits
+`MassCancelled(member, side, cancelledOrders)`, then an `OrderCancelled` with reason `MASS_CANCEL` for each order,
+in order of order ID. It is accepted in every phase and while the member is suspended, since it only removes
+orders, and with no open orders (`cancelledOrders` is `0`). For member `0`, the operator, it cancels every
+member's open orders on that side. It changes nothing else: the member is not suspended (RK-004) and may enter
+orders again at once. Required by RTS 6 art. 12 as a member's own kill functionality.
+

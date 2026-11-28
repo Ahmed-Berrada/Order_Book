@@ -13,6 +13,8 @@ import io.github.ahmedberrada.lob.core.MarketOrder;
 import io.github.ahmedberrada.lob.core.MemberCommandRejected;
 import io.github.ahmedberrada.lob.core.MemberLimits;
 import io.github.ahmedberrada.lob.core.MemberLimitsChanged;
+import io.github.ahmedberrada.lob.core.MassCancel;
+import io.github.ahmedberrada.lob.core.MassCancelled;
 import io.github.ahmedberrada.lob.core.MemberResumed;
 import io.github.ahmedberrada.lob.core.MemberState;
 import io.github.ahmedberrada.lob.core.MemberSuspended;
@@ -63,7 +65,9 @@ import java.util.List;
 final class Codec {
 
     static final int MAGIC = 0x4C4F424A;            // "LOBJ"
-    static final short FORMAT_VERSION = 8;
+    static final short FORMAT_VERSION = 9;
+    /** The oldest version this reader reads: 9 only adds codes to 8. */
+    static final short OLDEST_READABLE_VERSION = 8;
 
     enum Kind {
         COMMANDS(1), EVENTS(2), SNAPSHOT(3);
@@ -114,7 +118,7 @@ final class Codec {
             throw new JournalCorruptedException("not a journal file: bad magic number");
         }
         short version = in.readShort();
-        if (version != FORMAT_VERSION) {
+        if (version < OLDEST_READABLE_VERSION || version > FORMAT_VERSION) {
             throw new JournalCorruptedException("unsupported format version " + version);
         }
         byte code = in.readByte();
@@ -208,6 +212,10 @@ final class Codec {
                     out.writeByte(9);
                     out.writeLong(resume.memberId());
                 }
+                case MassCancel massCancel -> {
+                    out.writeByte(10);
+                    out.writeByte(massCancel.side() == null ? 0 : sideCode(massCancel.side()));
+                }
             }
         });
     }
@@ -230,6 +238,7 @@ final class Codec {
                         in.readLong(), in.readLong(), in.readLong(), in.readLong(), in.readLong()));
                 case 8 -> new SuspendMember(in.readLong());
                 case 9 -> new ResumeMember(in.readLong());
+                case 10 -> new MassCancel(readOptionalSide(in));
                 default -> throw new JournalCorruptedException("unknown command type " + type);
             };
             if (memberId < 0) {
@@ -368,6 +377,13 @@ final class Codec {
                 out.writeLong(e.memberId());
                 out.writeLong(e.cancelledOrders());
             }
+            case MassCancelled e -> {
+                out.writeByte(20);
+                out.writeLong(e.sequence());
+                out.writeLong(e.memberId());
+                out.writeByte(e.side() == null ? 0 : sideCode(e.side()));
+                out.writeLong(e.cancelledOrders());
+            }
             case MemberResumed e -> {
                 out.writeByte(18);
                 out.writeLong(e.sequence());
@@ -433,6 +449,7 @@ final class Codec {
             case 17 -> new MemberSuspended(in.readLong(), in.readLong(), in.readLong());
             case 18 -> new MemberResumed(in.readLong(), in.readLong());
             case 19 -> new MemberCommandRejected(in.readLong(), in.readLong(), readRejectReason(in));
+            case 20 -> new MassCancelled(in.readLong(), in.readLong(), readOptionalSide(in), in.readLong());
             default -> throw new JournalCorruptedException("unknown event type " + type);
         };
     }
@@ -540,6 +557,17 @@ final class Codec {
         };
     }
 
+    /** A side, or {@code 0} for both (RK-006). */
+    private static Side readOptionalSide(DataInputStream in) throws IOException {
+        byte code = in.readByte();
+        return switch (code) {
+            case 0 -> null;
+            case 1 -> Side.BUY;
+            case 2 -> Side.SELL;
+            default -> throw new JournalCorruptedException("unknown side " + code);
+        };
+    }
+
     private static Side readSide(DataInputStream in) throws IOException {
         byte code = in.readByte();
         return switch (code) {
@@ -633,6 +661,7 @@ final class Codec {
             case DAY_EXPIRED -> 6;
             case VOLATILITY_INTERRUPTION -> 7;
             case KILL_SWITCH -> 8;
+            case MASS_CANCEL -> 9;
         };
     }
 
@@ -647,6 +676,7 @@ final class Codec {
             case 6 -> CancelReason.DAY_EXPIRED;
             case 7 -> CancelReason.VOLATILITY_INTERRUPTION;
             case 8 -> CancelReason.KILL_SWITCH;
+            case 9 -> CancelReason.MASS_CANCEL;
             default -> throw new JournalCorruptedException("unknown cancel reason " + code);
         };
     }

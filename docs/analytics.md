@@ -36,7 +36,7 @@ once, not one line of the trade file (which has a line per side).
 | Buckets | The day is cut into fixed intervals (`--bucket`, 60 s by default) from the epoch; only intervals with a trade count. Each has its last trade price and its **net taker volume**: lots bought by takers minus lots sold by takers. Auction trades have no aggressor and add nothing |
 | Realized volatility | Sample standard deviation of the log returns between consecutive traded buckets, per bucket (not annualised). Needs at least two returns |
 | Price impact | Least-squares slope of each bucket's price change (from the previous traded bucket) on its net taker volume, with R² (Kyle's lambda, a standard measure of how much a lot of aggressive buying moves the price). Needs at least three observations and some variation in volume |
-| Order-to-trade ratio | Per UTC date of the records: messages a member sent (new orders, replaces and its own cancels, including those the venue refused) / trades it took part in, as buyer or seller. A trade between two orders of the same member counts once. Cancels by the venue (expiry, kill switch, IOC remainders) and the operator's commands about a member (limits, suspension, even when refused) are not the member's messages |
+| Order-to-trade ratio | Per UTC date of the records: messages a member sent (new orders, replaces and its own cancels, including those the venue refused; a mass cancel is one message) / trades it took part in, as buyer or seller. A trade between two orders of the same member counts once. Cancels by the venue (expiry, kill switch, IOC remainders) and the operator's commands about a member (limits, suspension, even when refused) are not the member's messages |
 
 The order-to-trade ratio is the measure of MiFID II RTS 9. The venue does not limit it as orders arrive (that
 needs time windows in the engine, ADR-0015 §4); this report measures it after the fact, which is what
@@ -55,7 +55,7 @@ standards.
 | `SPOOFING` | A member's order is large (at least 5 times the day's median order size in the instrument). The member cancels it within 60 s of entering it, with at most 10% of it traded, and meanwhile the member traded on the other side, as taker or maker. This is the pattern of spoofing and layering: size shown to move the price, never meant to trade | The order, its side, size and price, entry and cancel times, the trades on the other side |
 | `EXCESSIVE_CANCELLATION` | A member cancels at least 90% of the orders it entered in the day, with at least 50 orders | Orders and cancels |
 
-Cancels by the venue (expiry, the kill switch, IOC remainders) are not the member's, and are not counted. The
+Cancels by the venue (expiry, the kill switch, IOC remainders) are not the member's, and are not counted; a mass cancel by the member is (RK-006). The
 detectors read the order records only, so they see no orders of other venues: cross-venue and cross-product
 manipulation is outside what one venue can detect alone.
 
