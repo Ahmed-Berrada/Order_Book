@@ -5,7 +5,7 @@ import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Duration;
-import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -13,6 +13,8 @@ import java.util.function.LongSupplier;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.userdetails.UserDetails;
 
 /**
  * Credentials that bcrypt has already accepted, so that HTTP Basic, which sends them with every request, does not
@@ -22,8 +24,20 @@ import org.springframework.security.core.GrantedAuthority;
  */
 final class VerifiedCredentials {
 
-    /** A user and what it may do, as bcrypt last confirmed it. */
-    record Verified(Object principal, Collection<? extends GrantedAuthority> authorities) {
+    /**
+     * A user and what it may do, as bcrypt last confirmed it: names and authorities only, never a password or a
+     * shared user object, so nothing a request is handed carries the bcrypt hash or is changed by another request.
+     */
+    record Verified(String username, List<GrantedAuthority> authorities) {
+
+        Verified {
+            authorities = List.copyOf(authorities);
+        }
+
+        /** A fresh principal for one request, with no password. */
+        UserDetails principal() {
+            return User.withUsername(username).password("").authorities(authorities).build();
+        }
     }
 
     private record Entry(byte[] mac, Verified verified, long expiresAt) {
@@ -35,6 +49,9 @@ final class VerifiedCredentials {
     private final LongSupplier nanos;
 
     VerifiedCredentials(Duration ttl, LongSupplier nanos) {
+        if (ttl.isNegative()) {
+            throw new IllegalArgumentException("lob.security.credential-cache must not be negative: " + ttl);
+        }
         byte[] secret = new byte[32];
         new SecureRandom().nextBytes(secret);
         this.key = new SecretKeySpec(secret, "HmacSHA256");

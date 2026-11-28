@@ -58,7 +58,9 @@ and bcrypt makes each check cost tens of milliseconds by design. Once bcrypt has
 the same credentials are accepted without bcrypt for `credentialCache` (10 minutes by default; `0` checks every
 request). The venue keeps only an HMAC-SHA256 of the password under a random key that exists in its memory alone,
 compares it in constant time, and remembers only successes, at most one per configured user. A wrong password is
-always checked by bcrypt and counted (AC-009), and a locked-out name is refused before the cache is consulted.
+always checked by bcrypt and counted (AC-009), and a locked-out name is refused before the cache is consulted;
+while failures are counted for a name from an address, its credentials are checked by bcrypt again, whose success
+clears them. A negative `credentialCache` stops the venue from starting.
 
 ## Browsers
 

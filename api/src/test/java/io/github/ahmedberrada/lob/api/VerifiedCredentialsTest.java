@@ -101,4 +101,49 @@ class VerifiedCredentialsTest {
         assertThat(cache.lookup("alice", "secreT")).isNull();
         assertThat(cache.lookup("bob", "secret")).isNull();
     }
+
+    @Test
+    void whileFailuresAreCountedBcryptChecksAgainAndOnlyItsSuccessClearsThem() {
+        authentication.authenticate(basic("alice", "secret"));                 // remembered: 1 check
+        assertThatThrownBy(() -> authentication.authenticate(basic("alice", "guess"))).isInstanceOf(BadCredentialsException.class);
+        assertThatThrownBy(() -> authentication.authenticate(basic("alice", "guess"))).isInstanceOf(BadCredentialsException.class);
+        assertThat(checks).hasValue(3);
+        authentication.authenticate(basic("alice", "secret"));                 // failures counted: bcrypt, clears them
+        assertThat(checks).as("no shortcut while failures are counted").hasValue(4);
+        authentication.authenticate(basic("alice", "secret"));
+        assertThat(checks).as("remembered again once cleared").hasValue(4);
+        assertThatThrownBy(() -> authentication.authenticate(basic("alice", "guess"))).isInstanceOf(BadCredentialsException.class);
+        assertThatThrownBy(() -> authentication.authenticate(basic("alice", "guess"))).isInstanceOf(BadCredentialsException.class);
+        assertThatThrownBy(() -> authentication.authenticate(basic("alice", "guess"))).isInstanceOf(BadCredentialsException.class);
+        assertThatThrownBy(() -> authentication.authenticate(basic("alice", "secret")))
+                .isInstanceOf(ThrottledAuthentication.LockedOutException.class);
+    }
+
+    @Test
+    void aHitFreesItsPlaceWithoutTouchingTheCount() {
+        authentication.authenticate(basic("alice", "secret"));
+        for (int i = 0; i < 10; i++) {
+            authentication.authenticate(basic("alice", "secret"));             // more than the slots: each is freed
+        }
+        assertThat(throttle.hasFailures(LoginThrottle.Channel.REST, "alice", null)).isFalse();
+        assertThat(checks).hasValue(1);
+    }
+
+    @Test
+    void eachHitGetsItsOwnPrincipalWithoutAPassword() {
+        authentication.authenticate(basic("alice", "secret"));
+        Authentication one = authentication.authenticate(basic("alice", "secret"));
+        Authentication two = authentication.authenticate(basic("alice", "secret"));
+        assertThat(one.getPrincipal()).isNotSameAs(two.getPrincipal())
+                .isInstanceOf(org.springframework.security.core.userdetails.UserDetails.class);
+        assertThat(((org.springframework.security.core.userdetails.UserDetails) one.getPrincipal()).getPassword()).isEmpty();
+        assertThat(((org.springframework.security.core.userdetails.UserDetails) one.getPrincipal()).getUsername())
+                .isEqualTo("alice");
+    }
+
+    @Test
+    void aNegativeTimeToLiveIsRefused() {
+        org.assertj.core.api.Assertions.assertThatIllegalArgumentException()
+                .isThrownBy(() -> new VerifiedCredentials(Duration.ofSeconds(-1), nanos::get));
+    }
 }

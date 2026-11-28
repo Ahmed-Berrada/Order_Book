@@ -89,11 +89,21 @@ credentials, they are now accepted without bcrypt for ten minutes (AC-012); the 
 second, as without authentication.
 
 What is kept is an HMAC-SHA256 of the password under a key drawn at start and never written anywhere, compared in
-constant time: a heap dump gives no password and no hash that an offline guess could test without the key, which
-sits in the same dump, so the cache is as sensitive as the process memory, which already holds the bcrypt hashes.
+constant time. That protects nothing against someone who reads the process's memory: the key is in the same heap,
+and with it each remembered password is a fast hash that an offline guess tests millions of times faster than
+bcrypt. The cache makes a heap dump worse than the bcrypt hashes alone. It does not make it much worse than it
+already was: the same heap holds the `Authorization` headers of recent requests, which carry the passwords in
+plain Base64. Heap dumps and memory are therefore treated as secret (no `heapdump` actuator endpoint is exposed).
+
 Only successes are kept, so the cache cannot grow beyond the configured users, and a wrong password always goes to
-bcrypt and is counted. The lockout is checked first. Users only change at a restart, which empties the cache, so
-ten minutes bounds nothing but a compromised process's reuse of a password it has seen.
+bcrypt and is counted. The lockout is checked first, and while failures are counted for a name from an address,
+bcrypt checks again and only its success clears them: a hit, cheap and frequent, must not reset a guesser's count
+behind an address it shares with the member faster than bcrypt would. A cached principal is a fresh user object
+per request, with no password. Users only change at a restart, which empties the cache.
+
+Spring Security stamps a password authentication with the time bcrypt checked it (`FACTOR_PASSWORD`); a remembered
+authentication carries that first time for up to ten minutes. Nothing in the venue reads it; a rule on the
+freshness of the password factor would have to set the cache to `0`.
 
 ### 8. Not here
 
