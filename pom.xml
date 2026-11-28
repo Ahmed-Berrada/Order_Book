@@ -27,6 +27,7 @@
         <module>engine-service</module>
         <module>fix-gateway</module>
         <module>market-data</module>
+        <module>post-trade</module>
         <module>api</module>
         <module>engine-bench</module>
     </modules>
