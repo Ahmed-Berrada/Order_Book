@@ -46,7 +46,34 @@ public record LobProperties(
         @DefaultValue @Valid BinaryFeedProperties binaryFeed,
         @DefaultValue List<@Valid MemberProperties> members,
         @DefaultValue @Valid SecurityProperties security,
-        @DefaultValue @Valid ThrottleProperties throttle) {
+        @DefaultValue @Valid ThrottleProperties throttle,
+        @DefaultValue @Valid JournalSealProperties journalSeal) {
+
+    /**
+     * Seals of the command journals (RS-013): the venue's Ed25519 keys as PEM files; without a private key, no seals.
+     *
+     * @param interval the longest time between seals while commands arrive; also sealed at snapshots and at close
+     */
+    public record JournalSealProperties(Path privateKey, Path publicKey, @DefaultValue("1s") @NotNull Duration interval) {
+
+        /** The sealing these properties configure, or null without a private key. */
+        public io.github.ahmedberrada.lob.journal.JournalSealing sealing() {
+            if (privateKey == null) {
+                return null;
+            }
+            if (publicKey == null) {
+                throw new IllegalStateException("lob.journal-seal.private-key needs lob.journal-seal.public-key, "
+                        + "to check the seals at start-up");
+            }
+            try {
+                return new io.github.ahmedberrada.lob.journal.JournalSealing(
+                        io.github.ahmedberrada.lob.journal.SealKeys.privateKey(privateKey),
+                        io.github.ahmedberrada.lob.journal.SealKeys.publicKey(publicKey), interval);
+            } catch (java.io.IOException e) {
+                throw new IllegalStateException("cannot read the journal seal keys: " + e.getMessage(), e);
+            }
+        }
+    }
 
     /**
      * Throttles on members' messages (OE-008, OE-009, ADR-0021); {@code 0} means no limit.
