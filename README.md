@@ -11,7 +11,12 @@ a REST API on Spring Boot, and [published benchmarks](docs/performance.md).
 The goal is engineering rigour rather than feature count. The engine is **deterministic**,
 backed by **invariant tests**, and **measured before it is optimised**.
 
-> **Status: Phase 3, Connectivity, complete.** Price-time matching
+> **Status: phases 0 to 4 and 10 complete; phases 5 to 9 in progress** (sub-phases 5a-5c, 6a-6c, 7a-7b, 8a-8d and 9a-9c
+> shipped, replication and failover not yet built; see the [Roadmap](#roadmap)).
+> **Performance:** [`docs/performance.md`](docs/performance.md) publishes the JMH and HdrHistogram results, an
+> open-loop (coordinated-omission-aware) end-to-end load test over REST, the hardware, and JMH error bars.
+>
+> Price-time matching
 > ([rulebook](docs/rulebook/continuous-trading.md)) is durable, with a write-ahead journal, crash
 > recovery and a replay tool ([resilience rules](docs/rulebook/resilience.md)). Every listed instrument
 > runs on its own writer thread with a bounded queue ([order-entry rules](docs/rulebook/order-entry.md)).
@@ -20,7 +25,7 @@ backed by **invariant tests**, and **measured before it is optimised**.
 > are published as a level-2 feed over [WebSocket](docs/interfaces/market-data-websocket.md) and as a
 > sequenced [binary feed](docs/interfaces/market-data-binary.md) with retransmission
 > ([feed rules](docs/rulebook/market-data.md), [binary feed and drop copy rules](docs/rulebook/feeds.md)).
-> **Phase 4, Venue functionality, in progress:** IOC, FOK, post-only and cancel/replace with priority
+> **Phase 4, Venue functionality (complete):** IOC, FOK, post-only and cancel/replace with priority
 > rules ([order types](docs/rulebook/order-types.md)), [iceberg orders](docs/rulebook/iceberg-orders.md),
 > [stop orders](docs/rulebook/stop-orders.md) and
 > [self-trade prevention](docs/rulebook/self-trade-prevention.md) [trading phases and call auctions](docs/rulebook/trading-phases.md),
@@ -555,7 +560,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 1 | **Core engine**: rulebook, LIMIT / MARKET / cancel, property tests, reference model, quality gates | ✅ |
 | 2 | **Durability & audit**: write-ahead journal, snapshots, crash recovery, replay | ✅ |
 | 3 | **Connectivity**: service layer, REST API, FIX order entry, mass cancel, trading status and drop copy, WebSocket and binary market data | ✅ |
-| 4 | **Venue functionality**: IOC / FOK / post-only / cancel-replace ✅, iceberg orders ✅, stop orders ✅, self-trade prevention ✅, trading phases and call auctions ✅, tick regime, DAY orders and volatility interruptions ✅; throttles and kill switch moved to phase 5 | ⏳ |
+| 4 | **Venue functionality**: IOC / FOK / post-only / cancel-replace ✅, iceberg orders ✅, stop orders ✅, self-trade prevention ✅, trading phases and call auctions ✅, tick regime, DAY orders and volatility interruptions ✅; throttles and kill switch moved to phase 5 | ✅ |
 | 5 | **Pre-trade risk & members**: members, limits and the kill switch ✅, message-rate and order-to-trade throttles ✅, mass cancel ✅; trader hierarchy, venue-wide exposure | ⏳ |
 | 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅, group commit ✅, end-to-end load test ✅; GC study | ⏳ |
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; [surveillance alerts](docs/analytics.md#surveillance) ✅; RTS 22 reports, real-time surveillance | ⏳ |
@@ -569,7 +574,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 
 This project started as [lob-engine](https://github.com/Ahmed-Berrada/lob-engine), a single-threaded matching engine
 in C++17 (`std::map` price levels, intrusive FIFO lists, a pool allocator). It answered one question, how fast a book
-can match, and its benchmark is documented there: a median of 149 to 163 ns per operation depending on the machine.
+can match, and its benchmark is documented there: a median of about 149 ns per operation (p99 460 ns, about 5.3 M operations per second) on an Intel Core i7-10510U, reproduced with the method in its README. The 163 ns / 3.46 M ops/s figure was first published without recording the hardware.
 
 Order_Book is the same idea rebuilt as a venue core: determinism, durability, interfaces and rules first, then speed.
 lob-engine is archived. Its latency figures are for the C++ code and say nothing about this Java engine, which
