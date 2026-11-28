@@ -8,11 +8,13 @@ import io.github.ahmedberrada.lob.journal.JournaledEngine;
 import io.github.ahmedberrada.lob.service.RequestRefusedException.Reason;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -22,17 +24,42 @@ import java.util.function.Supplier;
  */
 final class SymbolWorker implements AutoCloseable {
 
-    /** A queued unit of work and the future that reports its outcome. */
-    private record Task<T>(Supplier<T> work, CompletableFuture<T> result) {
+    /**
+     * A queued unit of work and the future that reports its outcome. {@code journaled} marks a command whose
+     * acknowledgement waits for the group's flush; {@code afterSync} runs just before the future completes, once
+     * nothing can be lost any more (the listeners).
+     */
+    private record Task<T>(Supplier<T> work, CompletableFuture<T> result, boolean journaled, Consumer<T> afterSync) {
 
-        void run() {
+        /** Runs the work; the outcome is kept, not reported, until {@link Done#report}. */
+        Done<T> run() {
             try {
-                result.complete(work.get());
+                return new Done<>(this, work.get(), null);
             } catch (RuntimeException e) {
-                result.completeExceptionally(e);
+                return new Done<>(this, null, e);
             }
         }
     }
+
+    /** The outcome of a task, held until the group it belongs to is flushed (ADR-0020 §3). */
+    private record Done<T>(Task<T> task, T value, RuntimeException failure) {
+
+        void report(UncheckedIOException flushFailure, RuntimeException readRefusal) {
+            if (failure != null) {
+                task.result().completeExceptionally(failure);
+            } else if (flushFailure != null && task.journaled()) {
+                task.result().completeExceptionally(flushFailure);       // outcome unknown: not acknowledged
+            } else if (flushFailure != null) {
+                task.result().completeExceptionally(readRefusal);        // it saw commands of unknown outcome
+            } else {
+                task.afterSync().accept(value);
+                task.result().complete(value);
+            }
+        }
+    }
+
+    /** The most tasks one group holds (ADR-0020 §2). */
+    static final int MAX_GROUP = 256;
 
     private static final System.Logger LOG = System.getLogger(SymbolWorker.class.getName());
 
@@ -43,6 +70,8 @@ final class SymbolWorker implements AutoCloseable {
     private final Thread thread;
     private volatile boolean accepting = true;
     private volatile boolean halted;
+    /** A flush failed: the engine's memory holds commands of unknown outcome, so nothing is read from it. */
+    private volatile boolean stateUnknown;
     private final CommandObserver observer;
     private final int capacity;
 
@@ -85,6 +114,7 @@ final class SymbolWorker implements AutoCloseable {
         if (halted) {
             return CompletableFuture.failedFuture(new RequestRefusedException(Reason.HALTED, symbol));
         }
+        long[] took = new long[1];
         return enqueue(() -> {
             if (halted) {
                 throw new RequestRefusedException(Reason.HALTED, symbol);
@@ -92,16 +122,18 @@ final class SymbolWorker implements AutoCloseable {
             try {
                 long started = System.nanoTime();
                 EventBatch batch = engine.process(command, memberId);
-                observe(batch, System.nanoTime() - started);
+                took[0] = System.nanoTime() - started;
                 if (engine.isStopped()) {       // a later write failed: this command counts, the next ones do not
                     halt(new UncheckedIOException("event journal or snapshot write failed", engine.failure()));
                 }
-                notifyListeners(batch, context);
                 return batch;
             } catch (UncheckedIOException e) {
                 halt(e);
                 throw e;
             }
+        }, true, batch -> {
+            observe(batch, took[0]);            // after the flush: metrics never count an unknown outcome
+            notifyListeners(batch, context);
         });
     }
 
@@ -145,6 +177,11 @@ final class SymbolWorker implements AutoCloseable {
         return capacity;
     }
 
+    /** Device flushes of the instrument's command journal so far (for metrics, ADR-0020). */
+    long flushes() {
+        return engine.flushes();
+    }
+
     private void observe(EventBatch batch, long nanos) {
         try {
             observer.processed(symbol, batch, nanos);
@@ -176,8 +213,18 @@ final class SymbolWorker implements AutoCloseable {
         return accepting;
     }
 
+    /** A read: answered from the engine's memory, unless a failed flush left commands of unknown outcome in it. */
     private <T> CompletableFuture<T> enqueue(Supplier<T> work) {
-        Task<T> task = new Task<>(work, new CompletableFuture<>());
+        return enqueue(() -> {
+            if (stateUnknown) {
+                throw new RequestRefusedException(Reason.HALTED, symbol);
+            }
+            return work.get();
+        }, false, value -> { });
+    }
+
+    private <T> CompletableFuture<T> enqueue(Supplier<T> work, boolean journaled, Consumer<T> afterSync) {
+        Task<T> task = new Task<>(work, new CompletableFuture<>(), journaled, afterSync);
         if (!accepting) {
             return CompletableFuture.failedFuture(new RequestRefusedException(Reason.STOPPED, symbol));
         }
@@ -192,16 +239,70 @@ final class SymbolWorker implements AutoCloseable {
     }
 
     private void runLoop() {
+        int groupSize = engine.groupCommit() ? MAX_GROUP : 1;
+        List<Task<?>> group = new ArrayList<>(groupSize);
+        List<Done<?>> done = new ArrayList<>(groupSize);
         while (accepting || !queue.isEmpty()) {
             try {
-                Task<?> task = queue.poll(10, TimeUnit.MILLISECONDS);
-                if (task != null) {
-                    task.run();
+                Task<?> first = queue.poll(10, TimeUnit.MILLISECONDS);
+                if (first == null) {
+                    continue;
+                }
+                group.add(first);
+                queue.drainTo(group, groupSize - 1);           // what is already waiting; never wait for more
+                try {
+                    for (Task<?> task : group) {
+                        done.add(task.run());
+                    }
+                    int commands = (int) done.stream().filter(d -> d.task().journaled() && d.failure() == null).count();
+                    UncheckedIOException flushFailure = flush(commands);
+                    RequestRefusedException readRefusal = new RequestRefusedException(Reason.HALTED, symbol);
+                    for (Done<?> outcome : done) {
+                        outcome.report(flushFailure, readRefusal);
+                    }
+                } catch (Error e) {
+                    // Nothing of this group can be vouched for: fail every task of it rather than leave it hanging.
+                    stateUnknown = true;
+                    halt(new UncheckedIOException("instrument thread failed", new IOException(e)));
+                    for (Task<?> task : group) {
+                        task.result().completeExceptionally(e);
+                    }
+                    throw e;
                 }
             } catch (InterruptedException e) {
                 // This thread is stopped by close(), never by interruption: keep serving the queue.
+            } finally {
+                group.clear();
+                done.clear();
             }
         }
+    }
+
+    /**
+     * One device flush for the group's commands (RS-001). A failed flush halts the instrument (OE-006) and leaves
+     * its memory untrustworthy; a failed event write after a good flush halts it too, the commands acknowledged.
+     */
+    private UncheckedIOException flush(int commands) {
+        long before = engine.flushes();
+        long started = System.nanoTime();
+        try {
+            engine.sync();
+        } catch (UncheckedIOException e) {
+            stateUnknown = true;
+            halt(e);
+            return e;
+        }
+        if (engine.flushes() > before) {
+            try {
+                observer.flushed(symbol, commands, System.nanoTime() - started);
+            } catch (RuntimeException e) {
+                LOG.log(System.Logger.Level.ERROR, "Command observer failed on " + symbol, e);
+            }
+        }
+        if (engine.isStopped()) {
+            halt(new UncheckedIOException("event journal or snapshot write failed", engine.failure()));
+        }
+        return null;
     }
 
     /** Stops accepting tasks, processes those already queued, then closes the journals (OE-007). */
