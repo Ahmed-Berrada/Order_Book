@@ -41,10 +41,25 @@ Recovery reads the whole command journal; the hash comes with it. A journal that
 instrument from starting, like a corrupt journal (RS-004): continuing would build the book, and every later record,
 on altered history.
 
+### 5. A missing or damaged seal is not a new start
+
+A journal that holds commands and has no seal file looks the same as one whose seal file was deleted to hide an edit,
+so it is refused; turning sealing on for a venue that already traded is a stated, one-time setting
+(`seal-existing-journal`). A last seal record cut short is what a crash during its write leaves and is discarded;
+a whole record that fails its checksum is not, and is refused.
+
+### 6. Rollback needs an anchor outside the venue
+
+Seals prove that a journal has not changed since it was sealed, not that it is the latest: an older copy restored
+with its older seal file, or both cut back at a seal, verify. Only a record kept elsewhere can tell: the latest seal's
+command sequence, from `JournalVerify`'s output, kept by the auditor or in a write-once log, and checked with
+`JournalVerify --expect <sequence>`.
+
 ## Consequences
 
-- An edited, truncated or replaced command journal is found at the next start and by `JournalVerify`, except in
-  its last unsealed second.
+- An edited or partly truncated command journal, or one whose seal file was deleted or damaged, is found at the next
+  start and by `JournalVerify`, except in its unsealed tail; a rollback to an earlier seal is found only against a
+  sequence recorded outside the venue.
 - The private key becomes something to protect: whoever holds it can rewrite history and reseal it. It belongs in a
   secret store, apart from the journals.
 - The event journal and snapshots are not sealed: they are derived, and recovery checks them against the commands

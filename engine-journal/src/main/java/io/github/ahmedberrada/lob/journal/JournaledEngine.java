@@ -153,8 +153,15 @@ public final class JournaledEngine implements AutoCloseable {
             // RS-013: every seal is checked against the journal as recovered, before anything is appended to it.
             JournalSealer sealer = options.sealing() == null ? null : JournalSealer.open(commandsFile,
                     reader.validLength(), directory.resolve(JournalSealer.FILE), options.sealing(), instrument.symbol());
-            FrameWriter commandWriter = openWriter(commandsFile, reader.validLength(), Codec.Kind.COMMANDS, instrument,
-                    sealer);
+            FrameWriter commandWriter;
+            try {
+                commandWriter = openWriter(commandsFile, reader.validLength(), Codec.Kind.COMMANDS, instrument, sealer);
+            } catch (IOException e) {
+                if (sealer != null) {
+                    sealer.close();
+                }
+                throw e;
+            }
             FrameWriter eventWriter;
             try {
                 eventWriter = openWriter(eventsFile, eventsValidLength, Codec.Kind.EVENTS, instrument);
@@ -375,17 +382,14 @@ public final class JournaledEngine implements AutoCloseable {
             return;
         }
         closed = true;
-        try (commands; events; lock) {
+        // closed in reverse: the seal file, the journals, and the directory lock last (RS-011)
+        try (lock; commands; events; sealer) {
             if (!failed) {
                 commands.force();
                 events.force();
                 if (sealer != null && sealer.unsealed()) {
                     sealer.seal(lastCommandSequence, lastTimestampMicros);      // RS-013: sealed at close
                 }
-            }
-        } finally {
-            if (sealer != null) {
-                sealer.close();
             }
         }
     }

@@ -48,6 +48,19 @@ class JournalSealTest {
         return new JournalOptions(policy, 0, new JournalSealing(keys.getPrivate(), keys.getPublic(), interval));
     }
 
+    private JournalOptions adopting(Duration interval) {
+        return new JournalOptions(FsyncPolicy.OS, 0, new JournalSealing(keys.getPrivate(), keys.getPublic(), interval,
+                true));
+    }
+
+    private long now = 1_759_910_400_000_000L;
+
+    /** Moves the clock a second on: a seal is due again with a 10 ms interval. */
+    private void later() {
+        now += 1_000_000;
+        clock.set(now);
+    }
+
     private JournaledEngine open(JournalOptions options) throws IOException {
         return JournaledEngine.open(directory, INSTRUMENT, options, clock);
     }
@@ -96,11 +109,12 @@ class JournalSealTest {
 
     @Test
     void sealsFollowTheIntervalAndOnlyEverCoverFlushedCommands() throws IOException {
-        try (JournaledEngine engine = open(options(FsyncPolicy.GROUP, Duration.ZERO))) {
+        try (JournaledEngine engine = open(options(FsyncPolicy.GROUP, Duration.ofMillis(10)))) {
             engine.process(new LimitOrder(Side.BUY, 100, 1));
             assertThat(seals()).as("not before the group's flush").isEmpty();
             engine.sync();
             assertThat(seals()).hasSize(1);
+            later();
             engine.process(new LimitOrder(Side.BUY, 100, 1));
             engine.process(new LimitOrder(Side.BUY, 100, 1));
             engine.sync();
@@ -165,8 +179,12 @@ class JournalSealTest {
                 clock)) {
             engine.process(new LimitOrder(Side.BUY, 100, 1));
         }
-        write(options(FsyncPolicy.OS, Duration.ofHours(1)), 1);
+        assertThatThrownBy(() -> open(options(FsyncPolicy.OS, Duration.ofHours(1))))
+                .as("unsealed commands: never sealed over without being told").isInstanceOf(JournalCorruptedException.class)
+                .hasMessageContaining("holds commands but no seal");
+        write(adopting(Duration.ofHours(1)), 1);
         assertThat(seals()).hasSize(1).first().extracting(JournalSealer.Seal::lastSequence).isEqualTo(2L);
+        write(options(FsyncPolicy.OS, Duration.ofHours(1)), 1);                // from then on, sealed as any
     }
 
     @Test
@@ -189,12 +207,75 @@ class JournalSealTest {
         assertThat(SealKeys.privateKey(privateKey).getEncoded()).isEqualTo(keys.getPrivate().getEncoded());
         assertThat(SealKeys.publicKey(publicKeyFile()).getEncoded()).isEqualTo(keys.getPublic().getEncoded());
         assertThatThrownBy(() -> SealKeys.publicKey(privateKey)).isInstanceOf(IOException.class);
-        assertThatIllegalArgumentException().isThrownBy(() -> new JournalSealing(keys.getPrivate(), keys.getPublic(),
-                Duration.ofSeconds(-1)));
-        assertThat(new JournalSealing(keys.getPrivate(), keys.getPublic(), Duration.ZERO).toString())
+        for (Duration bad : new Duration[] {Duration.ofSeconds(-1), Duration.ZERO, Duration.ofMillis(9), Duration.ofHours(2)}) {
+            assertThatIllegalArgumentException().isThrownBy(() -> new JournalSealing(keys.getPrivate(), keys.getPublic(), bad));
+        }
+        assertThat(new JournalSealing(keys.getPrivate(), keys.getPublic(), Duration.ofSeconds(1)).toString())
                 .doesNotContain("Private");
         Instrument unused = INSTRUMENT;
         assertThat(unused.symbol()).isNotBlank();
+    }
+
+    @Test
+    void aDeletedSealFileIsFoundNotSealedOver() throws IOException {
+        write(options(FsyncPolicy.OS, Duration.ofHours(1)), 5);
+        rewriteFrame(directory.resolve(JournaledEngine.COMMANDS_FILE), 3);
+        Files.delete(directory.resolve(JournalSealer.FILE));                   // to hide the change
+        assertThatThrownBy(() -> open(options(FsyncPolicy.OS, Duration.ofHours(1))))
+                .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("holds commands but no seal");
+    }
+
+    @Test
+    void aDamagedLastSealIsFoundButAPartlyWrittenOneIsATornTail() throws IOException {
+        write(options(FsyncPolicy.OS, Duration.ofHours(1)), 5);
+        Path seals = directory.resolve(JournalSealer.FILE);
+        byte[] intact = Files.readAllBytes(seals);
+        byte[] damaged = intact.clone();
+        damaged[damaged.length - 1] ^= 0x01;                                    // the last seal's signature
+        Files.write(seals, damaged);
+        assertThatThrownBy(() -> open(options(FsyncPolicy.OS, Duration.ofHours(1))))
+                .isInstanceOf(JournalCorruptedException.class).hasMessageContaining("a seal was damaged or removed");
+
+        Files.write(seals, java.util.Arrays.copyOf(intact, intact.length - 50)); // a crash during the last seal
+        try (JournaledEngine engine = open(options(FsyncPolicy.OS, Duration.ofHours(1)))) {
+            assertThat(engine.recovery().lastCommandSequence()).isEqualTo(5);
+        }
+        assertThat(seals()).last().extracting(JournalSealer.Seal::lastSequence).as("sealed again at close").isEqualTo(5L);
+    }
+
+    @Test
+    void aStalledClockCannotStopTheSeals() throws IOException {
+        clock.set(now);
+        try (JournaledEngine engine = open(options(FsyncPolicy.OS, Duration.ofHours(1)))) {
+            for (int i = 0; i < JournalSealing.MAX_UNSEALED_COMMANDS + 5; i++) {
+                engine.process(new LimitOrder(Side.BUY, 100, 1));
+            }
+            assertThat(seals()).as("after the first command, then after the most commands a seal may wait for")
+                    .extracting(JournalSealer.Seal::lastSequence)
+                    .containsExactly(1L, (long) JournalSealing.MAX_UNSEALED_COMMANDS + 1);
+        }
+    }
+
+    @Test
+    void theToolChecksAgainstASequenceRecordedElsewhereAndCanRequireNoUnsealedTail() throws IOException {
+        write(options(FsyncPolicy.OS, Duration.ofHours(1)), 5);
+        Path key = publicKeyFile();
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+        PrintStream quiet = new PrintStream(new ByteArrayOutputStream());
+        assertThat(JournalVerify.run(new String[] {directory.toString(), key.toString(), "--expect", "5", "--strict"},
+                quiet, quiet)).isZero();
+        assertThat(JournalVerify.run(new String[] {directory.toString(), key.toString(), "--expect", "6"}, quiet,
+                new PrintStream(err, true, StandardCharsets.UTF_8))).as("rolled back: older than recorded").isEqualTo(1);
+        assertThat(err.toString(StandardCharsets.UTF_8)).startsWith("OLDER");
+        try (JournaledEngine engine = JournaledEngine.open(directory, INSTRUMENT, new JournalOptions(FsyncPolicy.OS, 0),
+                clock)) {
+            engine.process(new LimitOrder(Side.BUY, 100, 1));                  // appended without sealing
+        }
+        assertThat(JournalVerify.run(new String[] {directory.toString(), key.toString()}, quiet, quiet)).isZero();
+        assertThat(JournalVerify.run(new String[] {directory.toString(), key.toString(), "--strict"}, quiet, quiet))
+                .isEqualTo(1);
+        assertThat(JournalVerify.run(new String[] {directory.toString(), key.toString(), "--expect"}, quiet, quiet))
+                .isEqualTo(2);
     }
 
     /** Offsets of the frames of a journal file. */

@@ -20,7 +20,7 @@ import java.util.List;
  * venue's Ed25519 key: the length of the journal it covers, the last command sequence, the time, and the SHA-256 of
  * the journal up to that length. Rewriting or removing any byte the latest seal covers breaks the seal.
  */
-final class JournalSealer implements FrameWriter.Listener {
+final class JournalSealer implements FrameWriter.Listener, java.io.Closeable {
 
     static final String FILE = "commands.seal";
     private static final byte[] MAGIC = "LOBSEAL1".getBytes(StandardCharsets.US_ASCII);
@@ -65,6 +65,8 @@ final class JournalSealer implements FrameWriter.Listener {
     private long length;
     private long sealedLength;
     private long lastSealMicros;
+    private final long intervalMicros;
+    private long framesSinceSeal;
 
     private JournalSealer(JournalSealing sealing, byte[] symbol, MessageDigest digest, FrameWriter seals, long length,
             long sealedLength, long lastSealMicros) {
@@ -75,6 +77,7 @@ final class JournalSealer implements FrameWriter.Listener {
         this.length = length;
         this.sealedLength = sealedLength;
         this.lastSealMicros = lastSealMicros;
+        this.intervalMicros = sealing.interval().toNanos() / 1_000;
     }
 
     /**
@@ -88,14 +91,54 @@ final class JournalSealer implements FrameWriter.Listener {
         byte[] name = symbol.getBytes(StandardCharsets.UTF_8);
         List<Seal> found = new ArrayList<>();
         long sealValidLength = readSeals(sealFile, name, found);
+        if (found.isEmpty() && holdsCommands(journal, validLength) && !sealing.sealExistingJournal()) {
+            // A journal with commands and no seals is either one never sealed, which the operator must say, or one
+            // whose seal file was deleted to hide a change: never seal over it silently.
+            throw new JournalCorruptedException(journal + " holds commands but no seal: its seals were removed, or it "
+                    + "was never sealed (to begin sealing it, set seal-existing-journal once)");
+        }
         MessageDigest digest = verify(journal, validLength, name, found, sealing.verifyingKey());
+        boolean created = !Files.exists(sealFile);
         FrameWriter writer = new FrameWriter(sealFile, sealValidLength);
-        if (sealValidLength == 0) {
-            writer.append(header(name));
-            writer.force();
+        try {
+            if (sealValidLength == 0) {
+                writer.append(header(name));
+                writer.force();
+            }
+            if (created) {
+                forceDirectory(sealFile.toAbsolutePath().getParent());
+            }
+        } catch (IOException e) {
+            writer.close();
+            throw e;
         }
         return new JournalSealer(sealing, name, digest, writer, validLength,
-                found.isEmpty() ? 0 : found.getLast().length(), found.isEmpty() ? Long.MIN_VALUE / 2 : found.getLast().timestampMicros());
+                found.isEmpty() ? 0 : found.getLast().length(),
+                found.isEmpty() ? Long.MIN_VALUE / 2 : found.getLast().timestampMicros());
+    }
+
+    /** Whether a journal holds more than its header. */
+    private static boolean holdsCommands(Path journal, long validLength) throws IOException {
+        if (validLength == 0) {
+            return false;
+        }
+        try (FrameReader reader = new FrameReader(journal)) {
+            reader.next();                                     // the header
+            return reader.validLength() < validLength;
+        }
+    }
+
+    /** Makes a new file's directory entry durable; a file system that cannot is left as it is. */
+    private static void forceDirectory(Path directory) {
+        if (directory == null) {
+            return;
+        }
+        try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(directory,
+                java.nio.file.StandardOpenOption.READ)) {
+            channel.force(true);
+        } catch (IOException e) {
+            // not every platform opens directories; the journal's own files are forced either way
+        }
     }
 
     /** Checks a journal's seals without a private key, for an auditor (JournalVerify). */
@@ -120,6 +163,7 @@ final class JournalSealer implements FrameWriter.Listener {
     public void appended(byte[] frame) {
         digest.update(frame);
         length += frame.length;
+        framesSinceSeal++;
     }
 
     /**
@@ -127,7 +171,8 @@ final class JournalSealer implements FrameWriter.Listener {
      * commands (the clock is read only by the time source, RS-006).
      */
     boolean due(long nowMicros) {
-        return length > sealedLength && nowMicros - lastSealMicros >= sealing.interval().toNanos() / 1_000;
+        return length > sealedLength && (nowMicros - lastSealMicros >= intervalMicros
+                || framesSinceSeal >= JournalSealing.MAX_UNSEALED_COMMANDS);
     }
 
     /** Whether any byte is unsealed. */
@@ -157,9 +202,11 @@ final class JournalSealer implements FrameWriter.Listener {
         seals.force();
         sealedLength = length;
         lastSealMicros = timestampMicros;
+        framesSinceSeal = 0;
     }
 
-    void close() throws IOException {
+    @Override
+    public void close() throws IOException {
         seals.close();
     }
 
@@ -199,6 +246,12 @@ final class JournalSealer implements FrameWriter.Listener {
                     throw new JournalCorruptedException("seals out of order in " + sealFile);
                 }
                 into.add(seal);
+            }
+            // A crash can cut the last seal short; it cannot leave a whole one that fails its checksum, which is
+            // someone removing the latest seal to change what it covered.
+            if (reader.tornBytes() >= FrameReader.HEADER_BYTES + RECORD_BYTES) {
+                throw new JournalCorruptedException(sealFile + " ends with " + reader.tornBytes()
+                        + " bytes that are not a seal: a seal was damaged or removed");
             }
             return reader.validLength();
         }

@@ -83,10 +83,15 @@ is fixed recovers the instrument.
 **RS-013: Sealed command journal.** With a sealing key configured, the venue seals each instrument's command journal
 in `commands.seal`: a record, signed with the venue's Ed25519 key, of the journal's length, the SHA-256 of the
 journal up to that length, the last command sequence and the time. It seals at most every interval (1 s by
-default) while commands arrive, at every snapshot and at close, and only over bytes already flushed to the device.
-At start-up every seal is checked against the journal as recovered; a seal that does not match, is not signed by
-the key, or covers bytes the journal no longer holds stops the instrument from starting (`JournalCorruptedException`),
-since the journal was changed after it was sealed. `JournalVerify` checks a copy of a journal with the public key
-alone. Changes after the last seal, at most one interval of commands, are not detected; nor is a journal replaced
-together with its seal file by someone who holds the private key.
+default) while commands arrive, at every snapshot, at close and after 10,000 commands, and only over bytes already
+flushed to the device. At start-up every seal is checked against the journal as recovered; the instrument does not
+start (`JournalCorruptedException`), since its journal was changed after it was sealed, when a seal does not match,
+is not signed by the key, covers bytes the journal no longer holds, or is damaged; or when a journal that holds
+commands has no seal at all, unless sealing is being turned on for it (`seal-existing-journal`). A last seal cut
+short by a crash is discarded. `JournalVerify` checks a copy of a journal with the public key alone.
+
+Not detected by the seals alone: changes after the last seal (at most one interval or 10,000 commands); a journal
+cut back exactly to an earlier seal, or replaced by an older copy together with its seal file, which loses the
+commands since; and anything done by someone who holds the private key. Rollback is detected against a command
+sequence recorded outside the venue, which `JournalVerify --expect` compares with the latest seal.
 

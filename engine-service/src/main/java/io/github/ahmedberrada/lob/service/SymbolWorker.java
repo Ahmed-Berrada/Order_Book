@@ -124,7 +124,7 @@ final class SymbolWorker implements AutoCloseable {
                 EventBatch batch = engine.process(command, memberId);
                 took[0] = System.nanoTime() - started;
                 if (engine.isStopped()) {       // a later write failed: this command counts, the next ones do not
-                    halt(new UncheckedIOException("event journal or snapshot write failed", engine.failure()));
+                    halt(new UncheckedIOException("event journal, snapshot or journal seal write failed", engine.failure()));
                 }
                 return batch;
             } catch (UncheckedIOException e) {
@@ -300,7 +300,7 @@ final class SymbolWorker implements AutoCloseable {
             }
         }
         if (engine.isStopped()) {
-            halt(new UncheckedIOException("event journal or snapshot write failed", engine.failure()));
+            halt(new UncheckedIOException("event journal, snapshot or journal seal write failed", engine.failure()));
         }
         return null;
     }

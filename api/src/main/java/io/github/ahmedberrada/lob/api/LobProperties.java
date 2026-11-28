@@ -52,9 +52,13 @@ public record LobProperties(
     /**
      * Seals of the command journals (RS-013): the venue's Ed25519 keys as PEM files; without a private key, no seals.
      *
-     * @param interval the longest time between seals while commands arrive; also sealed at snapshots and at close
+     * @param interval the longest time between seals while commands arrive (10 ms to 1 h); also sealed at snapshots, at
+     *                 close and after 10,000 commands
+     * @param sealExistingJournal begin sealing journals that hold commands but no seal: once, when sealing is first
+     *                 turned on for a venue that already traded; otherwise a missing seal stops the instrument
      */
-    public record JournalSealProperties(Path privateKey, Path publicKey, @DefaultValue("1s") @NotNull Duration interval) {
+    public record JournalSealProperties(Path privateKey, Path publicKey, @DefaultValue("1s") @NotNull Duration interval,
+            @DefaultValue("false") boolean sealExistingJournal) {
 
         /** The sealing these properties configure, or null without a private key. */
         public io.github.ahmedberrada.lob.journal.JournalSealing sealing() {
@@ -68,7 +72,7 @@ public record LobProperties(
             try {
                 return new io.github.ahmedberrada.lob.journal.JournalSealing(
                         io.github.ahmedberrada.lob.journal.SealKeys.privateKey(privateKey),
-                        io.github.ahmedberrada.lob.journal.SealKeys.publicKey(publicKey), interval);
+                        io.github.ahmedberrada.lob.journal.SealKeys.publicKey(publicKey), interval, sealExistingJournal);
             } catch (java.io.IOException e) {
                 throw new IllegalStateException("cannot read the journal seal keys: " + e.getMessage(), e);
             }
