@@ -511,6 +511,7 @@ Every alert links to the [runbook](docs/operations/runbook.md); metrics are list
 | Architecture | ArchUnit | Core uses only the JDK: no clock, randomness, threads, I/O or floating point |
 | Traceability | `RulebookTraceabilityTest` | Every rulebook rule is cited by a test (`@Rulebook("CT-xxx")`) |
 | Crash recovery | Second JVM killed with SIGKILL | No acknowledged command lost; recovered state equals a fresh replay |
+| Venue chaos | The whole venue in a second JVM, killed mid-trading or run out of disk | Every order a client saw acknowledged survives; a full disk halts only its instrument (RS-012) |
 | Journal properties | jqwik | Cutting either journal at any byte recovers exactly the complete commands |
 | Corruption | JUnit | Damaged records, sequence gaps, foreign or swapped files are refused |
 | Concurrency | 8 concurrent clients, 2 instruments | Each instrument's acknowledgements equal sequential processing in sequence order |
@@ -554,7 +555,7 @@ The full plan, with exit criteria per phase, is in [`docs/ROADMAP.md`](docs/ROAD
 | 6 | **Performance**: JMH and HdrHistogram benchmarks ✅, O(1) cancel ✅, [published numbers](docs/performance.md) ✅; group commit, load test, GC study | ⏳ |
 | 7 | **Regulatory evidence**: [rule matrix](docs/compliance/rule-matrix.md) ✅, [regulation mapping](docs/compliance/regulatory-mapping.md) ✅, [RTS 24 order records](docs/compliance/order-records.md) ✅; RTS 22 reports, surveillance | ⏳ |
 | 8 | **Security & supply chain**: REST and FIX authentication ✅, roles and member binding ✅, CodeQL / SBOM / signed provenance ✅, [threat model](docs/security/threat-model.md) ✅; TLS and mTLS (phase 9), OIDC | ⏳ |
-| 9 | **Operations & resilience**: [Prometheus metrics, probes and alerts](docs/operations/observability.md) ✅, [runbook](docs/operations/runbook.md) ✅, one writer per journal ✅, soak test ✅, container image, compose stack and Helm chart ✅, [HA design](docs/adr/0018-operations-and-high-availability.md) ✅; replication and failover, chaos tests | ⏳ |
+| 9 | **Operations & resilience**: [Prometheus metrics, probes and alerts](docs/operations/observability.md) ✅, [runbook](docs/operations/runbook.md) ✅, one writer per journal ✅, soak test ✅, container image, compose stack and Helm chart ✅, [HA design](docs/adr/0018-operations-and-high-availability.md) ✅; chaos tests (kill -9, full disk) ✅; replication and failover | ⏳ |
 | 10 | **Post-trade & analytics** *(optional)*: [clearing trade file and maker/taker/auction fees](docs/interfaces/trade-file.md) ✅, [Python microstructure analytics](docs/analytics.md) ✅ | ✅ |
 
 ---
