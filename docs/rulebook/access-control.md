@@ -42,6 +42,13 @@ never with a secret.
 **AC-007: FIX logon.** A FIX session logs on only if its Logon `Password` is accepted for its CompID; the
 reason of a refusal is not revealed to the peer. Drop-copy sessions authenticate the same way.
 
+**AC-009: Repeated failures lock the name out.** After `maxFailures` failed authentications in a row for
+one user name (REST) or CompID (FIX) from one source address, further attempts for that name from that address
+are refused for `lockout`, without checking the secret: REST answers `429` with `Retry-After`, a FIX Logon is
+rejected as any failed Logon (AC-007). A success clears the count. The lockout is per name and address, so a
+caller cannot lock a member out from another address. This holds with security enabled; the defaults are 5
+failures and 1 minute, and `maxFailures` `0` switches it off. Lockouts are kept in memory and logged.
+
 ## Browsers
 
 **AC-008: No writes from another site.** A browser that has answered a Basic challenge resends the credentials

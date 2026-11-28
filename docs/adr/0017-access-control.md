@@ -51,9 +51,20 @@ that refuses.
 `fix-gateway` stays free of any framework (ADR-0006). It calls a `LogonAuthenticator` on every Logon; the API
 module implements it with Spring Security's password encoders, so REST and FIX verify secrets the same way.
 
-### 6. Not here
+### 6. Lockout after repeated failures (added in phase 5b)
 
-Rate limiting of failed attempts (ingress, phase 9), mutual TLS for FIX (needs certificates provisioned,
+Bcrypt already makes each guess cost about a tenth of a second, but nothing stopped a caller from guessing
+for ever. After a few failures in a row for one name from one source address, that name is locked out from
+that address for a minute, and the secret is not even checked (AC-009). Keying on the address as well as the
+name means an attacker cannot lock a member out by failing on purpose from elsewhere; it also means an
+attacker with many addresses gets a few guesses from each, which the bcrypt cost and the network controls in
+front of the venue must cover. REST answers `429` with `Retry-After`, which a client can act on and which
+reveals nothing more than a `401` (a name that does not exist is locked out the same way). FIX rejects the
+Logon as any failed one. The counts are in memory and bounded: a restart forgets them.
+
+### 7. Not here
+
+Mutual TLS for FIX (needs certificates provisioned,
 phase 9), secret rotation and an external identity provider.
 
 ## Consequences
@@ -61,4 +72,4 @@ phase 9), secret rotation and an external identity provider.
 - ➕ The loopback-only restriction is no longer the only protection.
 - ➕ One set of users and one hash format for both channels.
 - ➖ Basic credentials are static: anyone who obtains one can use it until it is changed.
-- ➖ Brute force is not throttled yet.
+- ➖ Brute force from many addresses is slowed only by the cost of bcrypt (AC-009 locks out per address).
