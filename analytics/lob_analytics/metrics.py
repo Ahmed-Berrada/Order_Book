@@ -68,7 +68,8 @@ def daily_summary(lines: Sequence[TradeLine], vwap_places: int = 4) -> List[Dail
 
 #: Records that are a message from the member: an order, a change or a cancel it sent, accepted or not.
 #: MEMBER_COMMAND_REJECTED is not one: it refuses an operator's command about the member (limits, suspension).
-MESSAGES = {"NEW_ORDER", "NEW_ORDER_REJECTED", "ORDER_REPLACED", "REPLACE_REJECTED", "CANCEL_REJECTED"}
+MESSAGES = {"NEW_ORDER", "NEW_ORDER_REJECTED", "ORDER_REPLACED", "REPLACE_REJECTED", "CANCEL_REJECTED",
+            "MASS_CANCELLED"}                 # one mass cancel is one message, whatever it cancels
 
 
 @dataclass(frozen=True)

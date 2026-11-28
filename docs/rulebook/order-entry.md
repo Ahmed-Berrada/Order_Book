@@ -41,8 +41,8 @@ with `STOPPED`.
 These two rules protect the venue and its other members from one member's flow of messages (MiFID II
 art. 48(1) and (6), RTS 7 art. 18, RTS 9). They apply to members other than `0`, whatever the protocol, and
 are checked when a command is submitted, before it is queued, so a refused command is not journaled and
-does not consume an order ID. A cancel is never refused by them: a member must always be able to reduce
-what it has in the market. Design: [ADR-0021](../adr/0021-ingress-throttles.md).
+does not consume an order ID. A cancel, of one order or of all (RK-006), is never refused by them: a member must
+always be able to reduce what it has in the market. Design: [ADR-0021](../adr/0021-ingress-throttles.md).
 
 **OE-008: Message rate.** Each member may submit at most `messagesPerSecond` new orders and replaces a
 second, all instruments together, with bursts of up to one second's worth (a token bucket that refills
@@ -50,7 +50,7 @@ continuously). A command over the limit is refused with `THROTTLED`, which says 
 the next is accepted. `0` means no limit. Cancels are not counted.
 
 **OE-009: Order-to-trade ratio.** For each member and instrument the venue counts, per UTC day, the
-messages it submitted (new orders, replaces and cancels) and the trades it took part in, as taker or maker.
+messages it submitted (new orders, replaces, cancels and mass cancels, each one message) and the trades it took part in, as taker or maker.
 Once a member has submitted at least `orderToTradeMinimum` messages in an instrument that day, a new order
 or replace that would take its messages above `maxOrderToTradeRatio` times its trades (at least one trade)
 is refused with `ORDER_TO_TRADE_LIMIT`, which says how long until the end of the UTC day. The refusal lasts

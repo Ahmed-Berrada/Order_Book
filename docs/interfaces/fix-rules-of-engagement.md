@@ -56,6 +56,24 @@ reports follow at once (OT-007). From then on the order answers to its new ClOrd
 price with a smaller or equal quantity keeps the order's place in the queue; anything else loses it
 (OT-006).
 
+### OrderMassCancelRequest (`35=q`)
+
+`11 ClOrdID`, `530 MassCancelRequestType`, `60 TransactTime`, and optionally `55 Symbol` and `54 Side`. Cancels
+all the session's member's open orders, resting and parked stops, on that side or on both (RK-006):
+
+| `530` | Scope |
+|---|---|
+| `1` | the instrument named in `55` |
+| `7` | every instrument |
+
+Each order cancelled is reported first, as an ExecutionReport `150=4` with `Text=MASS_CANCEL`. Then an
+OrderMassCancelReport (`35=r`) gives `531 MassCancelResponse` (the request type), `533 TotalAffectedOrders` and
+`37=NONE`. If an instrument refused the request (a halt, say) while others accepted it, `58 Text` lists the
+instruments not cancelled. A rejected request gets `531=0`, with `532 MassCancelRejectReason` when FIX 4.4 has a
+value for the reason (`1` unknown security, `0` an unsupported request type) and the reason in `58 Text`
+(`UNKNOWN_INSTRUMENT`, `UNSUPPORTED_MASS_CANCEL_REQUEST_TYPE`, `INVALID_SIDE`, `DUPLICATE_CLORDID`). A mass cancel
+is accepted in every phase and while the member is suspended, and does not suspend it.
+
 ### OrderStatusRequest (`35=H`)
 
 `11 ClOrdID` (the order's ClOrdID), `55`, `54`. Answered with an ExecutionReport `150=I`.
@@ -180,7 +198,8 @@ answered with a `BusinessMessageReject`, reason `6` (Not authorized) (DC-002).
   limit GTC orders and stops, and rejects the rest with `OrdRejReason=2` (Exchange closed) and text
   `NOT_ALLOWED_IN_PHASE`; the same reason is given for every new order while the instrument is closed.
   Auction fills are reported as ordinary `ExecType=Trade` reports at the auction price.
-- There is no mass cancel by the member itself; the operator's kill switch (REST) cancels all of a member's orders, and each is reported as `ExecType=4` with `Text=KILL_SWITCH`.
+- The operator's kill switch (REST) cancels all of a member's orders and suspends it; each order is reported as
+  `ExecType=4` with `Text=KILL_SWITCH`. A member's own mass cancel is `35=q` (above).
 
 ## Members and limits
 

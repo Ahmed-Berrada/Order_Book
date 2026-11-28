@@ -98,6 +98,15 @@ class ExcessiveCancellationTest(unittest.TestCase):
                                                                          {"orders": 50, "cancelled": 45}))
         self.assertIn("90%", alert.summary)
 
+    def test_a_mass_cancel_is_the_members_own_cancel(self):
+        records = [new(i, 9, i + 1, "BUY", 1) for i in range(50)]
+        records += [cancel(1_000, 9, i + 1, 1, reason="MASS_CANCEL") for i in range(45)]
+        (alert,) = surveillance.excessive_cancellation(records)
+        self.assertEqual(alert.evidence, {"orders": 50, "cancelled": 45})
+        venue = [new(i, 9, i + 1, "BUY", 1) for i in range(50)] + [
+            cancel(1_000, 9, i + 1, 1, reason="KILL_SWITCH") for i in range(50)]
+        self.assertEqual(surveillance.excessive_cancellation(venue), [], "the operator's kill switch is not")
+
     def test_below_either_threshold_nothing(self):
         self.assertEqual(self.day(49, 49), [], "too few orders to judge")
         self.assertEqual(self.day(50, 44), [], "88% cancelled")
