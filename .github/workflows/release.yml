@@ -22,14 +22,20 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          cache: maven
 
-      # The wrapper downloads Maven itself on every run; a failed download stops the job before any build.
-      - name: Cache the Maven distribution
+      # One cache for the dependencies and the Maven distribution the wrapper downloads. On a miss (a version
+      # bump changes the key) the closest older cache is restored, so only what changed comes from Maven
+      # Central, which rate-limits runners that download everything (HTTP 429).
+      - name: Cache Maven
         uses: actions/cache@v4
         with:
-          path: ~/.m2/wrapper
-          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
+          path: |
+            ~/.m2/repository
+            ~/.m2/wrapper
+          key: maven-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+          restore-keys: |
+            maven-${{ runner.os }}-${{ github.job }}-
+            maven-${{ runner.os }}-
 
       - name: Build, test and produce the SBOM
         run: ./mvnw -B -ntp -Psbom verify
