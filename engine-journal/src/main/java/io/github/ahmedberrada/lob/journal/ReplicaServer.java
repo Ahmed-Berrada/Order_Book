@@ -84,10 +84,11 @@ public final class ReplicaServer implements Closeable {
             throw new IllegalArgumentException("the replication secret must be at least 32 bytes");
         }
         Files.createDirectories(root);
-        DirectoryLock rootLock = DirectoryLock.acquire(root);
+        Path absolute = root.toAbsolutePath().normalize();
+        DirectoryLock rootLock = DirectoryLock.acquire(absolute);
         try {
             ServerSocket server = new ServerSocket(port, 50, InetAddress.getByName(bindAddress));
-            return new ReplicaServer(root, secret, server, rootLock);
+            return new ReplicaServer(absolute, secret, server, rootLock);
         } catch (IOException | RuntimeException e) {
             rootLock.close();
             throw e;
@@ -167,7 +168,11 @@ public final class ReplicaServer implements Closeable {
         }
         // No read timeout once authenticated: a quiet instrument sends nothing for hours. A dead primary's
         // connection is found by TCP keepalive, or replaced by the primary's next one.
-        Path directory = root.resolve(symbol);
+        Path directory = root.resolve(symbol).normalize();
+        if (!directory.startsWith(root) || !root.equals(directory.getParent())) {
+            link.refuse("not a symbol: " + symbol);     // never a path outside its own directory of the root
+            return;
+        }
         if (!Files.isDirectory(directory)) {
             Files.createDirectories(directory);
             Replication.forceDirectory(root);       // the instrument's directory survives a power loss
