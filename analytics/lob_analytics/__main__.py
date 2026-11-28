@@ -6,11 +6,11 @@ import json
 import sys
 from typing import List, Optional, TextIO
 
-from . import metrics
+from . import metrics, surveillance
 from .files import FormatError, read_records, read_trades
 
 
-def report(trades_file: TextIO, records_file: Optional[TextIO], bucket_seconds: int) -> dict:
+def report(trades_file: TextIO, records_file: Optional[TextIO], bucket_seconds: int, alerts: bool = False) -> dict:
     """Every metric, as plain data."""
     lines = read_trades(trades_file)
     days = []
@@ -33,9 +33,14 @@ def report(trades_file: TextIO, records_file: Optional[TextIO], bucket_seconds: 
         })
     result = {"days": days}
     if records_file is not None:
+        records = read_records(records_file)
+        if alerts:
+            result["alerts"] = [{"kind": a.kind, "trade_date": a.trade_date, "instrument": a.instrument,
+                                 "member_id": a.member_id, "summary": a.summary, "evidence": a.evidence}
+                                for a in surveillance.alerts(records)]
         result["order_to_trade"] = [{"trade_date": o.trade_date, "instrument": o.instrument, "member_id": o.member_id, "messages": o.messages,
                                      "trades": o.trades, "ratio": o.ratio}
-                                    for o in metrics.order_to_trade(read_records(records_file))]
+                                    for o in metrics.order_to_trade(records)]
     return result
 
 
@@ -65,6 +70,16 @@ def markdown(data: dict) -> str:
             ratio = "no trades" if o["ratio"] is None else f"{o['ratio']:.2f}"
             out.append(f"| {o['trade_date']} | {o['instrument']} | {o['member_id']} | {o['messages']} | {o['trades']} | {ratio} |")
         out.append("")
+    if "alerts" in data:
+        out += ["## Surveillance alerts", "",
+                "Indicators for review (MAR art. 16), not findings: docs/analytics.md, \"Surveillance\".", ""]
+        if not data["alerts"]:
+            out += ["None.", ""]
+        else:
+            out += ["| Kind | Date | Instrument | Member | What |", "|---|---|---|---:|---|"]
+            for a in data["alerts"]:
+                out.append(f"| {a['kind']} | {a['trade_date']} | {a['instrument']} | {a['member_id']} | {a['summary']} |")
+            out.append("")
     return "\n".join(out)
 
 
@@ -73,6 +88,8 @@ def main(argv: Optional[List[str]] = None, stdout: TextIO = sys.stdout, stderr: 
     parser.add_argument("--trades", required=True, help="trade file from lob-post-trade")
     parser.add_argument("--records", help="order records from lob-records, for the order-to-trade ratio")
     parser.add_argument("--bucket", type=int, default=60, help="bucket length in seconds (default 60)")
+    parser.add_argument("--alerts", action="store_true",
+                        help="add market-abuse indicators (wash trades, spoofing, excessive cancellation); needs --records")
     parser.add_argument("--json", action="store_true", help="print JSON instead of Markdown")
     try:
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -82,11 +99,14 @@ def main(argv: Optional[List[str]] = None, stdout: TextIO = sys.stdout, stderr: 
     if args.bucket <= 0:
         print("error: --bucket must be positive", file=stderr)
         return 2
+    if args.alerts and not args.records:
+        print("error: --alerts needs --records", file=stderr)
+        return 2
     try:
         with open(args.trades, encoding="utf-8", newline="") as trades:
             if args.records:
                 with open(args.records, encoding="utf-8", newline="") as records:
-                    data = report(trades, records, args.bucket)
+                    data = report(trades, records, args.bucket, args.alerts)
             else:
                 data = report(trades, None, args.bucket)
     except (OSError, FormatError) as e:

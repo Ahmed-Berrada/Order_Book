@@ -42,6 +42,23 @@ The order-to-trade ratio is the measure of MiFID II RTS 9. The venue does not li
 needs time windows in the engine, ADR-0015 §4); this report measures it after the fact, which is what
 surveillance does with it.
 
+## Surveillance
+
+`--alerts` (with `--records`) adds market-abuse indicators, the first stage of the surveillance MAR art. 16 asks
+of a venue: alerts a person reviews, each with the evidence that raised it. An alert is not a finding that abuse
+took place. The thresholds are starting points for a venue to calibrate (`surveillance.Thresholds`), not
+standards.
+
+| Alert | Raised when | Evidence |
+|---|---|---|
+| `WASH_TRADE` | A trade has the same member as buyer and seller (per day, instrument and member). FIX members' orders cannot meet their own (self-trade prevention, SP-001); a REST order has no group, so this catches what prevention does not | Trades, lots, the orders involved |
+| `SPOOFING` | A member's order is large (at least 5 times the day's median order size in the instrument). The member cancels it within 60 s of entering it, with at most 10% of it traded, and meanwhile the member traded on the other side, as taker or maker. This is the pattern of spoofing and layering: size shown to move the price, never meant to trade | The order, its side, size and price, entry and cancel times, the trades on the other side |
+| `EXCESSIVE_CANCELLATION` | A member cancels at least 90% of the orders it entered in the day, with at least 50 orders | Orders and cancels |
+
+Cancels by the venue (expiry, the kill switch, IOC remainders) are not the member's, and are not counted. The
+detectors read the order records only, so they see no orders of other venues: cross-venue and cross-product
+manipulation is outside what one venue can detect alone.
+
 ## Limits
 
 - No quote-based measures (quoted, effective and realised spreads, depth). They need the state of the book at

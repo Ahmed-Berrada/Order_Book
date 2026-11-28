@@ -51,6 +51,17 @@ class CliTest(unittest.TestCase):
         code, out, _ = self.run_cli("--trades", str(self.trades))
         self.assertNotIn("Order-to-trade", out)
 
+    def test_alerts_are_reported_from_the_records(self):
+        code, out, _ = self.run_cli("--trades", str(self.trades), "--records", str(self.records), "--alerts", "--json")
+        self.assertEqual(code, 0)
+        kinds = [a["kind"] for a in json.loads(out)["alerts"]]
+        self.assertEqual(kinds, ["WASH_TRADE"])                    # member 2 traded with itself in the fixture
+        code, out, _ = self.run_cli("--trades", str(self.trades), "--records", str(self.records), "--alerts")
+        self.assertIn("## Surveillance alerts", out)
+        self.assertIn("| WASH_TRADE | 2026-11-26 | PTX | 2 |", out)
+        code, _, err = self.run_cli("--trades", str(self.trades), "--alerts")
+        self.assertEqual((code, err), (2, "error: --alerts needs --records\n"))
+
     def test_errors(self):
         code, out, err = self.run_cli()
         self.assertEqual((code, out), (2, ""))
