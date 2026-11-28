@@ -18,11 +18,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
-          cache: maven
+
+      # One cache for the dependencies and the Maven distribution the wrapper downloads. On a miss (a version
+      # bump changes the key) the closest older cache is restored, so only what changed comes from Maven
+      # Central, which rate-limits runners that download everything (HTTP 429).
+      - name: Cache Maven
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.m2/wrapper
+          key: maven-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+          restore-keys: |
+            maven-${{ runner.os }}-${{ github.job }}-
+            maven-${{ runner.os }}-
 
       - name: Build, test and produce the SBOM
         run: ./mvnw -B -ntp -Psbom verify
@@ -47,7 +60,7 @@ jobs:
           sbom-path: 'release/lob-engine-bom.json'
 
       - name: Publish
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release/*
           generate_release_notes: true
