@@ -17,13 +17,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
 
-      - uses: github/codeql-action/init@v3
+      # The wrapper downloads Maven itself on every run; a failed download stops the job before any build.
+      - name: Cache the Maven distribution
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/wrapper
+          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
+
+      - uses: github/codeql-action/init@v4
         with:
           languages: java-kotlin
           build-mode: manual
@@ -32,6 +39,6 @@ jobs:
       - name: Build without tests
         run: ./mvnw -B -ntp -DskipTests package
 
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
         with:
           category: /language:java-kotlin
