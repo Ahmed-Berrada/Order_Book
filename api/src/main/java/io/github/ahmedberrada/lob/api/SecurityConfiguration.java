@@ -1,5 +1,6 @@
 package io.github.ahmedberrada.lob.api;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -10,8 +11,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.authentication.event.AbstractAuthenticationFailureEvent;
-import org.springframework.security.config.Customizer;
+import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -22,8 +23,6 @@ import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.WebAuthenticationDetails;
-import org.springframework.context.event.EventListener;
 
 /**
  * Authentication and authorisation of the REST API (docs/rulebook/access-control.md, ADR-0017): HTTP Basic
@@ -43,6 +42,30 @@ class SecurityConfiguration {
     @Bean
     PasswordEncoder passwordEncoder() {
         return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+    }
+
+    /** Logs failed authentications (AC-006). */
+    @Bean
+    LoginAudit loginAudit() {
+        return new LoginAudit();
+    }
+
+    /** Checks secrets for names not locked out, and counts the outcome (AC-009). */
+    @Bean
+    AuthenticationProvider authenticationProvider(UserDetailsService users, PasswordEncoder encoder,
+            LoginThrottle logins) {
+        DaoAuthenticationProvider secrets = new DaoAuthenticationProvider(users);
+        secrets.setPasswordEncoder(encoder);
+        return new ThrottledAuthentication(secrets, logins);
+    }
+
+    /** Lockouts after repeated failed authentications, REST and FIX (AC-009); none with security disabled. */
+    @Bean
+    LoginThrottle loginThrottle(LobProperties properties) {
+        LobProperties.SecurityProperties security = properties.security();
+        return security.enabled()
+                ? new LoginThrottle(security.maxFailures(), security.lockout(), Duration.ofSeconds(2),
+                        System::nanoTime) : LoginThrottle.NONE;
     }
 
     @Bean
@@ -113,7 +136,7 @@ class SecurityConfiguration {
             LOG.warn("lob.security.enabled is false: every caller who reaches this port is trusted as the operator");
             return http.authorizeHttpRequests(a -> a.anyRequest().permitAll()).build();
         }
-        return http.httpBasic(Customizer.withDefaults())
+        return http.httpBasic(b -> b.authenticationEntryPoint(ThrottledAuthentication.ENTRY_POINT))
                 .authorizeHttpRequests(a -> a
                         .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/instruments/*/phase").hasRole("ADMIN")
@@ -124,13 +147,5 @@ class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/**").hasRole("READ")
                         .anyRequest().denyAll())
                 .build();
-    }
-
-    /** AC-006: a failed authentication is logged with the user name and address, never a secret. */
-    @EventListener
-    void onFailure(AbstractAuthenticationFailureEvent event) {
-        Object details = event.getAuthentication().getDetails();
-        LOG.warn("authentication failed for user '{}' from {}", event.getAuthentication().getName(),
-                details instanceof WebAuthenticationDetails web ? web.getRemoteAddress() : "unknown address");
     }
 }

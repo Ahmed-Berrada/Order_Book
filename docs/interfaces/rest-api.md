@@ -29,7 +29,7 @@ carries HTTP Basic credentials, ideally over TLS terminated in front of the venu
 | `MEMBER` | also enter, replace and cancel orders, for its own member |
 | `ADMIN` | also set the trading phase, members' limits, and the kill switch; may act for any member with `X-Member-Id` |
 
-No credentials or wrong ones: `401`. A role too low, another member named, or a write the browser marks as coming from another site or with a form body (AC-008): `403`. Everything the API does not
+No credentials or wrong ones: `401`. After 5 failures in a row for one user name from one address (the defaults, `lob.security.max-failures` and `lob.security.lockout`), that name is refused from that address for a minute with `429`, `Retry-After` and reason `LOCKED_OUT`, even with the right password (AC-009). The secret is checked for at most five requests of one name and address at a time; more wait up to 2 seconds for a slot, then get `429` with reason `AUTHENTICATION_BUSY`. A role too low, another member named, or a write the browser marks as coming from another site or with a form body (AC-008): `403`. Everything the API does not
 name is refused. For local development only, the `dev` profile turns all of it off.
 
 ## Endpoints
