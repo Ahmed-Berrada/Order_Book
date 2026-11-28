@@ -38,6 +38,8 @@ class LobPropertiesTest {
             assertThat(properties.queueCapacity()).isEqualTo(10_000);
             assertThat(properties.fsync()).isEqualTo(FsyncPolicy.GROUP);     // ADR-0020 §5
             assertThat(properties.snapshotInterval()).isEqualTo(10_000);
+            assertThat(properties.security().maxFailures()).isEqualTo(5);                    // AC-009
+            assertThat(properties.security().lockout()).isEqualTo(java.time.Duration.ofMinutes(1));
             assertThat(properties.fix().enabled()).isFalse();
             assertThat(properties.fix().port()).isEqualTo(9878);
             assertThat(properties.fix().bindAddress()).isEqualTo("127.0.0.1");

@@ -83,6 +83,16 @@ The kill switch suspends a member and cancels its open orders in every instrumen
 `DELETE /api/v1/members/{memberId}/suspension`. Its FIX sessions receive a cancel for each order
 (`Text=KILL_SWITCH`). Limits are changed with `PUT /api/v1/members/{memberId}/limits`.
 
+## A user or FIX session is locked out
+
+After `lob.security.max-failures` failed authentications in a row (5 by default) for one name from one address,
+that name is refused from that address for `lob.security.lockout` (1 minute): REST answers `429` with reason
+`LOCKED_OUT`, a FIX Logon is rejected (AC-009). The log has a `WARN` line for each failure and one when the
+lockout starts (`'alice' locked out from 10.0.0.1 …`; FIX names are prefixed `FIX`). A member that is locked
+out has usually been configured with an old secret: fix its configuration and wait out the minute. Many
+names locked out from one address is someone guessing: block the address in front of the venue. A restart
+clears the lockouts.
+
 ## The queue is nearly full or commands are slow
 
 **Alerts:** `QueueNearlyFull`, `CommandLatencyHigh`. A full queue refuses with `OVERLOADED` and

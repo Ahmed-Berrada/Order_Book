@@ -46,4 +46,40 @@ class LogonAuthenticationTest {
 
         assertThat(attempts).contains("MEMBER1:guess", "MEMBER2:null", "MEMBER1:s3cret");
     }
+
+    @Test
+    @Rulebook("AC-009")
+    void theAuthenticatorIsToldWhereTheLogonCameFrom() throws Exception {
+        List<String> addresses = new java.util.concurrent.CopyOnWriteArrayList<>();
+        LogonAuthenticator authenticator = new LogonAuthenticator() {
+            @Override
+            public boolean authenticate(String compId, String password) {
+                throw new AssertionError("the gateway passes the address");
+            }
+
+            @Override
+            public boolean authenticate(String compId, String password, String remoteAddress) {
+                addresses.add(remoteAddress);
+                return "s3cret".equals(password);
+            }
+        };
+        try (FixVenue venue = new FixVenue(directory, FixVenue.freePort(), SelfTradeMode.CANCEL_NEWEST, authenticator)) {
+            FixTestClient client = new FixTestClient("MEMBER1", venue.port, directory.resolve("client"))
+                    .withPassword("s3cret");
+            try {
+                assertThat(client.tryLogon(10_000)).isTrue();
+            } finally {
+                client.close();
+            }
+        }
+        assertThat(addresses).isNotEmpty().allSatisfy(a -> assertThat(LoginThrottleHost.of(a)).isEqualTo("127.0.0.1"));
+    }
+
+    /** The host part of a socket address as text, as the application keys lockouts on it. */
+    private static final class LoginThrottleHost {
+        static String of(String address) {
+            String a = address.substring(address.lastIndexOf('/') + 1);
+            return a.substring(0, a.lastIndexOf(':'));
+        }
+    }
 }

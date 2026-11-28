@@ -30,7 +30,7 @@ below the edges assumes the edges did their job.
 | # | Threat | STRIDE | Where | Control | Status |
 |---|---|---|---|---|---|
 | 1 | A caller acts as another member or as the operator | Spoofing | REST, FIX | HTTP Basic or FIX Logon password; hashed secrets; member bound to the user; header naming another member refused (AC-001 to AC-005, AC-007) | Mitigated, over TLS only (see 5) |
-| 2 | Guessing credentials | Spoofing | REST, FIX | Bcrypt hashes make each guess expensive; failures are logged (AC-006) | Partial: no throttling or lock-out (ingress, phase 9) |
+| 2 | Guessing credentials | Spoofing | REST, FIX | Bcrypt hashes make each guess expensive; failures are logged (AC-006); after 5 failures in a row a name is locked out from that address for a minute, without its secret being checked (AC-009) | Partial: an attacker with many addresses gets 5 guesses a minute from each; no lockout across addresses, which would let anyone lock a member out |
 | 2a | A page on another site makes a logged-in browser enter or cancel orders (cross-site request forgery with cached Basic credentials) | Spoofing, Tampering | REST | Writes a browser marks as cross-site (`Sec-Fetch-Site`, or `Origin` from old browsers), and writes with a form body, are refused (AC-008); a JSON body from another site needs a CORS preflight, never granted | Mitigated |
 | 3 | Cancel or replace another member's order | Tampering | engine | Ownership of cancels and replaces; the answer is `UNKNOWN_ORDER` (MB-003) | Mitigated |
 | 4 | A member's runaway algorithm floods or distorts the book | Tampering, DoS | engine | Pre-trade limits, collar, kill switch (RK-001 to RK-005); the bounded queue refuses overload (OE-005) | Partial: no message-rate limit; operator-triggered kill only |

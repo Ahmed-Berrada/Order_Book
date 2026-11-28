@@ -96,8 +96,8 @@ class SecurityConfigurationTest {
     @Test
     @Rulebook("AC-006")
     void aFailedAuthenticationIsLoggedWithoutTheSecret(CapturedOutput output) {
-        SecurityConfiguration configuration = new SecurityConfiguration();
-        configuration.onFailure(new org.springframework.security.authentication.event.AuthenticationFailureBadCredentialsEvent(
+        LoginAudit audit = new LoginAudit(LoginThrottle.NONE);
+        audit.onFailure(new org.springframework.security.authentication.event.AuthenticationFailureBadCredentialsEvent(
                 new org.springframework.security.authentication.UsernamePasswordAuthenticationToken("mallory",
                         "hunter2"), new org.springframework.security.authentication.BadCredentialsException("bad")));
 
@@ -135,7 +135,8 @@ class SecurityConfigurationTest {
         return new LobProperties(Path.of("x"), 10, io.github.ahmedberrada.lob.journal.FsyncPolicy.OS, 0, List.of(),
                 new LobProperties.FixProperties(true, "127.0.0.1", 9999, "LOB", List.of("MEMBER1"), List.of("RISK"),
                         null, SelfTradeMode.CANCEL_NEWEST, passwords),
-                null, null, List.of(), new LobProperties.SecurityProperties(secure, List.of()));
+                null, null, List.of(), new LobProperties.SecurityProperties(secure, List.of(), 5,
+                        java.time.Duration.ofMinutes(1)));
     }
 
     @Test

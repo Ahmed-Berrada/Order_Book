@@ -29,7 +29,7 @@ carries HTTP Basic credentials, ideally over TLS terminated in front of the venu
 | `MEMBER` | also enter, replace and cancel orders, for its own member |
 | `ADMIN` | also set the trading phase, members' limits, and the kill switch; may act for any member with `X-Member-Id` |
 
-No credentials or wrong ones: `401`. A role too low, another member named, or a write the browser marks as coming from another site or with a form body (AC-008): `403`. Everything the API does not
+No credentials or wrong ones: `401`. After 5 failures in a row for one user name from one address, that name is refused from that address for a minute with `429`, `Retry-After` and reason `LOCKED_OUT`, even with the right password (AC-009). A role too low, another member named, or a write the browser marks as coming from another site or with a form body (AC-008): `403`. Everything the API does not
 name is refused. For local development only, the `dev` profile turns all of it off.
 
 ## Endpoints
