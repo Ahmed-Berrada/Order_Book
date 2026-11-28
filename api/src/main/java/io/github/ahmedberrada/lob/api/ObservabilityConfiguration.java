@@ -2,6 +2,7 @@ package io.github.ahmedberrada.lob.api;
 
 import io.github.ahmedberrada.lob.service.InstrumentConfig;
 import io.github.ahmedberrada.lob.service.MatchingService;
+import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import java.util.List;
@@ -26,6 +27,9 @@ class ObservabilityConfiguration {
                         .description("Commands waiting for the instrument's thread").register(registry);
                 Gauge.builder("lob.queue.capacity", service, s -> s.queueCapacity(symbol)).tag("symbol", symbol)
                         .description("Commands the queue holds before refusing with OVERLOADED").register(registry);
+                FunctionCounter.builder("lob.journal.flushes", service, s -> s.flushes(symbol)).tag("symbol", symbol)
+                        .description("Device flushes of the command journal: one per command, or one per group (ADR-0020)")
+                        .register(registry);
                 Gauge.builder("lob.instrument.halted", service, s -> s.isHalted(symbol) ? 1 : 0).tag("symbol", symbol)
                         .description("1 if the instrument stopped after a journal failure").register(registry);
             }

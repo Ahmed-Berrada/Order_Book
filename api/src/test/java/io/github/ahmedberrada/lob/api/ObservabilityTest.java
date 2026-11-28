@@ -59,6 +59,8 @@ class ObservabilityTest {
         String metrics = mvc.get().uri("/actuator/prometheus").exchange().getResponse().getContentAsString();
         assertThat(metrics).contains("lob_command_duration_seconds_count{", "symbol=\"AAPL\"")
                 .contains("lob_trades_total{", "lob_queue_depth{", "lob_queue_capacity{", "lob_instrument_halted{",
+                        "lob_journal_flushes_total{", "lob_journal_flush_duration_seconds_count{",
+                        "lob_journal_group_size_count{",
                         "lob_command_duration_seconds_bucket{");
         assertThat(metrics.lines().filter(l -> l.startsWith("lob_trades_total{") && l.contains("AAPL")).findFirst())
                 .hasValueSatisfying(line -> assertThat(line).endsWith(" 1.0"));
