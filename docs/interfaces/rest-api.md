@@ -220,6 +220,7 @@ peak only (IC-002).
 | `422` | Off-tick price (OE-002) | `OFF_TICK_PRICE` |
 | `422` | Rejected by the engine (CT-007, CT-009, OT-001, OT-004); the body carries the `orderId` it consumed | `INVALID_QUANTITY`, `QUANTITY_ABOVE_MAXIMUM`, `INVALID_PRICE`, `PRICE_ABOVE_MAXIMUM`, `NO_LIQUIDITY`, `INVALID_TIME_IN_FORCE`, `POST_ONLY_WOULD_TRADE`, `INVALID_DISPLAY_QUANTITY`, `STOP_PRICE_ALREADY_REACHED`, `NOT_ALLOWED_IN_PHASE`, `INVALID_TICK_SIZE`, `MEMBER_SUSPENDED`, `RISK_ORDER_QUANTITY`, `RISK_ORDER_NOTIONAL`, `RISK_PRICE_COLLAR`, `RISK_OPEN_ORDERS`, `RISK_POSITION` |
 | `422` | Replace refused by the engine (OT-005); the order is unchanged | the same reasons |
+| `429` | The member is over its message rate (OE-008) or its order-to-trade ratio for the day (OE-009), with `Retry-After` in seconds: until the next message is accepted, or at most until the end of the UTC day (new trades can lift the ratio refusal sooner). Cancels are never refused this way | `THROTTLED`, `ORDER_TO_TRADE_LIMIT` |
 | `503` | Queue full (OE-005), with `Retry-After: 1` | `OVERLOADED` |
 | `503` | Instrument halted (OE-006) or venue shutting down (OE-007) | `HALTED`, `STOPPED` |
 | `500` | The command's journal write failed: **its outcome is unknown** (ADR-0003 §8) | `OUTCOME_UNKNOWN` |

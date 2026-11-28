@@ -38,6 +38,8 @@ class LobPropertiesTest {
             assertThat(properties.queueCapacity()).isEqualTo(10_000);
             assertThat(properties.fsync()).isEqualTo(FsyncPolicy.GROUP);     // ADR-0020 §5
             assertThat(properties.snapshotInterval()).isEqualTo(10_000);
+            assertThat(properties.throttle().limits())                          // OE-008, OE-009
+                    .isEqualTo(new io.github.ahmedberrada.lob.service.IngressLimits(1_000, 1_000, 1_000));
             assertThat(properties.security().maxFailures()).isEqualTo(5);                    // AC-009
             assertThat(properties.security().lockout()).isEqualTo(java.time.Duration.ofMinutes(1));
             assertThat(properties.fix().enabled()).isFalse();
@@ -70,6 +72,12 @@ class LobPropertiesTest {
                     assertThat(instrument.volatilityBandBps()).isEqualTo(300);
                 });
         runner.withPropertyValues(with("lob.data-directory=target/test-venue-regime", "lob.instruments[0].volatility-band-bps=-1"))
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void refusesANegativeThrottle() {
+        runner.withPropertyValues(with("lob.throttle.messages-per-second=-1"))
                 .run(context -> assertThat(context).hasFailed());
     }
 

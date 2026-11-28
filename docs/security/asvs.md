@@ -18,5 +18,5 @@ does; **Not met** that it does not; **n/a** that it does not apply to this kind 
 | V10 Malicious code | Meets | CodeQL, dependency review, SBOM, signed provenance ([supply chain](supply-chain.md)) |
 | V11 Business logic | Meets | The rulebook; limits, phases, kill switch; property-tested against an independent model |
 | V12 Files and resources | n/a | No uploads. Journal paths come from configuration only, and symbols are restricted to `[A-Z0-9._-]` |
-| V13 API and web service | Partial | Role-checked REST; a documented OpenAPI contract. No rate limiting |
+| V13 API and web service | Partial | Role-checked REST; a documented OpenAPI contract; members' orders rate-limited (OE-008) and failed logins locked out (AC-009). No limit on reads or on connections |
 | V14 Configuration | Partial | Secure defaults, fail-closed start-up (AC-003); dependencies pinned. No hardened container or deployment profile yet |

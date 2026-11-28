@@ -513,7 +513,7 @@ final class FixApplication implements Application, EventListener {
             int reason = switch (refused.reason()) {
                 case UNKNOWN_INSTRUMENT -> OrdRejReason.UNKNOWN_SYMBOL;
                 case STOPPED -> OrdRejReason.EXCHANGE_CLOSED;
-                case OFF_TICK_PRICE, OVERLOADED, HALTED -> OrdRejReason.OTHER;
+                case OFF_TICK_PRICE, OVERLOADED, HALTED, THROTTLED, ORDER_TO_TRADE_LIMIT -> OrdRejReason.OTHER;
             };
             refuse(session, clOrdId, symbol, side, quantity, reason, refused.reason().name(), true);
         } else {

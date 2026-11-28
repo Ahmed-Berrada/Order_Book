@@ -34,10 +34,15 @@ public final class MatchingService implements AutoCloseable {
     private final Map<String, SymbolWorker> workers;
     private final List<EventListener> listeners;
     private final Map<String, RecoveryReport> recoveries;
+    private final Throttles throttles;
+    private final CommandObserver observer;
 
     private MatchingService(Map<String, InstrumentConfig> instruments, Map<String, SymbolWorker> workers,
-            Map<String, RecoveryReport> recoveries, List<EventListener> listeners) {
+            Map<String, RecoveryReport> recoveries, List<EventListener> listeners, Throttles throttles,
+            CommandObserver observer) {
         this.listeners = listeners;
+        this.throttles = throttles;
+        this.observer = observer;
         this.instruments = Collections.unmodifiableMap(instruments);
         this.workers = workers;
         this.recoveries = Collections.unmodifiableMap(recoveries);
@@ -58,8 +63,19 @@ public final class MatchingService implements AutoCloseable {
     public static MatchingService start(Path dataDirectory, List<InstrumentConfig> instruments,
             JournalOptions options, TimeSource timeSource, int queueCapacity, CommandObserver observer)
             throws IOException {
+        return start(dataDirectory, instruments, options, timeSource, queueCapacity, observer, IngressLimits.NONE);
+    }
+
+    /**
+     * Like {@link #start(Path, List, JournalOptions, TimeSource, int, CommandObserver)}, throttling members' messages
+     * (OE-008, OE-009) by the time of {@code timeSource}.
+     */
+    public static MatchingService start(Path dataDirectory, List<InstrumentConfig> instruments,
+            JournalOptions options, TimeSource timeSource, int queueCapacity, CommandObserver observer,
+            IngressLimits limits) throws IOException {
         Objects.requireNonNull(dataDirectory, "dataDirectory");
         Objects.requireNonNull(observer, "observer");
+        Objects.requireNonNull(limits, "limits");
         if (queueCapacity < 1) {
             throw new IllegalArgumentException("queueCapacity must be positive: " + queueCapacity);
         }
@@ -72,6 +88,8 @@ public final class MatchingService implements AutoCloseable {
         Map<String, SymbolWorker> workers = new LinkedHashMap<>();
         Map<String, RecoveryReport> recoveries = new LinkedHashMap<>();
         List<EventListener> listeners = new CopyOnWriteArrayList<>();
+        Throttles throttles = new Throttles(limits, timeSource);
+        listeners.add(throttles);                   // counts trades for OE-009, after they are durable
         try {
             for (InstrumentConfig config : bySymbol.values()) {
                 JournaledEngine engine = JournaledEngine.open(
@@ -86,7 +104,7 @@ public final class MatchingService implements AutoCloseable {
             }
             throw e;
         }
-        return new MatchingService(bySymbol, workers, recoveries, listeners);
+        return new MatchingService(bySymbol, workers, recoveries, listeners, throttles, observer);
     }
 
     /** Journals and processes a command for an instrument (OE-003, OE-004). */
@@ -103,15 +121,30 @@ public final class MatchingService implements AutoCloseable {
     }
 
     /**
-     * Like {@link #submit(String, Command, Object)}, on behalf of a member: the member's limits apply, and
-     * the journal records who sent the command (MB-001, RK-002).
+     * Like {@link #submit(String, Command, Object)}, on behalf of a member: the member's limits and the venue's
+     * throttles apply, and the journal records who sent the command (MB-001, RK-002, OE-008, OE-009).
      */
     public CompletableFuture<EventBatch> submit(String symbol, Command command, long memberId, Object context) {
         Objects.requireNonNull(command, "command");
         if (memberId < 0) {
             throw new IllegalArgumentException("member ID must not be negative: " + memberId);
         }
-        return withWorker(symbol, worker -> worker.submit(command, memberId, context));
+        return withWorker(symbol, worker -> {
+            RequestRefusedException refusal = throttles.check(symbol, command, memberId);
+            if (refusal != null) {
+                try {
+                    observer.throttled(symbol, memberId, refusal.reason());
+                } catch (RuntimeException e) {
+                    // a metric must not change the answer (CommandObserver)
+                }
+                return CompletableFuture.failedFuture(refusal);
+            }
+            CompletableFuture<EventBatch> result = worker.submit(command, memberId, context);
+            if (result.isCompletedExceptionally()) {
+                throttles.release(symbol, command, memberId);    // refused before the queue: not a message
+            }
+            return result;
+        });
     }
 
     /** Registers a listener for the events of every instrument, from the next command on. */

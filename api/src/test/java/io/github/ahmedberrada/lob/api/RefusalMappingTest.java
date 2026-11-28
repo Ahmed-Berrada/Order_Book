@@ -14,6 +14,7 @@ import io.github.ahmedberrada.lob.service.RequestRefusedException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.BeforeEach;
@@ -69,6 +70,29 @@ class RefusalMappingTest {
                 .hasStatus(HttpStatus.SERVICE_UNAVAILABLE).bodyJson().isLenientlyEqualTo("{\"reason\":\"HALTED\"}");
         assertThat(placeOrderFailingWith(new RequestRefusedException(Reason.STOPPED, "AAPL")))
                 .hasStatus(HttpStatus.SERVICE_UNAVAILABLE).bodyJson().isLenientlyEqualTo("{\"reason\":\"STOPPED\"}");
+    }
+
+    @Test
+    @Rulebook("OE-008")
+    void aThrottledMemberIsToldWhenToRetry() {
+        assertThat(placeOrderFailingWith(new RequestRefusedException(Reason.THROTTLED, "AAPL", Duration.ofMillis(1))))
+                .hasStatus(HttpStatus.TOO_MANY_REQUESTS).hasHeader("Retry-After", "1")
+                .bodyJson().isLenientlyEqualTo("{\"reason\":\"THROTTLED\",\"status\":429}");
+        assertThat(placeOrderFailingWith(new RequestRefusedException(Reason.THROTTLED, "AAPL", Duration.ofMillis(2_001))))
+                .hasHeader("Retry-After", "3");
+        assertThat(placeOrderFailingWith(new RequestRefusedException(Reason.THROTTLED, "AAPL", Duration.ofSeconds(2))))
+                .hasHeader("Retry-After", "2");
+        assertThat(placeOrderFailingWith(new RequestRefusedException(Reason.THROTTLED, "AAPL")))
+                .hasHeader("Retry-After", "1");
+    }
+
+    @Test
+    @Rulebook("OE-009")
+    void aMemberOverItsOrderToTradeRatioIsToldWhenTheDayEnds() {
+        assertThat(placeOrderFailingWith(new RequestRefusedException(Reason.ORDER_TO_TRADE_LIMIT, "AAPL",
+                Duration.ofHours(14))))
+                .hasStatus(HttpStatus.TOO_MANY_REQUESTS).hasHeader("Retry-After", "50400")
+                .bodyJson().isLenientlyEqualTo("{\"reason\":\"ORDER_TO_TRADE_LIMIT\"}");
     }
 
     @Test

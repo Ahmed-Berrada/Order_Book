@@ -6,7 +6,7 @@ of every module's tests. Do not edit by hand: change a rule or a test, then run 
 
 Regulation to rules: [regulatory-mapping.md](regulatory-mapping.md).
 
-**135 rules, 135 in force, 0 draft.**
+**137 rules, 137 in force, 0 draft.**
 
 | Rule | Title | Chapter | Status | Verified by |
 |---|---|---|---|---|
@@ -75,6 +75,8 @@ Regulation to rules: [regulatory-mapping.md](regulatory-mapping.md).
 | `OE-005` | Backpressure | [order-entry](../rulebook/order-entry.md) | in force | FailureMappingTest#refusalsAreRejectionsWithoutOrder, RefusalMappingTest#overloadedAsksTheClientToRetry, SymbolWorkerTest#fullQueueRefusesAtOnceWithoutJournaling |
 | `OE-006` | Halt | [order-entry](../rulebook/order-entry.md) | in force | FailureMappingTest#refusalsAreRejectionsWithoutOrder, GroupCommitTest#aFailedFlushAcknowledgesNoCommandOfTheGroupAndHalts, ObservabilityTest#probesAreUpAndPrometheusShowsTheInstrumentsAndTheirCommands, ObservabilityTest#readinessGoesDownWhileAnInstrumentIsHalted and 4 more |
 | `OE-007` | Orderly shutdown | [order-entry](../rulebook/order-entry.md) | in force | EndToEndTest#concurrentOrdersOverHttpSurviveARestart, FailureMappingTest#refusalsAreRejectionsWithoutOrder, RefusalMappingTest#haltedAndStoppedAreUnavailable, SymbolWorkerTest#shutdownProcessesWhatIsQueuedThenRefuses |
+| `OE-008` | Message rate | [order-entry](../rulebook/order-entry.md) | in force | FailureMappingTest#aThrottledReplaceIsACancelRejectWithTheReason, FailureMappingTest#throttledOrdersAreRejectionsWithTheReason, RefusalMappingTest#aThrottledMemberIsToldWhenToRetry, ThrottleApiTest#aMemberOverItsRateIsAskedToRetryAndMayStillCancel and 3 more |
+| `OE-009` | Order-to-trade ratio | [order-entry](../rulebook/order-entry.md) | in force | FailureMappingTest#aThrottledReplaceIsACancelRejectWithTheReason, FailureMappingTest#throttledOrdersAreRejectionsWithTheReason, RefusalMappingTest#aMemberOverItsOrderToTradeRatioIsToldWhenTheDayEnds, ThrottlesTest#aCommandTheInstrumentRefusesGivesBackWhatItCounted and 2 more |
 | `OT-001` | Time in force | [order-types](../rulebook/order-types.md) | in force | MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel, OrderTypesFixTest#marketOrdersAreImmediateOrCancelAndRefuseGoodTillCancel, OrderTypesTest#defaultsAreGoodTillCancelledForLimitAndImmediateOrCancelForMarket, OrderTypesTest#iocLimitTradesWhatItCanAndCancelsTheRest and 1 more |
 | `OT-002` | IOC | [order-types](../rulebook/order-types.md) | in force | MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel, OrderApiTest#iocAndFokOrders, OrderTypesFixTest#iocAndFokOrders, OrderTypesTest#iocLimitTradesWhatItCanAndCancelsTheRest and 2 more |
 | `OT-003` | FOK | [order-types](../rulebook/order-types.md) | in force | IcebergTest#fokCountsHiddenQuantity, MatchingEnginePropertyTest#producesExactlyTheSameEventsAsTheReferenceModel, OrderApiTest#iocAndFokOrders, OrderTypesFixTest#iocAndFokOrders and 5 more |

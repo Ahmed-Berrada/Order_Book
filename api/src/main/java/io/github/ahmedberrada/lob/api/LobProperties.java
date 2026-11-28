@@ -13,6 +13,7 @@ import jakarta.validation.constraints.PositiveOrZero;
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.Duration;
+import io.github.ahmedberrada.lob.service.IngressLimits;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -30,6 +31,7 @@ import org.springframework.validation.annotation.Validated;
  * @param fix              the FIX gateway (ADR-0006), off unless enabled
  * @param marketData       the market data feed (ADR-0007)
  * @param binaryFeed       the binary market data feed (ADR-0008), off unless enabled
+ * @param throttle         the message-rate and order-to-trade throttles (ADR-0021)
  */
 @Validated
 @ConfigurationProperties("lob")
@@ -43,7 +45,26 @@ public record LobProperties(
         @DefaultValue @Valid MarketDataProperties marketData,
         @DefaultValue @Valid BinaryFeedProperties binaryFeed,
         @DefaultValue List<@Valid MemberProperties> members,
-        @DefaultValue @Valid SecurityProperties security) {
+        @DefaultValue @Valid SecurityProperties security,
+        @DefaultValue @Valid ThrottleProperties throttle) {
+
+    /**
+     * Throttles on members' messages (OE-008, OE-009, ADR-0021); {@code 0} means no limit.
+     *
+     * @param messagesPerSecond    new orders and replaces a member may submit a second
+     * @param maxOrderToTradeRatio messages per trade a member may reach in an instrument in a UTC day
+     * @param orderToTradeMinimum  messages in an instrument that day before the ratio applies
+     */
+    public record ThrottleProperties(
+            @DefaultValue("1000") @PositiveOrZero int messagesPerSecond,
+            @DefaultValue("1000") @PositiveOrZero int maxOrderToTradeRatio,
+            @DefaultValue("1000") @PositiveOrZero int orderToTradeMinimum) {
+
+        /** The limits these properties set. */
+        public IngressLimits limits() {
+            return new IngressLimits(messagesPerSecond, maxOrderToTradeRatio, orderToTradeMinimum);
+        }
+    }
 
     /**
      * Who may call the venue (docs/rulebook/access-control.md).
