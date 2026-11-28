@@ -241,6 +241,9 @@ public final class JournaledEngine implements AutoCloseable {
                 unsynced = true;                // flushed by sync(), before any acknowledgement (ADR-0020)
             }
         } catch (IOException e) {
+            if (replica != null) {
+                replica.limit(0, commands.length());    // a torn command is not sent: recovery truncates it here
+            }
             throw stop("command journal write failed", e);
         }
         lastCommandSequence = sequence;
@@ -308,7 +311,7 @@ public final class JournaledEngine implements AutoCloseable {
             throw stop("command journal flush failed", e);
         }
         if (sealer != null && sealer.due(lastTimestampMicros)) {
-            seal();                                 // in the same round to the standby as the commands it covers
+            seal(true);                             // in the same round to the standby as the commands it covers
         }
         try {
             replicate();                            // RS-014: on the standby's device too, before any ack
@@ -344,12 +347,16 @@ public final class JournaledEngine implements AutoCloseable {
      * as a failed event write does: the journal would go on unsealed.
      */
     private void seal() {
+        seal(false);
+    }
+
+    private void seal(boolean justFlushed) {
         if (sealer == null || failed || !sealer.unsealed()) {
             return;
         }
         long sealsBefore = -1;
         try {
-            if (options.fsync() == FsyncPolicy.OS || unsynced) {
+            if (!justFlushed && (options.fsync() == FsyncPolicy.OS || unsynced)) {
                 commands.force();
             }
             sealsBefore = replica == null ? -1 : replica.size(1);

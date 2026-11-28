@@ -44,6 +44,7 @@ final class ReplicationClient implements AutoCloseable {
     private final ReplicationTarget target;
     private final long term;
     private volatile ReplicationLink link;
+    private volatile Socket connecting;                 // before the link exists: the watchdog closes it too
     private IOException failure;                        // once replication has failed, it is never retried
     private final long[] standbyLengths = new long[Replication.FILES.length];
     private final long[] limits = {Long.MAX_VALUE, Long.MAX_VALUE};
@@ -154,6 +155,7 @@ final class ReplicationClient implements AutoCloseable {
 
     private void open() throws IOException {
         Socket socket = new Socket();
+        connecting = socket;
         try {
             socket.setKeepAlive(true);
             socket.setTcpNoDelay(true);
@@ -221,6 +223,14 @@ final class ReplicationClient implements AutoCloseable {
 
     @Override
     public synchronized void close() {
+        Socket socket = connecting;
+        if (socket != null) {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                // closing a broken connection
+            }
+        }
         if (link != null) {
             try {
                 link.close();

@@ -225,6 +225,26 @@ class ReplicationTest {
     }
 
     @Test
+    @Rulebook({"RS-003", "RS-014"})
+    void aCommandWhoseWriteFailedIsNotSentAndTheInstrumentReopens() throws IOException {
+        int port = startStandby().port();
+        try (JournaledEngine engine = open(primary(), options(FsyncPolicy.GROUP, port))) {
+            engine.process(new LimitOrder(Side.BUY, 100, 1));                   // A, waiting for its group's flush
+            Thread.currentThread().interrupt();                                  // closes the journal mid-write
+            assertThatThrownBy(() -> engine.process(new LimitOrder(Side.BUY, 100, 2)))
+                    .isInstanceOf(UncheckedIOException.class);
+            Thread.interrupted();
+            assertThatThrownBy(engine::sync).isInstanceOf(UncheckedIOException.class);
+        }
+        assertThat(Replication.size(replica().resolve(JournaledEngine.COMMANDS_FILE)))
+                .as("no more than the primary keeps").isLessThanOrEqualTo(
+                        Replication.size(primary().resolve(JournaledEngine.COMMANDS_FILE)));
+        try (JournaledEngine reopened = open(primary(), options(FsyncPolicy.GROUP, port))) {
+            assertThat(reopened.recovery().lastCommandSequence()).isLessThanOrEqualTo(1);
+        }
+    }
+
+    @Test
     @Rulebook("RS-015")
     void aFailedReplicationIsNeverRetriedByTheStoppedInstance() throws IOException {
         int port = startStandby().port();

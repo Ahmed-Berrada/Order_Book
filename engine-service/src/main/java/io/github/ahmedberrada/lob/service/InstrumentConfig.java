@@ -39,6 +39,9 @@ public record InstrumentConfig(String symbol, BigDecimal tickSize, long maxOrder
         this(symbol, tickSize, maxOrderQuantity, maxPrice, List.of(), 0);
     }
 
+    /** Files of the data directory itself, which an instrument's directory must not collide with. */
+    private static final java.util.Set<String> RESERVED = java.util.Set.of("REPLICATION.TERM", "JOURNAL.LOCK");
+
     private static final Pattern SYMBOL = Pattern.compile("[A-Z0-9][A-Z0-9._-]{0,15}");
 
     public InstrumentConfig {
@@ -47,7 +50,8 @@ public record InstrumentConfig(String symbol, BigDecimal tickSize, long maxOrder
         Objects.requireNonNull(maxPrice, "maxPrice");
         Objects.requireNonNull(tickRegime, "tickRegime");
         tickRegime = List.copyOf(tickRegime);
-        if (!SYMBOL.matcher(symbol).matches()) {            // no ".", "..", nor any name starting with a dot
+        if (!SYMBOL.matcher(symbol).matches()                // no ".", "..", nor any name starting with a dot
+                || RESERVED.contains(symbol.toUpperCase(java.util.Locale.ROOT))) {
             throw new IllegalArgumentException("symbol must match " + SYMBOL + ": " + symbol);
         }
         if (tickSize.signum() <= 0) {

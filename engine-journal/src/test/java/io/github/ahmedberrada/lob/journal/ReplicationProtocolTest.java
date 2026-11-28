@@ -178,4 +178,94 @@ class ReplicationProtocolTest {
         assertThat(Replication.size(root.resolve("none"))).isZero();
         assertThatThrownBy(() -> Replication.sha256(root.resolve("none"), 5)).isInstanceOf(IOException.class);
     }
+
+    /** A standby that knows the secret but breaks the protocol after the handshake, as scripted. */
+    @FunctionalInterface
+    private interface Script {
+        void run(ReplicationLink link, DataOutputStream raw) throws IOException;
+    }
+
+    private String clientFailure(Script script) throws Exception {
+        try (ServerSocket fake = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            Thread.ofPlatform().daemon(true).start(() -> {
+                try (Socket socket = fake.accept()) {
+                    ReplicationLink link = ReplicationLink.asStandby(socket);
+                    link.authenticate(SECRET, link.readHello());
+                    script.run(link, new DataOutputStream(socket.getOutputStream()));
+                    link.flush();
+                    socket.getInputStream().readAllBytes();
+                } catch (IOException e) {
+                    // the primary hung up
+                }
+            });
+            Path directory = Files.createDirectories(root.resolve("client").resolve("AAPL"));
+            Files.write(directory.resolve(JournaledEngine.COMMANDS_FILE), new byte[] {1, 2, 3});
+            ReplicationClient client = new ReplicationClient(directory, "AAPL",
+                    new ReplicationTarget("127.0.0.1", fake.getLocalPort(), SECRET, java.time.Duration.ofSeconds(5)));
+            try (client) {
+                client.connect(1);
+                throw new AssertionError("connected");
+            } catch (IOException e) {
+                return e.getMessage();
+            }
+        }
+    }
+
+    private static void welcomeEmpty(ReplicationLink link) throws IOException {
+        link.send(Replication.WELCOME, ReplicationLink.body(out -> {
+            out.writeLong(1);
+            for (int f = 0; f < Replication.FILES.length; f++) {
+                out.writeLong(0);
+                out.write(Replication.sha256(Path.of("none"), 0));
+            }
+        }));
+    }
+
+    @Test
+    void aPrimaryRejectsAStandbyThatBreaksTheProtocol() throws Exception {
+        assertThat(clientFailure((link, raw) -> link.send(Replication.ACK, new byte[0])))
+                .isEqualTo("replication protocol: expected a welcome, got 8");
+        assertThat(clientFailure((link, raw) -> {
+            welcomeEmpty(link);
+            link.send(Replication.WELCOME, new byte[0]);                         // instead of an ACK
+        })).isEqualTo("replication protocol: expected an acknowledgement, got 4");
+        assertThat(clientFailure((link, raw) -> {
+            welcomeEmpty(link);
+            link.send(Replication.ACK, ReplicationLink.body(out -> {
+                out.writeLong(2);                                                // 3 bytes were sent
+                out.writeLong(0);
+            }));
+        })).isEqualTo("the standby confirmed 2 bytes of commands.journal, 3 were sent");
+        assertThat(clientFailure((link, raw) -> {
+            raw.writeByte(Replication.WELCOME);
+            raw.writeInt(-1);
+        })).isEqualTo("replication message of -1 bytes");
+        assertThat(clientFailure((link, raw) -> {
+            raw.writeByte(Replication.WELCOME);
+            raw.writeInt(Integer.MAX_VALUE);
+        })).isEqualTo("replication message of " + Integer.MAX_VALUE + " bytes");
+        assertThat(clientFailure((link, raw) -> {
+            raw.writeByte(Replication.WELCOME);
+            raw.writeInt(100);
+            raw.write(new byte[10]);
+            raw.flush();
+            link.close();                                                        // cut mid-message
+        })).isEqualTo("replication connection cut mid-message");
+    }
+
+    @Test
+    void aClientConnectsOnceAndNeverReplicatesUnconnected() throws Exception {
+        Path directory = Files.createDirectories(root.resolve("AAPL"));
+        ReplicationTarget target = new ReplicationTarget("127.0.0.1", standby.port(), SECRET,
+                java.time.Duration.ofSeconds(5));
+        try (ReplicationClient unconnected = new ReplicationClient(directory, "AAPL", target)) {
+            assertThatThrownBy(() -> unconnected.replicate(0)).hasMessage("replication failed earlier; the instance "
+                    + "has stopped");
+        }
+        try (ReplicationClient client = new ReplicationClient(directory, "AAPL", target)) {
+            client.connect(0);
+            client.connect(0);                                                   // already connected: nothing
+            client.replicate(0);                                                 // nothing to send
+        }
+    }
 }

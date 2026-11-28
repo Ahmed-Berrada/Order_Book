@@ -90,7 +90,7 @@ class InstrumentConfigTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", "aapl", "../etc", "..", ".", ".HIDDEN", "-X", "A/B", "SEVENTEEN_CHARS_X", "A B"})
+    @ValueSource(strings = {"", "aapl", "../etc", "..", ".", ".HIDDEN", "-X", "REPLICATION.TERM", "JOURNAL.LOCK", "A/B", "SEVENTEEN_CHARS_X", "A B"})
     void rejectsSymbolsThatCouldEscapeTheJournalDirectory(String symbol) {
         assertThatIllegalArgumentException().isThrownBy(() ->
                 new InstrumentConfig(symbol, BigDecimal.ONE, 1, BigDecimal.TEN));

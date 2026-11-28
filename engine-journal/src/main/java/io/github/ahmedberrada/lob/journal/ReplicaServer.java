@@ -20,6 +20,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The standby (RS-014): keeps, for each instrument a primary replicates, a byte-for-byte copy of its command journal
@@ -141,11 +142,14 @@ public final class ReplicaServer implements Closeable {
     private void serve(Socket socket, ReplicationLink link) throws IOException {
         socket.setKeepAlive(true);
         // An absolute deadline, not a read timeout: a client dribbling bytes cannot hold a connection slot.
+        AtomicBoolean settled = new AtomicBoolean();
         ScheduledFuture<?> deadline = DEADLINES.schedule(() -> {
-            try {
-                socket.close();
-            } catch (IOException e) {
-                // already closed
+            if (settled.compareAndSet(false, true)) {
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                    // already closed
+                }
             }
         }, HANDSHAKE.toMillis(), TimeUnit.MILLISECONDS);
         ReplicationLink.Hello hello;
@@ -155,6 +159,9 @@ public final class ReplicaServer implements Closeable {
             authenticated = link.authenticate(secret, hello);
         } finally {
             deadline.cancel(false);
+        }
+        if (!settled.compareAndSet(false, true)) {
+            return;                                 // the deadline won: the socket is closed
         }
         if (!authenticated) {
             link.refuse("authentication failed");
@@ -358,6 +365,9 @@ public final class ReplicaServer implements Closeable {
                 }
                 if (created) {
                     Replication.forceDirectory(directory);  // before any ACK: a confirmed file cannot vanish
+                }
+                for (FileChannel channel : channels) {
+                    channel.force(false);       // what an earlier connection left unforced: the WELCOME confirms it
                 }
             } catch (IOException | RuntimeException e) {
                 close();
